@@ -1,0 +1,181 @@
+use crate::{stamps::StampSource, svg_stamp};
+use eframe::egui::{self, Vec2};
+use std::sync::Arc;
+
+pub struct Designer {
+    pub target: Option<usize>,
+    pub original: Option<StampSource>,
+    pub category: String,
+    name: String,
+    description: String,
+    svg: String,
+    preview: Option<StampSource>,
+    error: Option<String>,
+    copied: bool,
+}
+pub enum Action {
+    Save(StampSource),
+    Cancel,
+}
+impl Designer {
+    pub fn set_error(&mut self, error: String) {
+        self.error = Some(error);
+    }
+    pub fn new(source: Option<StampSource>, target: Option<usize>, category: String) -> Self {
+        let (name, svg, description) = match &source {
+            Some(StampSource::Svg { name, svg, prompt }) => {
+                (name.clone(), svg.to_string(), prompt.clone())
+            }
+            _ => ("My stamp".into(), svg_stamp::STARTER.into(), String::new()),
+        };
+        Self {
+            target,
+            original: source,
+            category,
+            name,
+            svg,
+            description,
+            preview: None,
+            error: None,
+            copied: false,
+        }
+    }
+    fn source(&self) -> StampSource {
+        StampSource::Svg {
+            name: self.name.trim().into(),
+            svg: Arc::new(svg_stamp::clean(&self.svg)),
+            prompt: self.description.clone(),
+        }
+    }
+    pub fn show(&mut self, ctx: &egui::Context, categories: &[String]) -> Option<Action> {
+        let mut action = None;
+        let mut open = true;
+        egui::Window::new(if self.target.is_some() {
+            "Edit SVG stamp"
+        } else {
+            "Design a stamp"
+        })
+        .id(egui::Id::new("svg-designer"))
+        .open(&mut open)
+        .collapsible(false)
+        .resizable(true)
+        .default_width(760.)
+        .show(ctx, |ui| {
+            ui.label("Describe → copy prompt to your AI → paste its SVG → preview and save.");
+            ui.horizontal(|ui| {
+                ui.label("Name");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.name)
+                        .char_limit(60)
+                        .desired_width(200.),
+                );
+                ui.label("Category");
+                egui::ComboBox::from_id_salt("designer-category")
+                    .selected_text(&self.category)
+                    .show_ui(ui, |ui| {
+                        for category in categories {
+                            ui.selectable_value(&mut self.category, category.clone(), category);
+                        }
+                    });
+            });
+            egui::ScrollArea::vertical()
+                .max_height((ctx.content_rect().height() - 190.).max(240.))
+                .show(ui, |ui| {
+                    ui.columns(2, |columns| {
+                        let ui = &mut columns[0];
+                        ui.strong("Your idea");
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.description)
+                                .desired_rows(3)
+                                .desired_width(f32::INFINITY)
+                                .char_limit(2000)
+                                .hint_text("A teal approval seal with a checkmark…"),
+                        );
+                        if ui.button("Copy AI prompt").clicked() {
+                            ctx.copy_text(svg_stamp::prompt(&self.description));
+                            self.copied = true;
+                        }
+                        if self.copied {
+                            ui.weak("Prompt copied. Paste it into your preferred AI.");
+                        }
+                        ui.strong("SVG source");
+                        egui::ScrollArea::vertical()
+                            .id_salt("svg-code")
+                            .max_height(240.)
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::TextEdit::multiline(&mut self.svg)
+                                        .code_editor()
+                                        .desired_rows(12)
+                                        .desired_width(f32::INFINITY)
+                                        .char_limit(svg_stamp::MAX_BYTES),
+                                );
+                            });
+                        if ui.button("Preview SVG").clicked() {
+                            let source = self.source();
+                            match source.validate() {
+                                Ok(()) => {
+                                    self.preview = Some(source);
+                                    self.error = None;
+                                }
+                                Err(e) => {
+                                    self.preview = None;
+                                    self.error = Some(e);
+                                }
+                            }
+                        }
+                        if let Some(error) = &self.error {
+                            ui.colored_label(egui::Color32::DARK_RED, error);
+                        }
+                        let ui = &mut columns[1];
+                        ui.strong("Preview");
+                        let side = ui.available_width().min(300.);
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::splat(side), egui::Sense::hover());
+                        crate::editor::paint_checkerboard(ui.painter(), rect);
+                        if let Some(source) = &self.preview
+                            && let Ok(texture) = crate::stamps::texture(ctx, source)
+                        {
+                            let size = texture.size_vec2();
+                            let scale = (side - 24.) / size.x.max(size.y);
+                            ui.painter().image(
+                                texture.id(),
+                                egui::Rect::from_center_size(rect.center(), size * scale),
+                                egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)),
+                                egui::Color32::WHITE,
+                            );
+                        }
+                        ui.weak("SVG stays editable in the stamp and project. No API key needed.");
+                    });
+                });
+            ui.separator();
+            ui.horizontal(|ui| {
+                let source = self.source();
+                let ready = self.preview.as_ref() == Some(&source);
+                if ui
+                    .add_enabled(
+                        ready,
+                        crate::appearance::primary(if self.target.is_some() {
+                            "Apply stamp changes"
+                        } else {
+                            "Save stamp"
+                        }),
+                    )
+                    .clicked()
+                {
+                    action = Some(Action::Save(source));
+                }
+                if ui.button("Cancel").clicked() {
+                    action = Some(Action::Cancel);
+                }
+                if !ready {
+                    ui.weak("Preview the current source before saving.");
+                }
+            });
+        });
+        if !open {
+            action = Some(Action::Cancel);
+        }
+        action
+    }
+}

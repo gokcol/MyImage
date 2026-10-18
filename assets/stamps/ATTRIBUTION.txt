@@ -1,0 +1,10 @@
+Twemoji graphics — Copyright Twitter, Inc. and other contributors.
+Source: https://github.com/jdecked/twemoji/tree/v16.0.1/assets/svg
+License: Creative Commons Attribution 4.0 International (CC BY 4.0).
+https://creativecommons.org/licenses/by/4.0/
+
+MyImage bundles 160 selected graphics from Twemoji v16.0.1. SVG originals
+are included in the source tree; the PNG files are rasterized at 512 x 512
+with transparent backgrounds. No Snagit artwork is included.
+The category/name mapping is recorded in catalog.json and src/stamp_catalog.rs.
+See LICENSE-GRAPHICS for the complete license.

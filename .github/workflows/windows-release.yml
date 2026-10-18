@@ -1,0 +1,67 @@
+name: Windows build — UNTESTED
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release tag to attach the untested package to (optional)
+        required: false
+        type: string
+permissions:
+  contents: write
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+      - name: Build native Windows executable
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc
+      - name: Package untested build
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/MyImage | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/myimage.exe dist/MyImage/MyImage.exe
+          Copy-Item LICENSE dist/MyImage/LICENSE.txt
+          Copy-Item assets/stamps/LICENSE-GRAPHICS dist/MyImage/Twemoji-LICENSE.txt
+          Copy-Item assets/stamps/ATTRIBUTION.txt dist/MyImage/Twemoji-ATTRIBUTION.txt
+          @'
+          MyImage 1.0.0 — Windows x64 — UNTESTED
+          This package was compiled on GitHub Actions. It has NOT been tested interactively on Windows.
+          Screen capture, shortcuts, clipboard, scaling and installation require real-device validation.
+          The executable is unsigned; Windows may display a publisher/SmartScreen warning.
+          Extract the complete folder and run MyImage.exe. No administrator rights or service installation are required.
+          To update, save your work and quit MyImage from its tray menu before replacing the extracted folder.
+          To uninstall, quit and delete only this application folder. Pictures/MyImage, projects, settings and recovery copies are preserved.
+          Source and releases: https://github.com/gokcol/MyImage
+          '@ | Set-Content dist/MyImage/READ-ME-UNTESTED.txt
+          Compress-Archive -Path dist/MyImage -DestinationPath dist/MyImage-1.0.0-windows-x64-UNTESTED.zip
+          $file = 'dist/MyImage-1.0.0-windows-x64-UNTESTED.zip'
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path $file -Leaf)" | Set-Content "$file.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyImage-Windows-x64-UNTESTED
+          path: |
+            dist/MyImage-1.0.0-windows-x64-UNTESTED.zip
+            dist/MyImage-1.0.0-windows-x64-UNTESTED.zip.sha256
+          if-no-files-found: error
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?$') { throw 'Invalid release tag' }
+          gh release upload $env:RELEASE_TAG dist/MyImage-1.0.0-windows-x64-UNTESTED.zip dist/MyImage-1.0.0-windows-x64-UNTESTED.zip.sha256 --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }

@@ -1,0 +1,14 @@
+MyImage calico logo v1
+Generated with the built-in image-generation tool.
+Transparent RGBA PNG; original generated artwork retained.
+
+Final generation prompt:
+Use case: logo-brand
+Asset type: original app logo / mascot mark for MyImage, a native screen capture and image annotation app.
+Primary request: a charming calico cat captures a screen.
+Subject: one delightful, confident calico cat with a cream-white face and paws, clearly distinct warm orange and charcoal patches, triangular ears, bright expressive eyes and a little curved tail. The cat peeks over and hugs a small computer-screen-shaped capture frame; its two front paws actively grip opposite edges of a rectangular screenshot selection. Integrate four bold crop/selection corner brackets into that screen frame so “screen capture” reads immediately. A single tiny cursor pointer inside the frame can complete the idea.
+Style/medium: beautifully crafted contemporary app mascot logo, crisp vector-like contours, broad simple shapes, subtly rounded geometry, restrained depth, premium and playful. Strong silhouette, not a detailed cartoon scene. Cat is the hero and dominates the mark. Match a modern teal-accented desktop application; retain natural calico markings. Screen interior can be a simple pale teal field.
+Composition: one centered unified compact square logo, ample transparent padding, no surrounding badge or mockup. Readable as a small app icon and delightful at larger size. Ears, paws and tail clearly resolved; balanced visual weight, clean edges.
+Background: genuinely transparent alpha everywhere outside the logo.
+Constraints: no words, letters, watermark, extra characters, photographic fur, busy detail, multiple variants, or presentation board. Deliver one polished standalone logo.
+

@@ -1,0 +1,66 @@
+[package]
+name = "myimage"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Native desktop screen capture for macOS and Windows"
+license = "MIT"
+default-run = "myimage"
+
+[workspace]
+members = ["xtask"]
+resolver = "2"
+
+[dependencies]
+eframe = { version = "=0.33.3", default-features = false, features = ["wgpu", "default_fonts", "accesskit"] }
+wgpu = { version = "27", default-features = false, features = ["metal", "dx12", "wgsl"] }
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff", "gif"] }
+xcap = "=0.9.8"
+tray-icon = { version = "=0.25.1", default-features = false }
+global-hotkey = "=0.8.0"
+rfd = { version = "=0.17.2", default-features = false }
+directories = "6"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = "1"
+base64 = "=0.22.1"
+log = "0.4"
+env_logger = "0.11"
+tempfile = "3"
+tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
+pdf-writer = "=0.12.1"
+flate2 = "=1.1.10"
+tiff = "=0.11.3"
+resvg = { version = "=0.45.1", default-features = false, features = ["text"] }
+roxmltree = "=0.20.0"
+arboard = "=3.7.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "=0.2.191"
+objc2 = "0.6"
+block2 = "0.6"
+objc2-screen-capture-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+objc2-core-graphics = "0.3.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com"] }
+
+# Keep local builds compact. Tests inherit these development settings.
+# Retain file/line backtraces for workspace code without full debug metadata.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+# Preserve metadata needed to load macOS proc-macro dynamic libraries.
+strip = "none"
+
+[profile.dev.package."*"]
+debug = false
+strip = "none"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "none"
+
