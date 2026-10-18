@@ -19,6 +19,13 @@ MyImage is a Rust native macOS/Windows application. No WebView is used.
 - Tests verify warm opens reuse the existing texture, replaced data gets a fresh texture, and cache eviction remains bounded.
 - The compact first-run guide covers Capture, Annotate and Save/share, includes a platform-aware shortcut reference, persists dismissal, and is available later from the App menu.
 
+## Verified checks
+
+- Rust 1.93.1 is pinned for local builds and GitHub Actions.
+- Local workspace tests: 405 passed (391 application, 14 packaging); 16 explicit diagnostic/integration tests ignored. Strict Clippy and formatting checks passed.
+- The native guide was checked with its shortcut section expanded; its body scrolls while dismissal stays visible, and Escape dismisses it.
+- A 3200 × 2000 headless opening benchmark reused prepared data and textures on warm opens. These measurements verify cache behavior, not complete native display latency.
+
 ## Distribution
 
 - The macOS update helper verifies the app identifier, distributor signature, newer build number, staging bytes, and installed-app rollback. It refuses running apps, preserves data/settings and restores the old app on failed verification.

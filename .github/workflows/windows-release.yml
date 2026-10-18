@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.release_tag || github.ref }}
       - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc
+        run: rustup toolchain install 1.93.1 --profile minimal --target x86_64-pc-windows-msvc
       - name: Build native Windows executable
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
       - name: Package untested build

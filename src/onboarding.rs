@@ -10,10 +10,14 @@ pub fn show(ctx: &egui::Context, open: &mut bool) -> bool {
     }
     let mut dismissed = false;
     egui::Modal::new(egui::Id::new("quick_start")).show(ctx, |ui| {
-        ui.set_width(450.);
+        ui.set_width(450.0_f32.min((ctx.content_rect().width() - 48.).max(240.)));
         ui.heading("Meet MyImage");
         ui.weak("Capture a moment. Make it clear. Keep it editable.");
         ui.add_space(12.);
+        egui::ScrollArea::vertical()
+            .id_salt("quick_start_body")
+            .max_height((ctx.content_rect().height() - 220.).clamp(140., 460.))
+            .show(ui, |ui| {
         for (icon, title, body) in [
             (Icon::Capture, "1 · Capture", "Use Capture Now or Control + Shift + . to select a region, window or full screen. On Mac, Command + Shift + . works too."),
             (Icon::Edit, "2 · Annotate", "Choose a tool, then draw on the image. Click an object to adjust its style. Drag a selection to move its pixels; drag its handles to resize the boundary."),
@@ -30,7 +34,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool) -> bool {
         }
         ui.collapsing("Keyboard & mouse shortcuts", |ui| {
             let key = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
-            egui::Grid::new("shortcut_reference").spacing(egui::vec2(20., 6.)).show(ui, |ui| {
+            egui::Grid::new("shortcut_reference").spacing(egui::vec2(16., 4.)).show(ui, |ui| {
                 for (keys, action) in [
                     (format!("{key} + S"), "Save editable project"),
                     (format!("{key} + Shift + S"), "Save as a new project"),
@@ -43,6 +47,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool) -> bool {
                     ("Right-click image".into(), "Image and canvas actions"),
                 ] { ui.strong(keys); ui.label(action); ui.end_row(); }
             });
+        });
         });
         ui.add_space(10.);
         ui.horizontal(|ui| {
