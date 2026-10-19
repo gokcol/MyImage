@@ -856,7 +856,9 @@ impl EditorState {
             self.image_error = Some(error);
             return;
         }
-        history.commit(before, document);
+        if !self.commit_object_placement(before, document, history) {
+            return;
+        }
         self.tool = Tool::Area;
         self.select(Some(document.annotations.len() - 1), document);
     }

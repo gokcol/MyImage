@@ -1,5 +1,7 @@
 //! Reusable artwork in a native panel; inserted copies are ordinary annotations.
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::presets::{self, Change, Library, Preset};
 use std::path::PathBuf;
 
@@ -173,7 +175,7 @@ impl EditorState {
             ui.weak(notice);
         }
         if let Some(error) = &self.presets.error {
-            ui.colored_label(Color32::from_rgb(170, 35, 45), error);
+            dialogs::notice(ui, DialogIcon::Info, "Preset needs attention", error, true);
         }
         ui.add(
             egui::TextEdit::singleline(&mut self.presets.search)
@@ -294,13 +296,20 @@ impl EditorState {
         };
         let mut apply = false;
         let mut cancel = false;
-        let modal = egui::Modal::new(egui::Id::new("annotation-preset-dialog")).show(ctx, |ui| {
-            ui.set_width(360.);
+        let modal = Dialog::new(
+            if matches!(dialog, PresetDialog::Delete { .. }) {
+                "Delete preset?"
+            } else {
+                "Name your preset"
+            },
+            "Your reusable annotation library.",
+            DialogIcon::Favorite,
+            390.,
+        )
+        .modal(ctx, egui::Id::new("annotation-preset-dialog"), |ui| {
             match dialog {
                 PresetDialog::Save { name, focus, .. }
                 | PresetDialog::Rename { name, focus, .. } => {
-                    ui.heading("Name your preset");
-                    ui.add_space(10.);
                     let response = ui.add(
                         egui::TextEdit::singleline(name)
                             .char_limit(64)
@@ -313,21 +322,25 @@ impl EditorState {
                     }
                     let valid = presets::validate_name(name).is_ok();
                     ui.weak("The library retains an independent editable snapshot.");
-                    ui.horizontal(|ui| {
-                        cancel = ui.button("Cancel").clicked();
-                        apply = ui
-                            .add_enabled(valid, egui::Button::new("Save preset"))
-                            .clicked();
+                    dialogs::actions(ui, |ui| {
+                        cancel = dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked();
+                        apply = dialogs::button(
+                            ui,
+                            "Save preset",
+                            DialogIcon::Save,
+                            dialogs::Action::Primary,
+                            valid,
+                        )
+                        .clicked();
                     });
                     apply |= valid && ui.input(|i| i.key_pressed(Key::Enter));
                 }
                 PresetDialog::Delete { name, .. } => {
-                    ui.heading("Delete preset?");
                     ui.label(format!("Remove “{name}” from your library?"));
                     ui.weak("Copies already inserted into images remain unchanged.");
-                    ui.horizontal(|ui| {
-                        cancel = ui.button("Cancel").clicked();
-                        apply = ui.button("Delete preset").clicked();
+                    dialogs::actions(ui, |ui| {
+                        cancel = dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked();
+                        apply = dialogs::danger(ui, "Delete preset", DialogIcon::Trash).clicked();
                     });
                 }
             }

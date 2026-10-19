@@ -1,4 +1,6 @@
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 
 pub(super) struct CanvasDraft {
     width: u32,
@@ -40,8 +42,7 @@ impl EditorState {
             "Bottom center",
             "Bottom right",
         ];
-        egui::Window::new("Canvas size").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.label("Resize the canvas without resizing your artwork.");
+        Dialog::new("Canvas size", "Resize the canvas; keep your artwork intact.", DialogIcon::Resize, 430.).window(ctx, egui::Id::new("Canvas size"), &mut open, |ui| {
             egui::Grid::new("canvas-size-fields").show(ui, |ui| {
                 ui.label("Width"); ui.add(egui::DragValue::new(&mut draft.width).range(1..=crate::document::MAX_IMAGE_SIDE).suffix(" px")); ui.end_row();
                 ui.label("Height"); ui.add(egui::DragValue::new(&mut draft.height).range(1..=crate::document::MAX_IMAGE_SIDE).suffix(" px")); ui.end_row();
@@ -51,7 +52,7 @@ impl EditorState {
                 }); ui.end_row();
             });
             ui.small("Content outside the canvas is hidden, not deleted. Enlarge it to reveal that content again.");
-            ui.horizontal(|ui| { apply = ui.button("Resize canvas").clicked(); cancel = ui.button("Cancel").clicked(); });
+            ui.horizontal_wrapped(|ui| { apply = dialogs::primary(ui, "Resize canvas", DialogIcon::Resize).clicked(); cancel = dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked(); });
         });
         if !open || cancel {
             self.canvas_size = None;

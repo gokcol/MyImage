@@ -1,5 +1,7 @@
 //! Layer controls share the document's annotation stack and undo history.
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::document::LayerSettings;
 use std::collections::BTreeSet;
 
@@ -325,10 +327,13 @@ impl EditorState {
         };
         let mut apply = false;
         let mut cancel = false;
-        let modal = egui::Modal::new(egui::Id::new("rename-layer")).show(ctx, |ui| {
-            ui.set_width(330.0);
-            ui.heading("Rename layer");
-            ui.add_space(10.0);
+        let modal = Dialog::new(
+            "Rename layer",
+            "Give this layer a name you can find.",
+            DialogIcon::Edit,
+            360.,
+        )
+        .modal(ctx, egui::Id::new("rename-layer"), |ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut draft.name)
                     .char_limit(64)
@@ -341,9 +346,9 @@ impl EditorState {
             }
             ui.weak("Leave blank to restore the automatic name.");
             ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                cancel = ui.button("Cancel").clicked();
-                apply = ui.button("Rename").clicked();
+            dialogs::actions(ui, |ui| {
+                cancel = dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked();
+                apply = dialogs::primary(ui, "Rename", DialogIcon::Check).clicked();
             });
             apply |= ui.input(|i| i.key_pressed(Key::Enter));
         });
@@ -509,6 +514,7 @@ mod tests {
                 kind,
                 before: before.clone(),
                 origin: Point { x: 0., y: 0. },
+                preview_geometry: None,
             });
             e.update_gesture(Point { x: 300., y: 300. }, &mut d);
             e.update_snapped_gesture(Point { x: 350., y: 350. }, &mut d, false);

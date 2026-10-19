@@ -1,3 +1,5 @@
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::{stamps::StampSource, svg_stamp};
 use eframe::egui::{self, Vec2};
 use std::sync::Arc;
@@ -50,19 +52,18 @@ impl Designer {
     pub fn show(&mut self, ctx: &egui::Context, categories: &[String]) -> Option<Action> {
         let mut action = None;
         let mut open = true;
-        egui::Window::new(if self.target.is_some() {
-            "Edit SVG stamp"
-        } else {
-            "Design a stamp"
-        })
-        .id(egui::Id::new("svg-designer"))
-        .open(&mut open)
-        .collapsible(false)
-        .resizable(true)
-        .default_width(760.)
-        .show(ctx, |ui| {
-            ui.label("Describe → copy prompt to your AI → paste its SVG → preview and save.");
-            ui.horizontal(|ui| {
+        Dialog::new(
+            if self.target.is_some() {
+                "Edit SVG stamp"
+            } else {
+                "Design a stamp"
+            },
+            "Describe · Copy prompt · Paste SVG · Preview · Save",
+            DialogIcon::Create,
+            730.,
+        )
+        .window(ctx, egui::Id::new("svg-designer"), &mut open, |ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Name");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.name)
@@ -91,7 +92,7 @@ impl Designer {
                                 .char_limit(2000)
                                 .hint_text("A teal approval seal with a checkmark…"),
                         );
-                        if ui.button("Copy AI prompt").clicked() {
+                        if dialogs::secondary(ui, "Copy AI prompt", DialogIcon::Copy).clicked() {
                             ctx.copy_text(svg_stamp::prompt(&self.description));
                             self.copied = true;
                         }
@@ -111,7 +112,7 @@ impl Designer {
                                         .char_limit(svg_stamp::MAX_BYTES),
                                 );
                             });
-                        if ui.button("Preview SVG").clicked() {
+                        if dialogs::secondary(ui, "Preview SVG", DialogIcon::Eye).clicked() {
                             let source = self.source();
                             match source.validate() {
                                 Ok(()) => {
@@ -125,7 +126,7 @@ impl Designer {
                             }
                         }
                         if let Some(error) = &self.error {
-                            ui.colored_label(egui::Color32::DARK_RED, error);
+                            dialogs::notice(ui, DialogIcon::Info, "Check SVG", error, true);
                         }
                         let ui = &mut columns[1];
                         ui.strong("Preview");
@@ -149,23 +150,25 @@ impl Designer {
                     });
                 });
             ui.separator();
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let source = self.source();
                 let ready = self.preview.as_ref() == Some(&source);
-                if ui
-                    .add_enabled(
-                        ready,
-                        crate::appearance::primary(if self.target.is_some() {
-                            "Apply stamp changes"
-                        } else {
-                            "Save stamp"
-                        }),
-                    )
-                    .clicked()
+                if dialogs::button(
+                    ui,
+                    if self.target.is_some() {
+                        "Apply stamp changes"
+                    } else {
+                        "Save stamp"
+                    },
+                    DialogIcon::Save,
+                    dialogs::Action::Primary,
+                    ready,
+                )
+                .clicked()
                 {
                     action = Some(Action::Save(source));
                 }
-                if ui.button("Cancel").clicked() {
+                if dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked() {
                     action = Some(Action::Cancel);
                 }
                 if !ready {

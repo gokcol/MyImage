@@ -1,9 +1,11 @@
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::{
     appearance,
     export::{ExportFormat, ExportOptions},
     pdf_export::PdfPageSize,
 };
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, RichText};
 
 #[derive(Default)]
 pub struct ExportPanel {
@@ -24,9 +26,7 @@ impl ExportPanel {
             return false;
         }
         let mut choose_destination = false;
-        let modal = egui::Modal::new(egui::Id::new("export_options")).show(ctx, |ui| {
-            ui.set_width(460.0);
-            ui.heading("Export a copy");
+        let modal = Dialog::new("Export a copy", "A finished image, ready to share.", DialogIcon::Export, 480.).modal(ctx, egui::Id::new("export_options"), |ui| {
             ui.label(
                 RichText::new(format!("{} × {} pixels · Includes all annotations", size[0], size[1]))
                     .color(appearance::MUTED),
@@ -84,30 +84,19 @@ impl ExportPanel {
                 }
             }
             ui.add_space(14.0);
-            egui::Frame::new()
-                .fill(Color32::from_rgb(232, 245, 245))
-                .corner_radius(8)
-                .inner_margin(12)
-                .show(ui, |ui| {
-                    if has_privacy {
-                        ui.label(RichText::new("Share the exported copy").strong());
-                        ui.label("The .myimage project retains the original image and adjustable effects. Export creates a flattened copy with your blur and pixelate regions applied.");
-                    } else {
-                        ui.label(RichText::new("Keep an editable project").strong());
-                        ui.label("Export creates a flattened copy. Use Save project to keep every annotation editable in a .myimage file.");
-                    }
-                });
+            dialogs::notice(ui, DialogIcon::Save, if has_privacy { "Share the exported copy" } else { "Keep an editable project" },
+                if has_privacy { "Your .myimage project retains original pixels. Share the exported copy to apply blur and pixelation." } else { "Save a .myimage project to keep all annotations editable. Export makes a flattened copy." }, false);
             if let Some(error) = &self.error {
                 ui.add_space(8.0);
-                ui.colored_label(Color32::from_rgb(170, 35, 45), error);
+                dialogs::notice(ui, DialogIcon::Info, "Export needs attention", error, true);
             }
             ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                if ui.button("Cancel").clicked() {
+            dialogs::actions(ui, |ui| {
+                if dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked() {
                     self.open = false;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(appearance::primary("Choose destination…")).clicked() {
+                    if dialogs::primary(ui, "Choose destination…", DialogIcon::Export).clicked() {
                         choose_destination = true;
                     }
                 });

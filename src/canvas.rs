@@ -88,6 +88,11 @@ pub fn render_document(document: &Document) -> Result<Document, String> {
     for a in &mut annotations {
         shift(&mut a.start);
         shift(&mut a.end);
+        if let Some(controls) = &mut a.arrow.curve {
+            for control in controls {
+                shift(control);
+            }
+        }
         if let Some(tail) = &mut a.tail {
             shift(tail);
         }

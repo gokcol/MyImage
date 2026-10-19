@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 1.1](https://github.com/gokcol/MyImage/releases/tag/v1.1.0) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
+[Download MyImage 1.11](https://github.com/gokcol/MyImage/releases/tag/v1.11) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -107,6 +107,8 @@ Scanning and thumbnail decoding happen in the background. Only visible thumbnail
 
 ## Edit and save
 
+Dialogs and prompts share the **Studio Contrast** design: charcoal headers, contextual icons, soft shadows and compact raised buttons. The same treatment covers export, image/canvas sizing, text, stamps, presets, library actions, storage, recovery and unsaved changes. Long content scrolls within the window and action rows wrap for larger UI text. File and folder pickers retain the native macOS/Windows interface.
+
 Selected editable objects show a compact floating properties bar near their boundary and matching controls in the right inspector. Use swatches, visual style menus, presets and sliders. Arrows support solid/dashed/dotted lines and independent endpoint shapes/sizes. A slider drag creates one undo step; exact numeric entry remains optional. Arrangement stays in the inspector footer.
 
 Home, Editor, Library, Capture and Create share one compact top toolbar; the annotation tools follow after a gap in Editor. The vertical sidebar is removed. Annotation buttons are 48 × 42 points. Everyday tools stay visible; **More** contains Blur, Pixelate, Simplify, Magic Wand, Crop, Cut Out, Pen, Highlighter, Step, Eraser, Magnify and Spotlight. **More → Customize toolbar…** pins, unpins and reorders tools; your choices persist and overflow stays in More. The bottom **App** menu contains View only, background/hide and Quit actions. The right inspector shows the current tool’s shape choices, quick styles, and properties; selection controls appear only when artwork is selected. Right-click the image (or use **Image actions** below it) for crop, resize, rotation, undo/redo, clipboard, and zoom controls.
@@ -123,6 +125,8 @@ Projects use a versioned `.myimage` container with image-edit settings, annotati
 Storage migration copies and verifies files on a worker, saves the new library/Recents references, and only then removes unchanged originals. Copy or preference-save failures keep the original library usable; any completed destination copies are retained and reported. Files changed externally before cleanup are retained at the source with a warning. Old empty directories can remain. Migration requires enough free space for verified copies and a separate destination outside the source tree; Windows runtime/cross-volume behavior is not yet natively tested.
 
 With a drawing tool active, click an existing unlocked object to select it or drag it to move it; its floating controls and right-hand properties remain available. Draw on empty space to create another object. Drag drawings stay free of selection handles while drawing and after release; click the finished object to show its handles and edit it. Clicking empty image space or the surrounding canvas deselects objects without moving or refitting the image. Hold Alt/Option to draw over existing artwork. Shift supports multi-selection.
+
+Draw in the empty workspace or continue beyond any canvas edge to add transparent space automatically. Moving or resizing objects and groups, placing text, stamps or step markers, and duplicating annotations can also grow the canvas. The expansion previews while drawing and commits with the object as one undo step; Escape cancels a drag. Original pixels and all object layers remain editable.
 
 Closed shapes have eight small white resize handles: corners resize both dimensions, while side midpoints adjust only width or height. Handles have dark outlines for visibility on light or dark artwork, with larger invisible hit targets for easy grabbing.
 

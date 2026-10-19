@@ -1,4 +1,6 @@
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::recovery::{self, Command, Entry, Event};
 
 #[derive(Default)]
@@ -284,14 +286,11 @@ impl MyImageApp {
         if !self.recovery.prompt {
             return;
         }
-        egui::Modal::new(egui::Id::new("recover_unfinished_work")).show(ctx, |ui| {
-            ui.set_width(470.);
-            ui.heading("Pick up where you left off");
-            ui.label("MyImage found unfinished work from a previous session.");
+        Dialog::new("Pick up where you left off", "Unfinished work from your previous session.", DialogIcon::Refresh, 490.).modal(ctx, egui::Id::new("recover_unfinished_work"), |ui| {
             ui.weak("Recover opens an editable copy. Discard removes only the recovery copy; your saved images and projects stay unchanged.");
             ui.add_space(12.);
             if let Some(error) = &self.recovery.warning {
-                ui.colored_label(appearance::GINGER, error);
+                dialogs::notice(ui, DialogIcon::Info, "Recovery needs attention", error, true);
             }
             let entries = self.recovery.entries.clone();
             egui::ScrollArea::vertical().max_height(320.).show(ui, |ui| {
@@ -301,11 +300,11 @@ impl MyImageApp {
                         ui.strong(&entry.title);
                         let time: DateTime<Local> = entry.modified.into();
                         ui.weak(format!("Autosaved {}", time.format("%d %b %Y · %H:%M")));
-                        ui.horizontal(|ui| {
-                            if ui.add_enabled(!self.busy, appearance::primary("Recover")).clicked() {
+                        ui.horizontal_wrapped(|ui| {
+                            if dialogs::button(ui, "Recover", DialogIcon::Refresh, dialogs::Action::Primary, !self.busy).clicked() {
                                 self.recover_entry(ctx, entry.id.clone());
                             }
-                            if appearance::action_button(ui, "Discard recovery", Icon::Trash, !self.busy, false).clicked()
+                            if dialogs::button(ui, "Discard recovery", Icon::Trash, dialogs::Action::Danger, !self.busy).clicked()
                                 && self.recovery_send(Command::Discard(entry.id)) {
                                 self.busy = true;
                             }
@@ -314,7 +313,7 @@ impl MyImageApp {
                 }
             });
             ui.add_space(8.);
-            if ui.add_enabled(!self.busy, egui::Button::new("Decide later")).clicked() {
+            if dialogs::button(ui, "Decide later", DialogIcon::Close, dialogs::Action::Secondary, !self.busy).clicked() {
                 self.recovery.prompt = false;
             }
             ui.weak("You can return here from the calico App menu.");

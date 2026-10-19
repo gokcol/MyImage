@@ -216,7 +216,6 @@ fn snapped_delta(
     zoom: f32,
     enabled: bool,
 ) -> (Vec2, Vec<SnapGuide>) {
-    let raw = clamped_selection_delta(document, indices, raw);
     if !enabled {
         return (raw, Vec::new());
     }
@@ -261,9 +260,9 @@ fn snapped_delta(
         }
     }
     let desired = raw + source_delta(correction, document);
-    let delta = clamped_selection_delta(document, indices, desired);
+    let delta = desired;
     let actual = mapped_bounds(source_bounds.translate(delta), document);
-    // A boundary constraint can prevent a snap; never draw a misleading guide.
+    // Only show guides that the mapped movement actually reaches.
     guides.retain(|g| {
         anchors(actual, g.axis)
             .iter()
@@ -512,12 +511,12 @@ mod tests {
     }
 
     #[test]
-    fn constrained_snaps_only_report_reached_guides() {
+    fn outside_canvas_snaps_only_report_reached_guides() {
         let mut d = fixture();
         d.annotations[0].start.x = -10.0;
         let (delta, guides) = snapped_delta(&d, &[0], Vec2::new(-100.0, -100.0), 0.5, true);
         let moved = mapped_bounds(selection_bounds(&d, &[0]).translate(delta), &d);
-        assert!(delta.x >= 0.0);
+        assert!(delta.x < -80.0, "canvas edges must not constrain movement");
         for guide in guides {
             assert!(
                 anchors(moved, guide.axis)

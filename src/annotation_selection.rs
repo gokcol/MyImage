@@ -192,11 +192,7 @@ impl EditorState {
                 copies.insert(id, new);
             }
         }
-        let delta = clamped_selection_delta(
-            document,
-            &indices,
-            source_delta(Vec2::splat(16.0), document),
-        );
+        let delta = source_delta(Vec2::splat(16.0), document);
         let first = candidate.annotations.len();
         for &i in &indices {
             let mut copy = offset_annotation(&document.annotations[i], delta);
@@ -208,7 +204,12 @@ impl EditorState {
             }
             candidate.annotations.push(copy);
         }
-        if let Err(error) = crate::document::validate_document(&candidate) {
+        if let Err(error) = crate::canvas::extend_for_annotations(
+            &mut candidate,
+            &(first..first + indices.len()).collect::<Vec<_>>(),
+        )
+        .and_then(|_| crate::document::validate_document(&candidate))
+        {
             self.image_error = Some(format!("Cannot duplicate: {error}"));
             return;
         }
@@ -222,6 +223,7 @@ impl EditorState {
         }
         let before = document.edit_state();
         document.annotations = candidate.annotations;
+        document.geometry = candidate.geometry;
         history.commit(before, document);
         self.set_selection((first..document.annotations.len()).collect(), document);
         self.tool = Tool::Select;
@@ -289,6 +291,7 @@ impl EditorState {
             kind,
             before,
             origin: at,
+            preview_geometry: None,
         });
     }
 }
@@ -323,41 +326,6 @@ pub(super) fn selection_bounds(document: &Document, indices: &[usize]) -> Rect {
         .filter_map(|&i| document.annotations.get(i))
         .map(render::annotation_bounds)
         .fold(Rect::NOTHING, Rect::union)
-}
-
-pub(super) fn clamped_selection_delta(document: &Document, indices: &[usize], delta: Vec2) -> Vec2 {
-    if indices
-        .iter()
-        .any(|&i| document.annotations[i].kind == AnnotationKind::Stamp)
-    {
-        return delta;
-    }
-    let bounds = selection_bounds(document, indices);
-    let canvas = document.geometry.canvas.map_or(
-        Rect::from_min_size(
-            Pos2::ZERO,
-            Vec2::new(
-                document.image.width() as f32,
-                document.image.height() as f32,
-            ),
-        ),
-        |c| {
-            Rect::from_min_size(
-                egui::pos2(c.x as f32, c.y as f32),
-                egui::vec2(c.width as f32, c.height as f32),
-            )
-        },
-    );
-    Vec2::new(
-        delta.x.clamp(
-            (canvas.min.x - bounds.min.x).min(0.0),
-            (canvas.max.x - bounds.max.x).max(0.0),
-        ),
-        delta.y.clamp(
-            (canvas.min.y - bounds.min.y).min(0.0),
-            (canvas.max.y - bounds.max.y).max(0.0),
-        ),
-    )
 }
 
 pub(super) fn offset_annotation(original: &Annotation, delta: Vec2) -> Annotation {
@@ -612,11 +580,11 @@ mod tests {
     }
 
     #[test]
-    fn group_move_clamps_once_and_keeps_relative_geometry_and_pointer() {
+    fn group_move_keeps_relative_geometry_and_pointer_outside_canvas() {
         let mut d = document();
         let indices = vec![0, 2];
         let before = d.edit_state();
-        let delta = clamped_selection_delta(&d, &indices, Vec2::new(500.0, 500.0));
+        let delta = Vec2::new(500.0, 500.0);
         move_selection(&mut d, &before.annotations, &indices, delta);
         for i in indices {
             assert_eq!(
@@ -629,8 +597,8 @@ mod tests {
             point(d.annotations[2].tail.unwrap()) - point(before.annotations[2].tail.unwrap()),
             delta
         );
-        assert!(selection_bounds(&d, &[0, 2]).max.x <= 400.01);
-        assert!(selection_bounds(&d, &[0, 2]).max.y <= 300.01);
+        assert!(selection_bounds(&d, &[0, 2]).max.x > 400.);
+        assert!(selection_bounds(&d, &[0, 2]).max.y > 300.);
     }
 
     #[test]

@@ -1,5 +1,7 @@
 //! A bounded, versioned native text clipboard payload. No source image pixels.
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -402,7 +404,7 @@ impl EditorState {
         let mut heading = None;
         let mut detail = None;
         if let Some((text, until)) = &self.copy_confirmation {
-            heading = Some("✓ Copied to clipboard");
+            heading = Some("Copied to clipboard");
             detail = Some(text.as_str());
             ui.ctx()
                 .request_repaint_after(until.saturating_duration_since(now));
@@ -425,27 +427,49 @@ impl EditorState {
                 if width >= 40.
                     && let Some(heading) = heading
                 {
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(heading)
-                                .size(12.)
-                                .strong()
-                                .color(crate::appearance::ACCENT),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(heading);
+                    let (rect, response) =
+                        ui.allocate_exact_size(egui::vec2(width, 36.), egui::Sense::hover());
+                    ui.painter().rect(
+                        rect.shrink(1.),
+                        6,
+                        dialogs::CHARCOAL,
+                        egui::Stroke::NONE,
+                        egui::StrokeKind::Inside,
+                    );
+                    crate::appearance::icon(
+                        ui.painter(),
+                        rect.left_center() + egui::vec2(15., 0.),
+                        if detail.is_some() {
+                            DialogIcon::Check
+                        } else {
+                            DialogIcon::Copy
+                        },
+                        crate::appearance::GINGER,
+                        15.,
+                    );
+                    let painter = ui
+                        .painter()
+                        .with_clip_rect(rect.shrink(4.).intersect(ui.clip_rect()));
+                    painter.text(
+                        rect.left_top() + egui::vec2(29., 5.),
+                        egui::Align2::LEFT_TOP,
+                        heading,
+                        egui::FontId::proportional(12.),
+                        Color32::WHITE,
+                    );
                     if let Some(detail) = detail {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(detail)
-                                    .small()
-                                    .color(crate::appearance::MUTED),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text(detail);
+                        painter.text(
+                            rect.left_top() + egui::vec2(29., 20.),
+                            egui::Align2::LEFT_TOP,
+                            detail,
+                            egui::FontId::proportional(11.),
+                            Color32::from_gray(205),
+                        );
                     }
+                    response.on_hover_text(format!(
+                        "{heading}{}",
+                        detail.map_or(String::new(), |s| format!(" · {s}"))
+                    ));
                 }
             },
         );

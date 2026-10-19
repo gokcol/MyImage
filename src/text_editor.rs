@@ -1,9 +1,11 @@
 //! A focused editing session: live canvas preview, one undo step, explicit cancellation.
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::text_style::{Alignment, TextStyle};
 
 pub(super) struct TextDraft {
-    index: usize,
+    pub(super) index: usize,
     before: EditState,
     focus: bool,
 }
@@ -39,14 +41,21 @@ impl EditorState {
         };
         if apply {
             // Empty text is not an invisible object; cancel a new blank annotation.
-            if document
+            let removed = document
                 .annotations
                 .get(draft.index)
-                .is_some_and(|a| a.kind == AnnotationKind::Text && a.text.trim().is_empty())
-            {
+                .is_some_and(|a| a.kind == AnnotationKind::Text && a.text.trim().is_empty());
+            if removed {
                 document.annotations.remove(draft.index);
             }
-            history.commit(draft.before, document);
+            let indices = if removed { vec![] } else { vec![draft.index] };
+            if let Err(error) = crate::canvas::extend_for_annotations(document, &indices) {
+                document.annotations = draft.before.annotations;
+                document.geometry = draft.before.geometry;
+                self.image_error = Some(error);
+            } else {
+                history.commit(draft.before, document);
+            }
         } else {
             document.annotations = draft.before.annotations;
             document.geometry = draft.before.geometry;
@@ -73,22 +82,18 @@ impl EditorState {
         let mut open = true;
         let mut apply = ctx.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
         let mut cancel = ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape));
-        egui::Window::new("Edit text")
-            .id(egui::Id::new("text-properties-window"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(460.)
-            .default_pos(egui::pos2(360., 200.))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.strong("Text properties");
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.weak("Live preview");
-                    });
-                });
-                ui.add_space(6.);
-                ui.horizontal(|ui| {
+        Dialog::new(
+            "Edit text",
+            "Style your words with a live canvas preview.",
+            DialogIcon::Edit,
+            490.,
+        )
+        .window(
+            ctx,
+            egui::Id::new("text-properties-window"),
+            &mut open,
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
                     font_controls(ui, &mut annotation.text_style);
                     ui.label("Size");
                     object_properties::font_size_menu(ui, &mut annotation.font_size);
@@ -100,7 +105,7 @@ impl EditorState {
                     };
                     ui.color_edit_button_srgba_unmultiplied(color);
                 });
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.toggle_value(
                         &mut annotation.text_style.italic,
                         egui::RichText::new("Italic").italics(),
@@ -131,9 +136,9 @@ impl EditorState {
                     .fill(Color32::WHITE)
                     .stroke(Stroke::new(1., Color32::from_rgb(166, 187, 204)))
                     .corner_radius(8)
-                    .inner_margin(12)
+                    .inner_margin(10)
                     .show(ui, |ui| {
-                        ui.set_min_size(egui::vec2(436., 150.));
+                        ui.set_min_height(130.);
                         egui::ScrollArea::vertical()
                             .id_salt("text-draft-scroll")
                             .max_height(200.)
@@ -151,7 +156,7 @@ impl EditorState {
                                         })
                                         .text_color(Color32::from_rgb(29, 41, 56))
                                         .frame(false)
-                                        .desired_width(436.)
+                                        .desired_width(f32::INFINITY)
                                         .desired_rows(6)
                                         .char_limit(16_384)
                                         .hint_text("Write your text here…"),
@@ -176,16 +181,15 @@ impl EditorState {
                             });
                     });
                 ui.add_space(6.);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.weak("Enter: new line · Ctrl/⌘ + Enter: apply");
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        apply |= ui
-                            .add(egui::Button::new("Apply").fill(Color32::from_rgb(201, 237, 235)))
-                            .clicked();
-                        cancel |= ui.button("Cancel").clicked();
+                        apply |= dialogs::primary(ui, "Apply", DialogIcon::Check).clicked();
+                        cancel |= dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked();
                     });
                 });
-            });
+            },
+        );
         self.text_dialog = Some(draft);
         if apply || cancel || !open {
             self.finish_text_editor(document, history, apply);
@@ -247,6 +251,24 @@ mod tests {
         d.annotations[0].text = "Unwanted".into();
         e.finish_text_editor(&mut d, &mut h, false);
         assert_eq!(d.annotations[0].text, "Applied");
+    }
+    #[test]
+    fn deleting_empty_text_does_not_reveal_an_unrelated_off_canvas_layer() {
+        let mut e = EditorState::default();
+        let mut d = document();
+        let text = e.new_annotation(AnnotationKind::Text, Point { x: 20., y: 20. });
+        let mut shape = e.new_annotation(AnnotationKind::Rectangle, Point { x: 250., y: 20. });
+        shape.end = Point { x: 320., y: 90. };
+        d.annotations = vec![text, shape.clone()];
+        let before = d.edit_state();
+        let mut h = EditHistory::new(before.clone());
+        e.open_text_editor(0, before.clone(), &d);
+        d.annotations[0].text.clear();
+        e.finish_text_editor(&mut d, &mut h, true);
+        assert_eq!(d.geometry, before.geometry);
+        assert_eq!(d.annotations, vec![shape]);
+        assert!(h.undo(&mut d));
+        assert_eq!(d.edit_state(), before);
     }
     #[test]
     fn locked_text_does_not_open_for_editing() {

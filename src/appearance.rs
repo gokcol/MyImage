@@ -52,6 +52,19 @@ pub fn apply(ctx: &egui::Context) {
     style.visuals.override_text_color = Some(INK);
     style.visuals.panel_fill = PAPER;
     style.visuals.window_fill = Color32::WHITE;
+    style.visuals.window_corner_radius = egui::CornerRadius::same(8);
+    style.visuals.window_shadow = egui::Shadow {
+        offset: [0, 12],
+        blur: 30,
+        spread: 1,
+        color: Color32::from_black_alpha(65),
+    };
+    style.visuals.popup_shadow = egui::Shadow {
+        offset: [0, 6],
+        blur: 16,
+        spread: 0,
+        color: Color32::from_black_alpha(45),
+    };
     style.visuals.extreme_bg_color = Color32::from_rgb(242, 237, 229);
     style.visuals.faint_bg_color = Color32::from_rgb(246, 240, 230);
     style.visuals.selection.bg_fill = CREAM;
@@ -203,6 +216,10 @@ fn slider_track<N: egui::emath::Numeric>(
 
 #[derive(Clone, Copy)]
 pub enum Icon {
+    Close,
+    Check,
+    Resize,
+    Settings,
     Info,
     Trash,
     Remove,
@@ -235,6 +252,50 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
     let s = Stroke::new(1.8, color);
     let r = Rect::from_center_size(center, Vec2::splat(size));
     match kind {
+        Icon::Close => {
+            p.line_segment(
+                [
+                    r.left_top() + Vec2::splat(size * 0.18),
+                    r.right_bottom() - Vec2::splat(size * 0.18),
+                ],
+                s,
+            );
+            p.line_segment(
+                [
+                    r.right_top() + Vec2::new(-size * 0.18, size * 0.18),
+                    r.left_bottom() + Vec2::new(size * 0.18, -size * 0.18),
+                ],
+                s,
+            );
+        }
+        Icon::Check => {
+            p.line_segment(
+                [r.left_center(), center + Vec2::new(-size * 0.1, size * 0.3)],
+                s,
+            );
+            p.line_segment(
+                [
+                    center + Vec2::new(-size * 0.1, size * 0.3),
+                    r.right_top() + Vec2::new(0., size * 0.15),
+                ],
+                s,
+            );
+        }
+        Icon::Resize => {
+            p.rect_stroke(r.shrink(size * 0.12), 1, s, egui::StrokeKind::Inside);
+            p.line_segment([r.left_bottom(), r.right_top()], s);
+        }
+        Icon::Settings => {
+            for (i, offset) in [-0.3, 0., 0.3].iter().enumerate() {
+                let y = center.y + size * offset;
+                p.line_segment([Pos2::new(r.left(), y), Pos2::new(r.right(), y)], s);
+                let at = Pos2::new(
+                    center.x + if i == 1 { size * 0.22 } else { -size * 0.22 },
+                    y,
+                );
+                p.circle_filled(at, size * 0.12, color);
+            }
+        }
         Icon::Info => {
             p.circle_stroke(center, size * 0.48, s);
             p.circle_filled(center - Vec2::new(0., size * 0.23), size * 0.06, color);

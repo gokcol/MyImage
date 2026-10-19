@@ -1,3 +1,5 @@
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::{
     document::{Annotation, AnnotationKind, Document, EditHistory, EditState, Point},
     geometry::{CropRect, ImageGeometry},
@@ -17,6 +19,9 @@ mod annotation_selection;
 mod area_selection;
 #[path = "canvas_tools.rs"]
 mod canvas_tools;
+#[path = "object_canvas.rs"]
+mod object_canvas;
+use object_canvas::object_point;
 #[path = "editor_toolbar.rs"]
 mod editor_toolbar;
 #[path = "editor_tools.rs"]
@@ -140,6 +145,7 @@ struct Gesture {
     kind: GestureKind,
     before: EditState,
     origin: Point,
+    preview_geometry: Option<crate::geometry::ImageGeometry>,
 }
 
 #[derive(Clone)]
@@ -410,12 +416,8 @@ impl EditorState {
             }
             _ => None,
         };
-        let indices = self.selected_indices(document);
-        if indices
-            .iter()
-            .any(|&i| document.annotations[i].kind == AnnotationKind::Stamp)
-            && let Err(error) = crate::canvas::extend_for_annotations(document, &indices)
-        {
+        let indices = gesture.changed_objects(document);
+        if let Err(error) = crate::canvas::extend_for_annotations(document, &indices) {
             document.annotations = gesture.before.annotations;
             document.geometry = gesture.before.geometry;
             self.image_error = Some(error);
@@ -490,19 +492,14 @@ impl EditorState {
         };
         let before = document.edit_state();
         let mut annotation = self.new_annotation(AnnotationKind::Step, at);
-        let bounds = step_bounds(
-            at,
-            self.step_diameter,
-            Vec2::new(
-                document.image.width() as f32,
-                document.image.height() as f32,
-            ),
-        );
+        let bounds = step_bounds(at, self.step_diameter);
         annotation.start = from_pos(bounds.min);
         annotation.end = from_pos(bounds.max);
         annotation.step_number = number;
         document.annotations.push(annotation);
-        history.commit(before, document);
+        if !self.commit_object_placement(before, document, history) {
+            return;
+        }
         self.select(Some(document.annotations.len() - 1), document);
         self.image_error = None;
     }
@@ -1123,9 +1120,7 @@ impl EditorState {
         let mut cancel = false;
         let mut candidate = document.geometry;
         let original = original_size(document);
-        let modal = egui::Modal::new(egui::Id::new("resize-image")).show(ctx, |ui| {
-            ui.set_width(400.0);
-            ui.heading("Resize image");
+        let modal = Dialog::new("Resize image", "Scale the image and its editable annotations.", DialogIcon::Resize, 420.).modal(ctx, egui::Id::new("resize-image"), |ui| {
             ui.label(format!("Original: {} × {} px", original[0], original[1]));
             ui.label(format!("Current output: {} × {} px", document.output_size()[0], document.output_size()[1]));
             ui.add_space(16.0);
@@ -1155,12 +1150,12 @@ impl EditorState {
             ui.label("The original pixels stay in your project. Annotations scale with the image and remain editable.");
             if let Err(error) = &validation {
                 ui.add_space(8.0);
-                ui.colored_label(Color32::from_rgb(170, 35, 45), error);
+                dialogs::notice(ui, DialogIcon::Info, "Check dimensions", error, true);
             }
             ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                cancel = ui.button("Cancel").clicked();
-                apply = ui.add_enabled(validation.is_ok(), egui::Button::new("Apply resize")).clicked();
+            dialogs::actions(ui, |ui| {
+                cancel = dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked();
+                apply = dialogs::button(ui, "Apply resize", DialogIcon::Resize, dialogs::Action::Primary, validation.is_ok()).clicked();
             });
         });
         if apply && self.apply_geometry(document, history, candidate) {
@@ -1241,10 +1236,6 @@ impl EditorState {
         }
         let Some(index) = self.selected else { return };
         let before = document.edit_state();
-        let image_size = Vec2::new(
-            document.image.width() as f32,
-            document.image.height() as f32,
-        );
         if let Some(annotation) = document.annotations.get_mut(index) {
             if annotation.kind == AnnotationKind::Arrow {
                 annotation.arrow = self.arrow.clone();
@@ -1268,11 +1259,8 @@ impl EditorState {
                         annotation.text_color = self.text_color;
                         let current = interaction_bounds(annotation);
                         if self.step_diameter != current.width() {
-                            let bounds = step_bounds(
-                                from_pos(current.center()),
-                                self.step_diameter,
-                                image_size,
-                            );
+                            let bounds =
+                                step_bounds(from_pos(current.center()), self.step_diameter);
                             annotation.start = from_pos(bounds.min);
                             annotation.end = from_pos(bounds.max);
                             self.step_diameter = bounds.width();
@@ -1349,8 +1337,15 @@ impl EditorState {
                     Rect::from_min_size(space.min + visible.min.to_vec2(), visible.size())
                         .intersect(ui.clip_rect()),
                 );
-                let hit_rect = if self.tool == Tool::Area && self.area_bounds(document).is_some() {
-                    rect.expand(7.)
+                let stamp_payload =
+                    egui::DragAndDrop::has_payload_of_type::<crate::stamps::StampSource>(ui.ctx());
+                let draw_in_margin = self.draws_objects() || stamp_payload;
+                let hit_rect = if draw_in_margin {
+                    space
+                } else if self.selected.is_some()
+                    || (self.tool == Tool::Area && self.area_bounds(document).is_some())
+                {
+                    rect.expand(8.)
                 } else {
                     rect
                 };
@@ -1404,7 +1399,13 @@ impl EditorState {
                     )
                     && let Some(position) = press
                     && hit_rect.intersect(ui.clip_rect()).contains(position)
-                    && (rect.contains(position)
+                    && (draw_in_margin
+                        || rect.contains(position)
+                        || self.object_target(
+                            object_point(position, rect, scale, document),
+                            scale,
+                            document,
+                        )
                         || self.over_area_handle(
                             image_point(position, rect, scale, document),
                             document,
@@ -1413,7 +1414,14 @@ impl EditorState {
                 {
                     response.request_focus();
                     self.finish_annotation_gesture(document, history);
-                    let point = image_point(position, rect, scale, document);
+                    let point = if self.draws_objects()
+                        || self.tool == Tool::Select
+                        || (self.tool == Tool::Area && self.area.is_none())
+                    {
+                        object_point(position, rect, scale, document)
+                    } else {
+                        image_point(position, rect, scale, document)
+                    };
                     if self.tool == Tool::Crop {
                         if let Some(crop) = &mut self.crop {
                             crop.drag_start = Some(point);
@@ -1476,14 +1484,14 @@ impl EditorState {
                                 button: PointerButton::Primary,
                                 pressed: true,
                                 ..
-                            } if rect.intersect(ui.clip_rect()).contains(pos)
+                            } if hit_rect.intersect(ui.clip_rect()).contains(pos)
                                 && ui.ctx().layer_id_at(pos) == Some(ui.layer_id()) =>
                             {
                                 response.request_focus();
                                 self.finish_annotation_gesture(document, history);
                                 let m = ui.input(|i| i.modifiers);
                                 self.begin_tool_gesture(
-                                    image_point(pos, rect, scale, document),
+                                    object_point(pos, rect, scale, document),
                                     scale,
                                     document,
                                     m.shift,
@@ -1492,7 +1500,7 @@ impl EditorState {
                             }
                             egui::Event::PointerMoved(pos) if self.gesture.is_some() => {
                                 self.update_gesture(
-                                    image_point(pos, rect, scale, document),
+                                    object_point(pos, rect, scale, document),
                                     document,
                                 );
                             }
@@ -1503,7 +1511,7 @@ impl EditorState {
                                 ..
                             } if self.gesture.is_some() => {
                                 self.update_gesture(
-                                    image_point(pos, rect, scale, document),
+                                    object_point(pos, rect, scale, document),
                                     document,
                                 );
                                 self.finish_annotation_gesture(document, history);
@@ -1517,13 +1525,13 @@ impl EditorState {
                 let mut stamp_dropped = false;
                 if ui.is_enabled()
                     && let Some(position) = ui.input(|i| i.pointer.interact_pos())
-                    && rect.intersect(ui.clip_rect()).contains(position)
+                    && hit_rect.intersect(ui.clip_rect()).contains(position)
                     && let Some(source) =
                         response.dnd_release_payload::<crate::stamps::StampSource>()
                 {
                     self.stamps.source = (*source).clone();
                     self.place_stamp(
-                        image_point(position, rect, scale, document),
+                        object_point(position, rect, scale, document),
                         document,
                         history,
                     );
@@ -1534,7 +1542,7 @@ impl EditorState {
                 if !stamp_dropped && response.clicked_by(PointerButton::Primary) {
                     response.request_focus();
                     if let Some(position) = response.interact_pointer_pos() {
-                        let point = image_point(position, rect, scale, document);
+                        let point = object_point(position, rect, scale, document);
                         if self.tool == Tool::Text && !self.object_press {
                             let before = document.edit_state();
                             let mut annotation = self.new_annotation(AnnotationKind::Text, point);
@@ -1613,21 +1621,7 @@ impl EditorState {
                     && ui.is_enabled()
                     && let Some(position) = ui.input(|i| i.pointer.interact_pos())
                 {
-                    let point = if self
-                        .selected_indices(document)
-                        .iter()
-                        .any(|&i| document.annotations[i].kind == AnnotationKind::Stamp)
-                    {
-                        document.geometry.inverse_point(
-                            Point {
-                                x: (position.x - rect.min.x) / scale,
-                                y: (position.y - rect.min.y) / scale,
-                            },
-                            original_size(document),
-                        )
-                    } else {
-                        image_point(position, rect, scale, document)
-                    };
+                    let point = object_point(position, rect, scale, document);
                     self.update_snapped_gesture(point, document, ui.input(|i| i.modifiers.alt));
                 }
                 if self.gesture.is_some()
@@ -1673,7 +1667,15 @@ impl EditorState {
                 // and selection coordinates remain stable until release/cancel.
                 // Invalid growth is rejected by finish_area_drag; keep the current
                 // canvas visible in the meantime rather than show a blank frame.
-                let expansion = self.area_drag_preview(document, rect, scale).ok().flatten();
+                let object_expansion = self
+                    .object_canvas_preview(document, rect, scale)
+                    .ok()
+                    .flatten();
+                let expansion = self
+                    .area_drag_preview(document, rect, scale)
+                    .ok()
+                    .flatten()
+                    .or(object_expansion);
                 let display_document = expansion.as_ref().map_or(&*document, |(doc, _)| doc);
                 let live_fit = self.fit && expansion.is_some();
                 let (paint_rect, display_scale) = if live_fit {
@@ -1692,7 +1694,12 @@ impl EditorState {
                 let stable_frame = self
                     .area_drag_texture_frame(document, rect, scale, ui.clip_rect())
                     .ok()
-                    .flatten();
+                    .flatten()
+                    .or_else(|| {
+                        self.object_canvas_texture_frame(document, rect, scale, ui.clip_rect())
+                            .ok()
+                            .flatten()
+                    });
                 let (paint_document, _) = stable_frame
                     .as_ref()
                     .or(expansion.as_ref())
@@ -1720,7 +1727,7 @@ impl EditorState {
                         .iter()
                         .any(|annotation| annotation.visible() && annotation.kind.needs_composite())
                 {
-                    let image = if self.moving_area_pixels(document) {
+                    let image = if self.moving_area_pixels(document) || self.gesture.is_some() {
                         preview.drag_texture(ui.ctx(), paint_document)
                     } else {
                         preview.continuous_texture(ui.ctx(), paint_document)
@@ -1764,7 +1771,7 @@ impl EditorState {
                         StrokeKind::Inside,
                     );
                 }
-                let selection_clip = if self.moving_area_pixels(document) {
+                let selection_clip = if expansion.is_some() || self.moving_area_pixels(document) {
                     ui.clip_rect()
                 } else {
                     rect.expand(7.).intersect(ui.clip_rect())
@@ -1799,16 +1806,22 @@ impl EditorState {
                     if indices.len() > 1 {
                         paint_many(
                             &painter,
-                            document,
+                            display_document,
                             &indices,
-                            rect.min,
-                            scale,
+                            paint_rect.min,
+                            display_scale,
                             ui.visuals().selection.bg_fill,
                         );
                     } else if let Some(annotation) =
                         self.selected.and_then(|i| document.annotations.get(i))
                     {
-                        paint_selection(&painter, annotation, document, rect.min, scale);
+                        paint_selection(
+                            &selection_painter,
+                            annotation,
+                            display_document,
+                            paint_rect.min,
+                            display_scale,
+                        );
                     }
                 }
                 if let Some(Gesture {
@@ -1833,7 +1846,9 @@ impl EditorState {
                         StrokeKind::Inside,
                     );
                 }
-                self.paint_snap_guides(&painter, rect, scale);
+                if expansion.is_none() {
+                    self.paint_snap_guides(&painter, rect, scale);
+                }
                 if ui.is_enabled()
                     && let Some(source) = response.dnd_hover_payload::<crate::stamps::StampSource>()
                     && let Some(position) = ui.input(|i| i.pointer.interact_pos())
@@ -1841,20 +1856,20 @@ impl EditorState {
                 {
                     let image = texture.size_vec2();
                     let size = image * (self.stamps.size / image.max_elem());
-                    let center = image_point(position, rect, scale, document);
+                    let center = object_point(position, rect, scale, document);
                     let bounds =
                         mapped_bounds(Rect::from_center_size(point(center), size), document);
                     let screen = Rect::from_min_max(
                         rect.min + bounds.min.to_vec2() * scale,
                         rect.min + bounds.max.to_vec2() * scale,
                     );
-                    painter.image(
+                    ui.painter().image(
                         texture.id(),
                         screen,
                         Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)),
                         Color32::from_white_alpha(170),
                     );
-                    painter.rect_stroke(
+                    ui.painter().rect_stroke(
                         screen.expand(3.),
                         3.,
                         Stroke::new(1., crate::appearance::ACCENT),
@@ -1892,7 +1907,7 @@ impl EditorState {
                         .hover_pos()
                         .map_or(CursorIcon::Default, |position| {
                             self.canvas_cursor(
-                                image_point(position, rect, scale, document),
+                                object_point(position, rect, scale, document),
                                 scale,
                                 document,
                             )
@@ -2112,6 +2127,7 @@ impl EditorState {
             kind,
             before,
             origin: point,
+            preview_geometry: None,
         });
         if self.tool == Tool::Eraser {
             self.update_gesture(point, document);
@@ -2133,16 +2149,7 @@ impl EditorState {
         }
         match &mut gesture.kind {
             GestureKind::MoveMany(indices) => {
-                let original = Document {
-                    image: document.image.clone(),
-                    annotations: gesture.before.annotations.clone(),
-                    geometry: gesture.before.geometry,
-                };
-                let delta = clamped_selection_delta(
-                    &original,
-                    indices,
-                    Vec2::new(point.x - gesture.origin.x, point.y - gesture.origin.y),
-                );
+                let delta = Vec2::new(point.x - gesture.origin.x, point.y - gesture.origin.y);
                 move_selection(document, &gesture.before.annotations, indices, delta);
                 return;
             }
@@ -2224,13 +2231,9 @@ impl EditorState {
                     gesture.before.annotations.get(index),
                     document.annotations.get_mut(index),
                 ) {
-                    *annotation = translated(
+                    *annotation = offset_annotation(
                         original,
                         Vec2::new(point.x - gesture.origin.x, point.y - gesture.origin.y),
-                        Vec2::new(
-                            document.image.width() as f32,
-                            document.image.height() as f32,
-                        ),
                     );
                 }
             }
@@ -2253,14 +2256,7 @@ impl EditorState {
                     };
                     if annotation.kind == AnnotationKind::Step {
                         let bounds = interaction_bounds(annotation);
-                        let bounds = step_bounds(
-                            from_pos(bounds.center()),
-                            bounds.width(),
-                            Vec2::new(
-                                document.image.width() as f32,
-                                document.image.height() as f32,
-                            ),
-                        );
+                        let bounds = step_bounds(from_pos(bounds.center()), bounds.width());
                         annotation.start = from_pos(bounds.min);
                         annotation.end = from_pos(bounds.max);
                     }
@@ -2354,14 +2350,10 @@ impl EditorState {
         });
         let indices = self.selected_indices(document);
         if delta != Vec2::ZERO && self.can_edit_selection(document) {
-            let delta = clamped_selection_delta(document, &indices, source_delta(delta, document));
+            let delta = source_delta(delta, document);
             let before = document.edit_state();
             move_selection(document, &before.annotations, &indices, delta);
-            if indices
-                .iter()
-                .any(|&i| document.annotations[i].kind == AnnotationKind::Stamp)
-                && let Err(error) = crate::canvas::extend_for_annotations(document, &indices)
-            {
+            if let Err(error) = crate::canvas::extend_for_annotations(document, &indices) {
                 document.annotations = before.annotations;
                 document.geometry = before.geometry;
                 self.image_error = Some(error);
@@ -2493,14 +2485,8 @@ fn stroke_point_count(document: &Document) -> usize {
         .sum()
 }
 
-fn step_bounds(center: Point, diameter: f32, image_size: Vec2) -> Rect {
-    let diameter = diameter.max(1.0).min(image_size.x).min(image_size.y);
-    let radius = diameter * 0.5;
-    let center = Pos2::new(
-        center.x.clamp(radius, image_size.x - radius),
-        center.y.clamp(radius, image_size.y - radius),
-    );
-    Rect::from_center_size(center, Vec2::splat(diameter))
+fn step_bounds(center: Point, diameter: f32) -> Rect {
+    Rect::from_center_size(point(center), Vec2::splat(diameter.max(1.0)))
 }
 
 fn default_callout_tail(annotation: &Annotation, image_size: Vec2) -> Point {
@@ -3439,44 +3425,6 @@ fn inside_triangle(at: Pos2, vertices: [Pos2; 3]) -> bool {
     sides.iter().all(|v| *v >= 0.0) || sides.iter().all(|v| *v <= 0.0)
 }
 
-fn translated(original: &Annotation, delta: Vec2, image_size: Vec2) -> Annotation {
-    let mut bounds = interaction_bounds(original);
-    if let Some(tail) = original
-        .tail
-        .filter(|_| original.kind == AnnotationKind::Callout)
-    {
-        bounds.extend_with(point(tail));
-    }
-    // Preserve geometry, including text larger than the image or imported off-canvas annotations.
-    let delta = Vec2::new(
-        delta.x.clamp(
-            (-bounds.min.x).min(0.0),
-            (image_size.x - bounds.max.x).max(0.0),
-        ),
-        delta.y.clamp(
-            (-bounds.min.y).min(0.0),
-            (image_size.y - bounds.max.y).max(0.0),
-        ),
-    );
-    let mut annotation = original.clone();
-    annotation.start = from_pos(point(original.start) + delta);
-    annotation.end = from_pos(point(original.end) + delta);
-    annotation.tail = original.tail.map(|tail| from_pos(point(tail) + delta));
-    annotation.arrow.curve = original
-        .arrow
-        .curve
-        .map(|c| c.map(|p| from_pos(point(p) + delta)));
-    if annotation.kind == AnnotationKind::Freehand {
-        annotation.points = original
-            .points
-            .iter()
-            .map(|p| from_pos(point(*p) + delta))
-            .collect();
-        freehand::sync_bounds(&mut annotation);
-    }
-    annotation
-}
-
 fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
     let mut annotation = original.clone();
     let bounds = interaction_bounds(original);
@@ -3738,11 +3686,7 @@ mod tests {
         assert!(d.annotations[0].arrow.curve.is_none());
         assert!(h.redo(&mut d));
         assert_eq!(d.edit_state(), curved);
-        let moved = translated(
-            &d.annotations[0],
-            Vec2::new(10., 12.),
-            Vec2::new(400., 300.),
-        );
+        let moved = offset_annotation(&d.annotations[0], Vec2::new(10., 12.));
         assert_eq!(
             moved.arrow.curve.unwrap()[0],
             from_pos(point(d.annotations[0].arrow.curve.unwrap()[0]) + Vec2::new(10., 12.))
@@ -3998,11 +3942,11 @@ mod tests {
     }
 
     #[test]
-    fn movement_preserves_size_and_clamps_as_one_object() {
+    fn movement_preserves_size_beyond_source_bounds() {
         let original = annotation(AnnotationKind::Rectangle);
-        let moved = translated(&original, Vec2::new(-100.0, 100.0), Vec2::splat(100.0));
-        assert_eq!(moved.start, Point { x: 0.0, y: 40.0 });
-        assert_eq!(moved.end, Point { x: 60.0, y: 100.0 });
+        let moved = offset_annotation(&original, Vec2::new(-100.0, 100.0));
+        assert_eq!(moved.start, Point { x: -80.0, y: 130.0 });
+        assert_eq!(moved.end, Point { x: -20.0, y: 190.0 });
     }
 
     #[test]
@@ -5588,12 +5532,12 @@ mod tests {
     #[test]
     fn callout_tail_moves_with_body_and_resizes_independently() {
         let callout = annotation(AnnotationKind::Callout);
-        let moved = translated(&callout, Vec2::new(10.0, 15.0), Vec2::splat(200.0));
+        let moved = offset_annotation(&callout, Vec2::new(10.0, 15.0));
         assert_eq!(moved.start, Point { x: 30.0, y: 45.0 });
         assert_eq!(moved.tail, Some(Point { x: 60.0, y: 125.0 }));
-        let clamped = translated(&callout, Vec2::new(0.0, 100.0), Vec2::splat(120.0));
-        assert_eq!(clamped.tail.unwrap().y, 120.0);
-        assert_eq!(clamped.start.y, 40.0);
+        let outside = offset_annotation(&callout, Vec2::new(0.0, 100.0));
+        assert_eq!(outside.tail.unwrap().y, 210.0);
+        assert_eq!(outside.start.y, 130.0);
         let bubble = resized(&callout, Handle::BottomRight, Point { x: 100.0, y: 95.0 });
         assert_eq!(bubble.tail, callout.tail);
         let tip = resized(&callout, Handle::CalloutTail, Point { x: 150.0, y: 140.0 });
@@ -5913,7 +5857,7 @@ mod tests {
             hit_document_annotation(&document, Point { x: 50.0, y: 80.0 }, 1.0),
             None
         );
-        let moved = translated(&original, Vec2::new(10.0, 20.0), Vec2::splat(200.0));
+        let moved = offset_annotation(&original, Vec2::new(10.0, 20.0));
         assert_eq!(
             moved.points,
             vec![Point { x: 30.0, y: 70.0 }, Point { x: 90.0, y: 70.0 }]
@@ -5951,6 +5895,7 @@ mod tests {
             kind: GestureKind::Draw(0),
             before: EditState::default(),
             origin: Point { x: 10.0, y: 10.0 },
+            preview_geometry: None,
         });
         editor.update_gesture(Point { x: 20.0, y: 20.0 }, &mut document);
         assert_eq!(

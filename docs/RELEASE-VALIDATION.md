@@ -1,5 +1,19 @@
 # Release validation — MyImage
 
+## Version 1.11.0 — build 48 (release tag v1.11)
+
+This release combines build 46's editable drawing beyond the canvas with the Studio Contrast dialogs reviewed in build 47. The two-part public tag `v1.11` maps exactly to package version `1.11.0`; the Windows workflow validates that normalization before uploading its explicitly UNTESTED package. Project format 18 and the stable macOS bundle/signing identity are unchanged.
+
+The feature source passed 412 application and 15 packaging tests, strict workspace Clippy, formatting and the native checks recorded below before the version-only release bump. Final tagged-source CI, signing, notarization and package verification are recorded in the GitHub release notes.
+
+## Version 1.1.0 — build 47: Studio Contrast dialogs
+
+All application-owned dialogs and prompts use shared native Rust/egui surfaces: charcoal headers, contextual icons, neutral bodies, compact raised action buttons, distinct destructive actions and soft shadows. This covers export, image/canvas sizing, text, SVG stamps, preset/layer naming, toolbar customization, library actions, storage migration, crash recovery, the first-run guide and unsaved changes. Error notices and clipboard confirmation use matching styling. macOS/Windows file and folder pickers remain platform-native.
+
+Validation: 412 application tests and 15 packaging tests passed, with 16 explicitly ignored diagnostic/integration tests. Formatting, diff whitespace validation and strict workspace Clippy passed. The new bounded-prompt regression covers three workspace sizes and verifies Escape does not activate an action. Existing native-control tests still exercise layer rename, preset save/rename/delete and text-editor sizing.
+
+Native macOS review verified the welcome guide, export, canvas sizing, text entry/apply, unsaved-work cancellation and discard on a disposable fixture, and the storage dialog at Very Large UI text size. Final checks confirmed header close-button positioning and action icon/label spacing. The authorized isolated review app was closed and removed; regular user artwork was untouched. Windows interactive validation remains deferred.
+
 ## Version 1.1.0 — build 45
 
 This release consolidates builds 41–44: layer-aware selection deletion, the refreshed Calico guide, natural object selection in drawing tools, directly editable curved arrows, compact eight-point shape handles, stable canvas layout during selection, and improved window detection and capture controls. New saves use editable project format 18; older projects remain readable.
@@ -104,3 +118,15 @@ Native macOS review confirmed a saved curved arrow stays saved and at the same 8
 
 
 Build 44 notarization submission `1d096dd8-3cfe-441a-87a9-46d616a49d5a` was Accepted, stapled and validated; Gatekeeper reports Notarized Developer ID. The regular app was confirmed closed before installation. The installer verified and retained the installed build 43 rollback, installed build 44, and left captures, projects, settings and permission records unchanged. The installed app was reopened at Home, and its App menu confirmed `1.0.0 · build 44`. Release cleanup left approximately 40 MiB in target and 13 MiB in backups.
+
+## Build 46 — draw beyond the canvas
+
+Object tools can start in the empty workspace and draw across any canvas edge. Drawing, moving, resizing, duplicating and nudging annotations or groups automatically grows the visible canvas with transparent margins. Text, stamps and numbered steps also support placement outside the image. Original pixels and editable layers are retained. Pixel-selection, crop and fill tools keep their image-based interaction boundaries.
+
+During an object gesture the preview grows while input coordinates and its sampling frame remain fixed. Fit mode shows the growing canvas during the drag. The geometry change and object edit commit as one undo step; Escape or rejected oversized growth restores both. Existing curved arrows retain their shape in previews and exports when the canvas grows left or upward. Removing an empty text layer does not expand the canvas around an unrelated hidden object.
+
+Validation: 411 application tests and 15 packaging tests passed, with 16 explicit diagnostics/integration tests ignored. The packaging signature test requires the macOS trust service outside the restricted sandbox. Formatting and strict workspace Clippy passed. Regression coverage includes all four edges, wholly outside drawing, live preview without coordinate drift, transparency, undo/redo, cancellation, editable project reopening, grouped movement and resizing after rotation/flip/nonuniform image resizing, text/stamp/step placement, and unchanged curved-arrow pixels after negative-origin expansion.
+
+Native macOS review used a disposable 400 × 240 image in an isolated app. An arrow started entirely outside the image expanded the canvas left and upward to 487 × 327 with checkerboard transparency. Another arrow crossed the right and bottom edges and grew it to 532 × 292. Each Undo restored the clean 400 × 240 document. The review app was then closed. Windows interactive validation remains deferred.
+
+Build 46 notarization submission `ab45e550-610d-460b-b1eb-9ea99708738f` was Accepted, stapled and validated; Gatekeeper reports Notarized Developer ID. Release cleanup removed build caches and retained the rollback. The isolated review bundle was removed. After the user saved and quit, the installer verified the signature and notarization, retained the actual installed build 45 as rollback, and installed build 46 without modifying captures, projects, settings or permission records. The app was reopened at Home and its App menu confirmed `1.1.0 · build 46`. The published v1.1.0 release and its Windows UNTESTED artifact are unchanged.

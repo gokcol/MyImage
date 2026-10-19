@@ -1003,6 +1003,11 @@ pub fn interactive_preview(document: &Document, max_side: u32) -> Result<RgbaIma
             };
             shift(&mut a.start);
             shift(&mut a.end);
+            if let Some(controls) = &mut a.arrow.curve {
+                for control in controls {
+                    shift(control);
+                }
+            }
             if let Some(tail) = &mut a.tail {
                 shift(tail);
             }

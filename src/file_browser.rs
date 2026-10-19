@@ -1,4 +1,6 @@
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 use crate::library_files::{self, Operation, Outcome};
 
 pub(super) enum FileDialog {
@@ -227,11 +229,22 @@ impl MyImageApp {
         let mut operation = None;
         let mut choose_storage = false;
         let mut storage_change = None;
-        let shown=egui::Modal::new(egui::Id::new("library-file-dialog")).show(ctx,|ui| {
-            ui.set_width(420.);
+        let (title, icon) = match &dialog {
+            FileDialog::Storage => ("Storage folder".to_owned(), Icon::OpenProject),
+            FileDialog::ChangeStorage { .. } => {
+                ("Change storage folder".to_owned(), Icon::OpenProject)
+            }
+            FileDialog::Trash(paths) => (
+                format!("Move {} file(s) to Trash?", paths.len()),
+                Icon::Trash,
+            ),
+            FileDialog::Rename { .. } => ("Rename file".to_owned(), Icon::Edit),
+            FileDialog::Info(_) => ("File info".to_owned(), Icon::Info),
+        };
+        let shown=Dialog::new(&title, "Your MyImage library.", icon, 470.).modal(ctx,egui::Id::new("library-file-dialog"),|ui| {
             match &mut dialog {
                 FileDialog::Storage => {
-                    ui.heading("Storage folder");
+
                     ui.label("Captures and editable projects are ordinary files in your library.");
                     ui.add_space(8.);
                     ui.strong("Library & captures");
@@ -239,9 +252,9 @@ impl MyImageApp {
                     ui.strong("New .myimage projects");
                     let projects = storage::projects_folder(&self.settings);
                     ui.label(projects.display().to_string());
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         for (label, folder) in [("Open library folder", self.settings.output_dir.clone()), ("Open projects folder", projects)] {
-                            if appearance::action_button(ui, label, Icon::Open, true, false).clicked()
+                            if dialogs::secondary(ui, label, Icon::Open).clicked()
                                 && let Err(error) = library_files::open_folder(&folder) {
                                     self.error = Some(error);
                             }
@@ -249,15 +262,15 @@ impl MyImageApp {
                     });
                     ui.separator();
                     ui.label("Change storage for future captures and projects, with the option to move your existing library too.");
-                    ui.horizontal(|ui| {
-                        if appearance::action_button(ui, "Change storage folder…", Icon::OpenProject, true, false).clicked() {
+                    ui.horizontal_wrapped(|ui| {
+                        if dialogs::primary(ui, "Change storage folder…", Icon::OpenProject).clicked() {
                             choose_storage = true;
                         }
-                        if ui.button("Done").clicked() { close = true; }
+                        if dialogs::secondary(ui, "Done", DialogIcon::Check).clicked() { close = true; }
                     });
                 }
                 FileDialog::ChangeStorage { destination, move_existing } => {
-                    ui.heading("Change storage folder");
+
                     ui.strong("From"); ui.label(self.settings.output_dir.display().to_string());
                     ui.strong("To"); ui.label(destination.display().to_string());
                     ui.add_space(8.);
@@ -268,31 +281,31 @@ impl MyImageApp {
                     } else {
                         ui.label("Use this folder for new captures and projects only. Existing files and their Recents stay at their current locations.");
                     }
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() { close = true; }
-                        if ui.add(appearance::primary(if *move_existing { "Move and switch" } else { "Use folder" })).clicked() {
+                    ui.horizontal_wrapped(|ui| {
+                        if dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked() { close = true; }
+                        if dialogs::primary(ui, if *move_existing { "Move and switch" } else { "Use folder" }, DialogIcon::OpenProject).clicked() {
                             storage_change = Some((destination.clone(), *move_existing)); close = true;
                         }
                     });
                 }
                 FileDialog::Trash(paths) => {
-                    ui.heading(format!("Move {} file(s) to Trash?",paths.len()));
+
                     ui.label("You can restore them from your system Trash or Recycle Bin. Only the selected files will be moved.");
                     egui::ScrollArea::vertical().max_height(180.).show(ui,|ui| {for p in paths.iter() {ui.label(p.file_name().unwrap_or_default().to_string_lossy());}});
                     ui.add_space(8.);
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {close=true;}
-                        if ui.add(appearance::primary("Move to Trash")).clicked() {operation=Some(Operation::Trash(paths.clone()));close=true;}
+                    ui.horizontal_wrapped(|ui| {
+                        if dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked() {close=true;}
+                        if dialogs::danger(ui, "Move to Trash", DialogIcon::Trash).clicked() {operation=Some(Operation::Trash(paths.clone()));close=true;}
                     });
                 }
                 FileDialog::Rename{path,name,error} => {
-                    ui.heading("Rename file");
+
                     ui.label("Name"); ui.text_edit_singleline(name);
                     ui.weak(format!("The .{} extension is kept.",path.extension().unwrap_or_default().to_string_lossy()));
-                    if let Some(e)=error.as_ref() {ui.colored_label(Color32::DARK_RED,e);}
-                    ui.horizontal(|ui| {
-                        if ui.button("Cancel").clicked() {close=true;}
-                        if ui.add(appearance::primary("Rename")).clicked() {
+                    if let Some(e)=error.as_ref() { dialogs::notice(ui, DialogIcon::Info, "Name unavailable", e, true); }
+                    ui.horizontal_wrapped(|ui| {
+                        if dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked() {close=true;}
+                        if dialogs::primary(ui, "Rename", DialogIcon::Check).clicked() {
                             match library_files::rename_target(path,name) {
                                 Ok(target) if target!=*path && target.exists()=>*error=Some("A file with this name already exists.".into()),
                                 Ok(_)=>{operation=Some(Operation::Rename(path.clone(),name.clone()));close=true;},
@@ -302,7 +315,7 @@ impl MyImageApp {
                     });
                 }
                 FileDialog::Info(path) => {
-                    ui.heading("File info");
+
                     ui.strong(path.file_name().unwrap_or_default().to_string_lossy());
                     ui.label(path.to_string_lossy());
                     match std::fs::metadata(&path) {
@@ -315,7 +328,7 @@ impl MyImageApp {
                         }
                         Err(e)=>{ui.label(e.to_string());}
                     }
-                    if ui.button("Done").clicked(){close=true;}
+                    if dialogs::primary(ui, "Done", DialogIcon::Check).clicked(){close=true;}
                 }
             }
         });

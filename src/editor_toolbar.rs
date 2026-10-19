@@ -1,4 +1,6 @@
 use super::*;
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 
 impl EditorState {
     fn tools(&self) -> Vec<(Tool, &'static str, &'static str)> {
@@ -236,58 +238,58 @@ impl EditorState {
             return;
         }
         let mut open = true;
-        egui::Window::new("Customize toolbar")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .default_width(360.)
-            .show(ctx, |ui| {
-                ui.label("Pin your everyday tools. The others remain in More.");
-                let tools = self.tools();
-                let before = self.toolbar_pins.clone();
-                egui::ScrollArea::vertical()
-                    .max_height(450.)
-                    .show(ui, |ui| {
-                        for (tool, label, _) in tools {
-                            ui.horizontal(|ui| {
-                                let mut pinned = self.toolbar_pins.iter().any(|p| p == label);
-                                if ui.checkbox(&mut pinned, label).changed() {
-                                    if pinned {
-                                        self.toolbar_pins.push(label.into());
-                                    } else {
-                                        self.toolbar_pins.retain(|p| p != label);
-                                    }
+        Dialog::new(
+            "Customize toolbar",
+            "Pin everyday tools. Find the rest in More.",
+            DialogIcon::Settings,
+            390.,
+        )
+        .window(ctx, egui::Id::new("Customize toolbar"), &mut open, |ui| {
+            let tools = self.tools();
+            let before = self.toolbar_pins.clone();
+            egui::ScrollArea::vertical()
+                .max_height(450.)
+                .show(ui, |ui| {
+                    for (tool, label, _) in tools {
+                        ui.horizontal(|ui| {
+                            let mut pinned = self.toolbar_pins.iter().any(|p| p == label);
+                            if ui.checkbox(&mut pinned, label).changed() {
+                                if pinned {
+                                    self.toolbar_pins.push(label.into());
+                                } else {
+                                    self.toolbar_pins.retain(|p| p != label);
                                 }
-                                if let Some(i) = self.toolbar_pins.iter().position(|p| p == label) {
-                                    if ui
-                                        .add_enabled(i > 0, egui::Button::new("↑"))
-                                        .on_hover_text("Move earlier")
-                                        .clicked()
-                                    {
-                                        self.toolbar_pins.swap(i, i - 1);
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            i + 1 < self.toolbar_pins.len(),
-                                            egui::Button::new("↓"),
-                                        )
-                                        .on_hover_text("Move later")
-                                        .clicked()
-                                    {
-                                        self.toolbar_pins.swap(i, i + 1);
-                                    }
-                                    ui.weak(format!("{}", i + 1));
+                            }
+                            if let Some(i) = self.toolbar_pins.iter().position(|p| p == label) {
+                                if ui
+                                    .add_enabled(i > 0, egui::Button::new("↑"))
+                                    .on_hover_text("Move earlier")
+                                    .clicked()
+                                {
+                                    self.toolbar_pins.swap(i, i - 1);
                                 }
-                                let _ = tool;
-                            });
-                        }
-                    });
-                ui.separator();
-                if ui.button("Restore default toolbar").clicked() {
-                    self.toolbar_pins = default_toolbar();
-                }
-                self.toolbar_changed |= before != self.toolbar_pins;
-            });
+                                if ui
+                                    .add_enabled(
+                                        i + 1 < self.toolbar_pins.len(),
+                                        egui::Button::new("↓"),
+                                    )
+                                    .on_hover_text("Move later")
+                                    .clicked()
+                                {
+                                    self.toolbar_pins.swap(i, i + 1);
+                                }
+                                ui.weak(format!("{}", i + 1));
+                            }
+                            let _ = tool;
+                        });
+                    }
+                });
+            ui.separator();
+            if dialogs::secondary(ui, "Restore default toolbar", DialogIcon::Refresh).clicked() {
+                self.toolbar_pins = default_toolbar();
+            }
+            self.toolbar_changed |= before != self.toolbar_pins;
+        });
         self.toolbar_customizer = open;
     }
 }

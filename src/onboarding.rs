@@ -1,5 +1,6 @@
 //! Calico welcome and compact native shortcut guide.
 use crate::appearance::{self, Icon};
+use crate::dialogs::{self, Dialog};
 use eframe::egui::{self, Color32, RichText};
 
 pub const VERSION: u8 = 2;
@@ -9,27 +10,24 @@ pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) 
         return false;
     }
     let mut dismissed = false;
-    egui::Modal::new(egui::Id::new("quick_start"))
-        .frame(egui::Frame::popup(&ctx.style()).fill(appearance::PAPER).corner_radius(16).inner_margin(18))
-        .show(ctx, |ui| {
-            ui.set_width(490.0_f32.min((ctx.content_rect().width() - 64.).max(240.)));
+    Dialog::new("Welcome to MyImage", "Your compact capture and annotation studio.", Icon::Capture, 510.)
+        .modal(ctx, egui::Id::new("quick_start"), |ui| {
             ui.spacing_mut().item_spacing.y = 7.;
             ui.horizontal(|ui| {
-                let (badge, _) = ui.allocate_exact_size(egui::vec2(80., 86.), egui::Sense::hover());
-                ui.painter().circle_filled(badge.center(), 38., appearance::CREAM);
+                let (badge, _) = ui.allocate_exact_size(egui::vec2(64., 68.), egui::Sense::hover());
+                ui.painter().circle_filled(badge.center(), 30., appearance::CREAM);
                 ui.painter().image(calico.id(), badge.shrink(3.), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)), Color32::WHITE);
                 appearance::calico_tabs(ui.painter(), badge.left_bottom() + egui::vec2(24., -2.));
                 ui.add_space(9.);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("WELCOME TO MYIMAGE").size(11.).strong().color(appearance::ACCENT));
-                    ui.label(RichText::new("Small paws. Big ideas.").size(25.).strong().color(appearance::INK));
+                    ui.label(RichText::new("Small paws. Big ideas.").size(23.).strong().color(appearance::INK));
                     ui.label(RichText::new("Capture it. Make it yours.").color(appearance::MUTED));
                 });
             });
             ui.add_space(6.);
             egui::ScrollArea::vertical()
                 .id_salt("quick_start_body")
-                .max_height((ctx.content_rect().height() - 250.).clamp(130., 440.))
+                .max_height((ctx.content_rect().height() - 330.).clamp(110., 400.))
                 .show(ui, |ui| {
                     step_card(ui, "01", Icon::Capture, "Catch a moment", "Capture a region, a window, or your whole screen.", "Ctrl + Shift + .  ·  On Mac, ⌘ + Shift + . also works", appearance::CREAM, appearance::ACCENT);
                     step_card(ui, "02", Icon::Edit, "Make your mark", "Add arrows, text and stamps. Click an object to style it.", "Drag a selection to move pixels; use its handles to adjust the boundary.", Color32::from_rgb(229, 242, 239), Color32::from_rgb(30, 104, 94));
@@ -45,7 +43,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) 
                 });
             ui.add_space(7.);
             ui.horizontal_wrapped(|ui| {
-                if appearance::action_button(ui, "Let's create", Icon::Edit, true, true).clicked() {
+                if dialogs::primary(ui, "Let's create", Icon::Edit).clicked() {
                     dismissed = true;
                 }
                 ui.small(RichText::new("Your calico App menu keeps this guide handy.").color(appearance::MUTED));

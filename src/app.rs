@@ -1,3 +1,5 @@
+use crate::appearance::Icon as DialogIcon;
+use crate::dialogs::{self, Dialog};
 #[path = "capture_session.rs"]
 mod capture_session;
 use crate::{
@@ -1971,7 +1973,7 @@ impl eframe::App for MyImageApp {
                                 ui.set_min_width(210.);
                                 ui.horizontal(|ui| {
                                     ui.strong("MyImage");
-                                    ui.weak(concat!(env!("CARGO_PKG_VERSION"), " · build 45"));
+                                    ui.weak(concat!(env!("CARGO_PKG_VERSION"), " · build 48"));
                                 });
                                 ui.separator();
                                 let enabled = self.document.is_some()
@@ -2147,12 +2149,8 @@ impl eframe::App for MyImageApp {
         }
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(error) = &self.error {
-                egui::Frame::group(ui.style())
-                    .fill(Color32::from_rgb(255, 235, 235))
-                    .show(ui, |ui| {
-                        ui.label(error);
-                    });
-                if ui.small_button("Dismiss message").clicked() {
+                dialogs::notice(ui, DialogIcon::Info, "MyImage needs attention", error, true);
+                if dialogs::secondary(ui, "Dismiss message", DialogIcon::Close).clicked() {
                     self.error = None;
                 }
             }
@@ -2162,11 +2160,15 @@ impl eframe::App for MyImageApp {
                 .and_then(|desktop| desktop.hotkey_error())
                 .map(str::to_string)
             {
-                ui.colored_label(
-                    Color32::YELLOW,
-                    format!("Capture shortcut unavailable: {error}"),
+                dialogs::notice(
+                    ui,
+                    DialogIcon::Capture,
+                    "Capture shortcut unavailable",
+                    &error,
+                    true,
                 );
-                if ui.button("Retry unavailable shortcuts").clicked()
+                if dialogs::secondary(ui, "Retry unavailable shortcuts", DialogIcon::Refresh)
+                    .clicked()
                     && let Some(desktop) = &mut self.desktop
                 {
                     let _ = desktop.retry_hotkey();
@@ -2224,25 +2226,22 @@ impl eframe::App for MyImageApp {
             self.calico.stop();
         }
         if let Some(action) = self.pending_action.clone() {
-            egui::Modal::new(egui::Id::new("unsaved_document")).show(ctx, |ui| {
-                ui.set_width(390.0);
-                ui.heading("Save your changes?");
+            let prompt = Dialog::new("Save your changes?", "Keep your work ready for next time.", DialogIcon::Save, 470.).modal(ctx, egui::Id::new("unsaved_document"), |ui| {
                 ui.label(
                     "Save an editable project to keep the original image, image edits, and every annotation.",
                 );
                 if self.has_unsaved_capture() {
                     ui.label("This image has no saved copy yet.");
                 }
-                ui.add_space(12.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                dialogs::actions(ui, |ui| {
+                    if dialogs::secondary(ui, "Keep editing", DialogIcon::Back).clicked() {
                         self.pending_action = None;
                     }
-                    if ui.button("Discard changes").clicked() {
+                    if dialogs::danger(ui, "Discard changes", DialogIcon::Trash).clicked() {
                         self.pending_action = None;
                         self.perform_action(ctx, action.clone(), true);
                     }
-                    if ui.add(appearance::primary("Save and continue")).clicked()
+                    if dialogs::primary(ui, "Save and continue", DialogIcon::Save).clicked()
                         && self.save_project(ctx, false)
                     {
                         self.pending_action = None;
@@ -2250,6 +2249,9 @@ impl eframe::App for MyImageApp {
                     }
                 });
             });
+            if prompt.should_close() {
+                self.pending_action = None;
+            }
         }
         self.autosave(ctx);
     }

@@ -17,6 +17,7 @@ mod capture;
 mod capture_magnifier;
 mod capture_panel;
 mod desktop;
+mod dialogs;
 mod document;
 mod editor;
 mod export;
