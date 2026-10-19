@@ -20,6 +20,8 @@ const MAX_TEXTURE_BYTES: usize = 32 * 1024 * 1024;
 const MAX_REPLIES_PER_FRAME: usize = 2;
 #[path = "library_actions.rs"]
 mod actions;
+#[path = "library_availability.rs"]
+mod availability;
 #[path = "library_browser.rs"]
 mod browser;
 #[path = "library_selection.rs"]
@@ -62,11 +64,13 @@ type Calendar = BTreeMap<i32, BTreeMap<u32, BTreeMap<NaiveDate, usize>>>;
 
 enum Request {
     Scan(u64, PathBuf),
+    CheckPaths(u64, Vec<PathBuf>),
     Thumbnail(u64, LibraryEntry),
 }
 
 enum Reply {
     Scan(u64, Result<LibraryIndex, String>),
+    Missing(u64, Vec<PathBuf>),
     Thumbnail(u64, PathBuf, Result<PreparedThumbnail, String>),
 }
 
@@ -98,16 +102,29 @@ impl Worker {
             .spawn(move || {
                 while let Ok(request) = receive.recv() {
                     let version = match &request {
-                        Request::Scan(version, _) | Request::Thumbnail(version, _) => *version,
+                        Request::Scan(version, _)
+                        | Request::Thumbnail(version, _)
+                        | Request::CheckPaths(version, _) => *version,
                     };
                     if version != generation.load(Ordering::Relaxed) {
                         continue;
                     }
                     let reply = match request {
+                        Request::CheckPaths(version, paths) => Reply::Missing(
+                            version,
+                            paths
+                                .into_iter()
+                                .filter(|p| crate::library_files::is_missing(p))
+                                .collect(),
+                        ),
                         Request::Scan(version, root) => Reply::Scan(version, library::scan(&root)),
                         Request::Thumbnail(version, entry) => {
                             let result = library::thumbnail(&entry).map(PreparedThumbnail::from);
-                            Reply::Thumbnail(version, entry.path, result)
+                            if result.is_err() && crate::library_files::is_missing(&entry.path) {
+                                Reply::Missing(version, vec![entry.path])
+                            } else {
+                                Reply::Thumbnail(version, entry.path, result)
+                            }
                         }
                     };
                     if version == generation.load(Ordering::Relaxed) {
@@ -159,6 +176,8 @@ pub struct LibraryPanel {
     selection: FileSelection,
     recent_selection: FileSelection,
     pending: HashSet<PathBuf>,
+    checked_paths: HashMap<PathBuf, std::time::Instant>,
+    missing_paths: HashSet<PathBuf>,
     previews: HashMap<PathBuf, CachedPreview>,
     preview_bytes: usize,
     frame: u64,
@@ -189,6 +208,8 @@ impl Default for LibraryPanel {
             selection: FileSelection::default(),
             recent_selection: FileSelection::default(),
             pending: HashSet::new(),
+            checked_paths: HashMap::new(),
+            missing_paths: HashSet::new(),
             previews: HashMap::new(),
             preview_bytes: 0,
             frame: 0,
@@ -224,7 +245,10 @@ impl LibraryPanel {
         let mut entries = Vec::new();
         let mut seen = HashSet::new();
         for path in paths.iter().take(24) {
-            if !self.preferences.hidden_recents.contains(path) && seen.insert(path.clone()) {
+            if !self.preferences.hidden_recents.contains(path)
+                && !self.missing_paths.contains(path)
+                && seen.insert(path.clone())
+            {
                 entries.push(LibraryEntry {
                     path: path.clone(),
                     name: path
@@ -258,6 +282,7 @@ impl LibraryPanel {
             }
         }
         let order: Vec<_> = entries.iter().map(|e| e.path.clone()).collect();
+        self.check_paths(ui.ctx(), &order);
         self.recent_selection.retain(&order);
         let mut chosen = None;
         ui.horizontal(|ui| {
@@ -414,6 +439,7 @@ impl LibraryPanel {
         self.filtered.clear();
         self.filter_dirty = true;
         self.pending.clear();
+        self.checked_paths.clear();
         self.previews.clear();
         self.preview_bytes = 0;
         self.error = None;
@@ -443,6 +469,9 @@ impl LibraryPanel {
         let generation = self.generation.load(Ordering::Relaxed);
         for reply in replies {
             match reply {
+                Reply::Missing(version, paths) if version == generation => {
+                    self.note_missing(&paths)
+                }
                 Reply::Scan(version, result) if version == generation => {
                     self.scanning = false;
                     match result {
@@ -455,7 +484,9 @@ impl LibraryPanel {
                         Err(error) => self.error = Some(error),
                     }
                 }
-                Reply::Thumbnail(version, path, result) if version == generation => {
+                Reply::Thumbnail(version, path, result)
+                    if version == generation && !self.missing_paths.contains(&path) =>
+                {
                     self.pending.remove(&path);
                     let (preview, bytes) = match result {
                         Ok(thumbnail) => {

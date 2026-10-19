@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 1.11](https://github.com/gokcol/MyImage/releases/tag/v1.11) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
+[Download MyImage 1.11.1](https://github.com/gokcol/MyImage/releases/tag/v1.11.1) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -353,3 +353,9 @@ On Mac, quit MyImage after saving, open the disk image, and drag MyImage into Ap
 For maintainers, `cargo run -p xtask -- install` installs the prepared local bundle transactionally: it requires a newer build, verifies the distributor signature and Gatekeeper acceptance, refuses running apps, byte-verifies the staging copy and rollback ZIP, and restores the previous app on failed verification. It preserves one rollback ZIP under `backups/` and never changes user data or TCC permission records. `--allow-signing-migration` explicitly permits the one-time transition from local development signing to the official Developer ID; macOS may require a fresh Screen Recording grant for that transition. Future releases keep the same Developer ID. Updates are downloaded deliberately through GitHub Releases; the app does not silently download or replace itself.
 
 Public macOS packages use `MYIMAGE_DISTRIBUTION=1 MYIMAGE_SIGNING_IDENTITY=<certificate-fingerprint> cargo run -p xtask -- bundle`, followed by `cargo run -p xtask -- notarize <existing-keychain-profile>`. This enables the hardened runtime and timestamp, submits to Apple, staples and validates the ticket, assesses Gatekeeper acceptance, and rebuilds the ZIP with the stapled app. Credentials stay in the macOS Keychain and must never be committed or uploaded to GitHub.
+
+### Direct canvas handles
+
+Eight small square handles surround the canvas in Editor. Drag a corner or edge midpoint to resize the canvas with a live dimension readout. Artwork keeps its size: new space is transparent and shrinking hides content without deleting it. Grow the canvas again to reveal it, including after saving and reopening a `.myimage` project. Press Escape to cancel; a completed drag is one Undo step. Deselect a pixel region to reveal canvas handles, so region handles retain priority.
+
+Recents and cached Library thumbnails check file availability in the background while visible. Files deleted externally are removed from navigation and selection automatically, including persisted recent references. Missing-file actions clear stale entries without repeated filesystem errors. This never closes the in-memory image or discards unsaved edits; unreadable or corrupt files are not treated as missing.

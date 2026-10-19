@@ -18,6 +18,22 @@ pub(super) enum FileDialog {
     Info(PathBuf),
 }
 impl MyImageApp {
+    pub(super) fn sync_library_references(&mut self) {
+        let missing = self.library.take_missing_paths();
+        if !missing.is_empty() {
+            self.settings.recent_files.retain(|p| !missing.contains(p));
+        }
+        let preferences = self.library.take_preferences_change();
+        let changed = preferences.is_some() || !missing.is_empty();
+        if let Some(preferences) = preferences {
+            self.settings.library = preferences;
+        }
+        if changed {
+            self.persist_settings();
+        }
+        // The open in-memory document is intentionally untouched, including edits.
+    }
+
     fn begin_storage_change(
         &mut self,
         ctx: &egui::Context,
@@ -181,8 +197,9 @@ impl MyImageApp {
         }
         self.settings
             .recent_files
-            .retain(|p| !result.removed.contains(p));
+            .retain(|p| !result.removed.contains(p) && !result.missing.contains(p));
         self.library.forget_paths(&result.removed);
+        self.library.forget_paths(&result.missing);
         for (old, new) in &result.renamed {
             for p in &mut self.settings.recent_files {
                 if p == old {
@@ -214,6 +231,11 @@ impl MyImageApp {
             format!("Duplicated {} file(s)", result.created.len())
         } else if !result.renamed.is_empty() {
             "File renamed".into()
+        } else if !result.missing.is_empty() {
+            format!(
+                "Removed {} missing file(s) from Library and Recents",
+                result.missing.len()
+            )
         } else {
             "No files changed".into()
         };

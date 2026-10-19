@@ -1,5 +1,13 @@
 # Release validation — MyImage
 
+## Version 1.11.1 — build 49
+
+Editor now exposes eight compact canvas resize handles outside the image. Corner and edge drags change the visible canvas window while retaining the original pixels, annotations, crop, rotation, flip and cut-out state. Growing adds transparency; shrinking keeps hidden content editable and recoverable by later expansion, including after saving/reopening. The drag uses a fixed input frame and a reusable bounded composition texture, with live dimensions, resize cursors, Escape cancellation and one Undo step. Pixel-selection handles take priority; blank canvas presses do not swap preview textures. Fit and pointer-anchored pinch reserve room for the handles.
+
+Recents and cached Library previews check missing paths on the existing background worker while visible, at most once per path per five seconds. Confirmed missing files are removed from browser entries, thumbnails, selection, favorites and persisted Recents. Permission errors and corrupt files remain available for diagnosis. Missing-file races during Open, Trash, Duplicate and Rename no longer produce repeated filesystem errors, and an in-memory document is preserved even when its source disappears.
+
+Validation: 419 application tests and 15 packaging tests passed; 16 diagnostic/integration tests were explicitly ignored. Formatting, diff whitespace and strict workspace Clippy passed. Coverage includes all eight handles across drawing tools, stationary drag sampling, click-only and quick gestures, invalid sizes, cancellation, keyboard Undo focus, hidden-layer save/reopen under rotation/flip/nonuniform resize, pinch anchoring, background availability checks and missing-file operations. Native macOS review verified transparent growth, shrink/reveal, immediate Undo/Redo, project saving, and automatic removal of an externally deleted selected recent entry while its unsaved arrow and in-memory image remained intact. The isolated review app was closed and removed. Windows interactive validation remains deferred; final tagged-source CI, signatures and notarization are recorded in the GitHub release notes.
+
 ## Version 1.11.0 — build 48 (release tag v1.11)
 
 This release combines build 46's editable drawing beyond the canvas with the Studio Contrast dialogs reviewed in build 47. The two-part public tag `v1.11` maps exactly to package version `1.11.0`; the Windows workflow validates that normalization before uploading its explicitly UNTESTED package. Project format 18 and the stable macOS bundle/signing identity are unchanged.

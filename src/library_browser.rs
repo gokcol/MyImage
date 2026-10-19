@@ -111,6 +111,8 @@ impl LibraryPanel {
         self.receive(ui.ctx());
         self.request_scan(ui.ctx(), root);
         self.update_filter();
+        let cached: Vec<_> = self.previews.keys().cloned().collect();
+        self.check_paths(ui.ctx(), &cached);
         let mut action = None;
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(8., 6.);

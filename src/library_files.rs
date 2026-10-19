@@ -20,9 +20,14 @@ impl Operation {
 #[derive(Default)]
 pub struct Outcome {
     pub removed: Vec<PathBuf>,
+    pub missing: Vec<PathBuf>,
     pub renamed: Vec<(PathBuf, PathBuf)>,
     pub created: Vec<PathBuf>,
     pub errors: Vec<String>,
+}
+pub fn is_missing(path: &Path) -> bool {
+    // Permission errors and unreadable/corrupt files must remain visible.
+    matches!(fs::metadata(path), Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory))
 }
 fn regular_file(path: &Path) -> Result<(), String> {
     let m = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
@@ -115,6 +120,10 @@ pub fn run(operation: Operation) -> Outcome {
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>()
     {
+        if is_missing(&path) {
+            outcome.missing.push(path);
+            continue;
+        }
         let result = regular_file(&path).and_then(|_| match &operation {
             Operation::Trash(_) => trash(&path).map(|_| outcome.removed.push(path.clone())),
             Operation::Duplicate(_) => duplicate(&path).map(|p| outcome.created.push(p)),
@@ -123,7 +132,11 @@ pub fn run(operation: Operation) -> Outcome {
             }
         });
         if let Err(e) = result {
-            outcome.errors.push(format!("{}: {e}", path.display()));
+            if is_missing(&path) {
+                outcome.missing.push(path);
+            } else {
+                outcome.errors.push(format!("{}: {e}", path.display()));
+            }
         }
     }
     outcome
@@ -196,6 +209,36 @@ pub fn reveal(path: &Path) -> Result<(), String> {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn missing_files_are_forgotten_without_trash_errors_or_neighbor_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("deleted.png");
+        let present = dir.path().join("keep.png");
+        std::fs::write(&present, b"keep").unwrap();
+        for op in [
+            super::Operation::Trash(vec![missing.clone()]),
+            super::Operation::Duplicate(vec![missing.clone()]),
+            super::Operation::Rename(missing.clone(), "renamed".into()),
+        ] {
+            let result = super::run(op);
+            assert_eq!(result.missing, vec![missing.clone()]);
+            assert!(
+                result.errors.is_empty()
+                    && result.removed.is_empty()
+                    && result.created.is_empty()
+                    && result.renamed.is_empty()
+            );
+        }
+        assert!(
+            !super::is_missing(&present),
+            "Unreadable image contents are not a missing file"
+        );
+        assert!(
+            !super::is_missing(dir.path()),
+            "An existing directory is not missing"
+        );
+        assert_eq!(std::fs::read(present).unwrap(), b"keep");
+    }
     use super::*;
     #[test]
     fn duplicate_and_rename_preserve_bytes_extension_and_existing_files() {

@@ -55,6 +55,7 @@ enum WorkEvent {
     ),
     Saved(Arc<image::RgbaImage>, Result<PathBuf, String>, bool),
     Opened(PathBuf, bool, Result<Document, String>),
+    MissingOpen(PathBuf),
     Prepared(
         PathBuf,
         Result<crate::image_loading::PreparedDocument, String>,
@@ -711,7 +712,12 @@ impl MyImageApp {
             let tx = self.work_tx.clone();
             let worker_ctx = ctx.clone();
             match crate::image_loading::Loader::start(move |path, result| {
-                let _ = tx.send(WorkEvent::Prepared(path, result));
+                let event = if result.is_err() && crate::library_files::is_missing(&path) {
+                    WorkEvent::MissingOpen(path)
+                } else {
+                    WorkEvent::Prepared(path, result)
+                };
+                let _ = tx.send(event);
                 worker_ctx.request_repaint();
             }) {
                 Ok(loader) => self.image_loader = Some(loader),
@@ -1145,6 +1151,19 @@ impl MyImageApp {
                         self.request_quit(ctx);
                     }
                 }
+                WorkEvent::MissingOpen(path) => {
+                    self.busy = false;
+                    self.settings.recent_files.retain(|p| p != &path);
+                    self.library.forget_paths(&[path]);
+                    self.sync_library_references();
+                    self.library.refresh();
+                    self.error = None;
+                    self.status =
+                        "That file is no longer on disk. Its missing entry was removed.".into();
+                    if std::mem::take(&mut self.quit_after_work) {
+                        self.request_quit(ctx);
+                    }
+                }
                 WorkEvent::Prepared(path, result) => {
                     self.busy = false;
                     match result {
@@ -1506,10 +1525,7 @@ impl MyImageApp {
 
     fn library_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let action = self.library.ui(ui, &self.settings.output_dir);
-        if let Some(preferences) = self.library.take_preferences_change() {
-            self.settings.library = preferences;
-            self.persist_settings();
-        }
+        self.sync_library_references();
         if let Some(action) = action {
             self.library_action(ctx, action);
         }
@@ -2140,10 +2156,7 @@ impl eframe::App for MyImageApp {
                         if let Some(action) = chosen {
                             self.library_action(ctx, action);
                         }
-                        if let Some(preferences) = self.library.take_preferences_change() {
-                            self.settings.library = preferences;
-                            self.persist_settings();
-                        }
+                        self.sync_library_references();
                     }
                 });
         }

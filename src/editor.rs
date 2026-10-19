@@ -17,6 +17,8 @@ mod annotation_presets;
 mod annotation_selection;
 #[path = "area_selection.rs"]
 mod area_selection;
+#[path = "canvas_handles.rs"]
+mod canvas_handles;
 #[path = "canvas_tools.rs"]
 mod canvas_tools;
 #[path = "object_canvas.rs"]
@@ -238,6 +240,7 @@ pub struct EditorState {
     crop: Option<CropDraft>,
     resize: Option<ResizeDraft>,
     canvas_size: Option<canvas_tools::CanvasDraft>,
+    canvas_resize: Option<canvas_handles::CanvasResize>,
     layers_open: bool,
     presets_open: bool,
     presets: annotation_presets::PresetState,
@@ -308,6 +311,7 @@ impl Default for EditorState {
             crop: None,
             resize: None,
             canvas_size: None,
+            canvas_resize: None,
             layers_open: false,
             presets_open: false,
             presets: Default::default(),
@@ -356,6 +360,7 @@ impl EditorState {
     /// Complete annotation gestures and discard unapplied image-tool previews
     /// before saving, hiding, exporting, or switching to another workspace.
     pub fn finish_gesture(&mut self, document: &mut Document, history: &mut EditHistory) {
+        self.finish_canvas_resize(document, history);
         self.finish_properties(document, history);
         self.finish_text_editor(document, history, true);
         self.finish_area_drag(document, history);
@@ -365,6 +370,7 @@ impl EditorState {
 
     pub fn autosave_ready(&self) -> bool {
         self.gesture.is_none()
+            && self.canvas_resize.is_none()
             && self.area_drag.is_none()
             && !self.extra_tools.busy()
             && !self.fill_tool.busy()
@@ -383,6 +389,7 @@ impl EditorState {
     }
 
     pub fn cancel_image_tools(&mut self) {
+        self.canvas_resize = None;
         self.crop = None;
         self.resize = None;
         self.canvas_size = None;
@@ -539,7 +546,7 @@ impl EditorState {
             .ctx()
             .memory(|m| m.focused())
             .is_some_and(|id| egui::text_edit::TextEditState::load(ui.ctx(), id).is_some());
-        if !modal_open && !text_input_focused {
+        if !modal_open && !text_input_focused && self.canvas_resize.is_none() {
             if self.gesture.is_none()
                 && self.area_drag.is_none()
                 && ui.is_enabled()
@@ -1301,17 +1308,16 @@ impl EditorState {
         let [width, height] = document.output_size();
         let image_size = Vec2::new(width as f32, height as f32);
         if self.fit {
-            self.zoom = ((viewport.x - 2.0) / image_size.x)
-                .min((viewport.y - 2.0) / image_size.y)
-                .clamp(0.001, 1.0);
+            self.zoom = canvas_handles::fit_scale(viewport, image_size);
         }
-        let pinch_offset = crate::canvas_zoom::prepare(
+        let pinch_offset = crate::canvas_zoom::prepare_with_gutter(
             ui,
             "annotation-canvas-scroll",
             &mut self.zoom,
             &mut self.fit,
             true,
-            self.gesture.is_none() && self.area_drag.is_none(),
+            self.gesture.is_none() && self.area_drag.is_none() && self.canvas_resize.is_none(),
+            canvas_handles::GUTTER,
         );
         let scale = self.zoom;
         let image_size = image_size * scale;
@@ -1326,8 +1332,12 @@ impl EditorState {
                 ..Default::default()
             })
             .show_viewport(ui, |ui, visible| {
-                let (space, _) =
-                    ui.allocate_exact_size(visible.size().max(image_size), Sense::hover());
+                let (space, _) = ui.allocate_exact_size(
+                    visible
+                        .size()
+                        .max(image_size + Vec2::splat(canvas_handles::GUTTER * 2.)),
+                    Sense::hover(),
+                );
                 let rect =
                     Rect::from_min_size(space.min + (space.size() - image_size) * 0.5, image_size);
                 crate::canvas_zoom::remember(
@@ -1337,6 +1347,11 @@ impl EditorState {
                     Rect::from_min_size(space.min + visible.min.to_vec2(), visible.size())
                         .intersect(ui.clip_rect()),
                 );
+                let (canvas_resizing, painted_resize) =
+                    self.canvas_resize_ui(ui, document, history, rect, scale, viewport);
+                if painted_resize {
+                    return;
+                }
                 let stamp_payload =
                     egui::DragAndDrop::has_payload_of_type::<crate::stamps::StampSource>(ui.ctx());
                 let draw_in_margin = self.draws_objects() || stamp_payload;
@@ -1380,7 +1395,7 @@ impl EditorState {
                         _ => None,
                     })
                 });
-                if ui.is_enabled()
+                if (ui.is_enabled() && !canvas_resizing)
                     && self.selected.is_some()
                     && let Some(position) = press
                     && space.intersect(ui.clip_rect()).contains(position)
@@ -1392,7 +1407,7 @@ impl EditorState {
                     self.clear_selection();
                     self.object_press = false;
                 }
-                if ui.is_enabled()
+                if (ui.is_enabled() && !canvas_resizing)
                     && !matches!(
                         self.tool,
                         Tool::Fill | Tool::Wand | Tool::Pen | Tool::Eraser
@@ -1475,7 +1490,9 @@ impl EditorState {
 
                 // Keep every pointer sample, including a complete quick scribble
                 // in one frame. Reading only interact_pos would discard corners.
-                if ui.is_enabled() && matches!(self.tool, Tool::Pen | Tool::Eraser) {
+                if (ui.is_enabled() && !canvas_resizing)
+                    && matches!(self.tool, Tool::Pen | Tool::Eraser)
+                {
                     let events = ui.input(|i| i.events.clone());
                     for event in events {
                         match event {
@@ -1523,7 +1540,7 @@ impl EditorState {
                 }
 
                 let mut stamp_dropped = false;
-                if ui.is_enabled()
+                if (ui.is_enabled() && !canvas_resizing)
                     && let Some(position) = ui.input(|i| i.pointer.interact_pos())
                     && hit_rect.intersect(ui.clip_rect()).contains(position)
                     && let Some(source) =
@@ -1569,7 +1586,7 @@ impl EditorState {
                     }
                 }
                 if self.tool == Tool::Crop
-                    && ui.is_enabled()
+                    && (ui.is_enabled() && !canvas_resizing)
                     && let Some(crop) = &mut self.crop
                 {
                     if let Some(start) = crop.drag_start
@@ -1585,7 +1602,7 @@ impl EditorState {
                         crop.drag_start = None;
                     }
                 }
-                if self.area_drag.is_some() && ui.is_enabled() {
+                if self.area_drag.is_some() && (ui.is_enabled() && !canvas_resizing) {
                     for position in ui.input(|i| {
                         i.events
                             .iter()
@@ -1618,7 +1635,7 @@ impl EditorState {
                 }
                 if self.gesture.is_some()
                     && !matches!(self.tool, Tool::Pen | Tool::Eraser)
-                    && ui.is_enabled()
+                    && (ui.is_enabled() && !canvas_resizing)
                     && let Some(position) = ui.input(|i| i.pointer.interact_pos())
                 {
                     let point = object_point(position, rect, scale, document);
@@ -1636,7 +1653,7 @@ impl EditorState {
                     || margin_response.has_focus()
                     || self.gesture.is_some()
                     || self.area_drag.is_some())
-                    && ui.is_enabled()
+                    && (ui.is_enabled() && !canvas_resizing)
                 {
                     self.keyboard(ui, document, history);
                 }
@@ -1647,15 +1664,18 @@ impl EditorState {
                     let [w, h] = document.output_size();
                     let size = egui::vec2(w as f32, h as f32);
                     if self.fit {
-                        self.zoom = ((viewport.x - 2.) / size.x)
-                            .min((viewport.y - 2.) / size.y)
-                            .clamp(0.001, 1.);
+                        self.zoom = canvas_handles::fit_scale(viewport, size);
                     }
                     let size = size * self.zoom;
                     ui.ctx().request_repaint();
                     (
                         Rect::from_min_size(
-                            space.min + (visible.size().max(size) - size) * 0.5,
+                            space.min
+                                + (visible
+                                    .size()
+                                    .max(size + Vec2::splat(canvas_handles::GUTTER * 2.))
+                                    - size)
+                                    * 0.5,
                             size,
                         ),
                         self.zoom,
@@ -1681,9 +1701,7 @@ impl EditorState {
                 let (paint_rect, display_scale) = if live_fit {
                     let [w, h] = display_document.output_size();
                     let size = egui::vec2(w as f32, h as f32);
-                    let zoom = ((viewport.x - 2.) / size.x)
-                        .min((viewport.y - 2.) / size.y)
-                        .clamp(0.001, 1.);
+                    let zoom = canvas_handles::fit_scale(viewport, size);
                     (Rect::from_center_size(rect.center(), size * zoom), zoom)
                 } else {
                     (
@@ -1849,7 +1867,7 @@ impl EditorState {
                 if expansion.is_none() {
                     self.paint_snap_guides(&painter, rect, scale);
                 }
-                if ui.is_enabled()
+                if (ui.is_enabled() && !canvas_resizing)
                     && let Some(source) = response.dnd_hover_payload::<crate::stamps::StampSource>()
                     && let Some(position) = ui.input(|i| i.pointer.interact_pos())
                     && let Ok(texture) = crate::stamps::texture(ui.ctx(), &source)
@@ -1924,8 +1942,18 @@ impl EditorState {
                 if let Some(cursor) = self.active_gesture_cursor(document) {
                     ui.ctx().set_cursor_icon(cursor);
                 }
-                response.context_menu(|ui| self.canvas_menu(ui, document, history));
-                self.floating_properties(ui, document, history, rect.min, scale, ui.clip_rect());
+                if !canvas_resizing {
+                    response.context_menu(|ui| self.canvas_menu(ui, document, history));
+                    self.floating_properties(
+                        ui,
+                        document,
+                        history,
+                        rect.min,
+                        scale,
+                        ui.clip_rect(),
+                    );
+                }
+                self.paint_canvas_handles(ui, document, paint_rect);
             });
     }
 
@@ -4255,7 +4283,8 @@ mod tests {
             let body = image.min + Vec2::new(300., 250.) * zoom;
             let handle = image.min + Vec2::new(450., 250.) * zoom + Vec2::new(2., 2.);
             let blank = image.min + Vec2::new(100., 60.) * zoom;
-            let margin = Pos2::new(image.left() - 10., image.center().y);
+            // Blank margin away from the new canvas edge handles.
+            let margin = Pos2::new(image.left() - 10., image.center().y + 40.);
             for (at, selected) in [
                 (body, Some(0)),
                 (handle, Some(0)),
@@ -4659,7 +4688,7 @@ mod tests {
                 "whole growing image must fit: {bounds:?} in {:?}",
                 mesh.0
             );
-            assert!(bounds.width() > 215. && bounds.width() < 224.);
+            assert!(bounds.width() > 190. && bounds.width() + canvas_handles::GUTTER * 2. <= 224.);
             assert!(
                 bounds.height() < 105.,
                 "the view must already zoom out before release"

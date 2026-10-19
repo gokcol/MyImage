@@ -21,6 +21,18 @@ pub fn prepare(
     centered: bool,
     enabled: bool,
 ) -> Option<Vec2> {
+    prepare_with_gutter(ui, salt, zoom, fit, centered, enabled, 0.)
+}
+
+pub fn prepare_with_gutter(
+    ui: &egui::Ui,
+    salt: &str,
+    zoom: &mut f32,
+    fit: &mut bool,
+    centered: bool,
+    enabled: bool,
+    gutter: f32,
+) -> Option<Vec2> {
     let id = ui.make_persistent_id(Id::new(salt));
     let frame = ui
         .ctx()
@@ -43,14 +55,14 @@ pub fn prepare(
     let ratio = next / *zoom;
     let size = frame.image.size() * ratio;
     let padding = if centered {
-        (frame.viewport.size() - size).max(Vec2::ZERO) * 0.5
+        ((frame.viewport.size() - size) * 0.5).max(Vec2::splat(gutter))
     } else {
         Vec2::ZERO
     };
     let anchor = (pointer - frame.image.min) * ratio;
     let offset = (padding + anchor - (pointer - frame.viewport.min))
         .max(Vec2::ZERO)
-        .min((size - frame.viewport.size()).max(Vec2::ZERO));
+        .min((size + Vec2::splat(gutter * 2.) - frame.viewport.size()).max(Vec2::ZERO));
     *zoom = next;
     *fit = false;
     // Clear kinetic scrolling so it cannot compete with the pinch anchor.
@@ -64,6 +76,50 @@ pub fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinch_accounts_for_canvas_handle_gutter() {
+        let ctx = egui::Context::default();
+        let mut zoom = 1.;
+        let mut fit = false;
+        let viewport = Rect::from_min_size(egui::pos2(8., 8.), Vec2::splat(200.));
+        let image = Rect::from_min_size(viewport.min + Vec2::splat(12.), Vec2::splat(300.));
+        let pointer = egui::pos2(100., 90.);
+        for events in [
+            vec![egui::Event::PointerMoved(pointer)],
+            vec![egui::Event::Zoom(2.)],
+        ] {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, Vec2::splat(400.))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if let Some(offset) = prepare_with_gutter(
+                            ui,
+                            "gutter-test",
+                            &mut zoom,
+                            &mut fit,
+                            true,
+                            true,
+                            12.,
+                        ) {
+                            assert_eq!(
+                                viewport.min + Vec2::splat(12.) + (pointer - image.min) * 2.
+                                    - offset,
+                                pointer
+                            );
+                            assert_eq!(zoom, 2.);
+                        }
+                        remember(ui, "gutter-test", image, viewport);
+                    });
+                },
+            );
+        }
+        assert_eq!(zoom, 2.);
+    }
 
     #[test]
     fn native_pinch_preserves_pointer_anchor_and_ignores_inspector_or_drag_input() {
