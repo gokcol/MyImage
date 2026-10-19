@@ -27,15 +27,23 @@ jobs:
       - name: Build native Windows executable
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
       - name: Package untested build
+        id: package
         shell: pwsh
         run: |
+          $metadata = cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot read package version' }
+          $version = ($metadata.packages | Where-Object name -eq 'myimage').version
+          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { throw 'Invalid package version' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          $file = "dist/MyImage-$version-windows-x64-UNTESTED.zip"
+          "archive=$file" >> $env:GITHUB_OUTPUT
           New-Item -ItemType Directory -Force dist/MyImage | Out-Null
           Copy-Item target/x86_64-pc-windows-msvc/release/myimage.exe dist/MyImage/MyImage.exe
           Copy-Item LICENSE dist/MyImage/LICENSE.txt
           Copy-Item assets/stamps/LICENSE-GRAPHICS dist/MyImage/Twemoji-LICENSE.txt
           Copy-Item assets/stamps/ATTRIBUTION.txt dist/MyImage/Twemoji-ATTRIBUTION.txt
-          @'
-          MyImage 1.0.0 — Windows x64 — UNTESTED
+          @"
+          MyImage $version — Windows x64 — UNTESTED
           This package was compiled on GitHub Actions. It has NOT been tested interactively on Windows.
           Screen capture, shortcuts, clipboard, scaling and installation require real-device validation.
           The executable is unsigned; Windows may display a publisher/SmartScreen warning.
@@ -43,17 +51,16 @@ jobs:
           To update, save your work and quit MyImage from its tray menu before replacing the extracted folder.
           To uninstall, quit and delete only this application folder. Pictures/MyImage, projects, settings and recovery copies are preserved.
           Source and releases: https://github.com/gokcol/MyImage
-          '@ | Set-Content dist/MyImage/READ-ME-UNTESTED.txt
-          Compress-Archive -Path dist/MyImage -DestinationPath dist/MyImage-1.0.0-windows-x64-UNTESTED.zip
-          $file = 'dist/MyImage-1.0.0-windows-x64-UNTESTED.zip'
+          "@ | Set-Content dist/MyImage/READ-ME-UNTESTED.txt
+          Compress-Archive -Path dist/MyImage -DestinationPath $file
           $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
           "$hash  $(Split-Path $file -Leaf)" | Set-Content "$file.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: MyImage-Windows-x64-UNTESTED
           path: |
-            dist/MyImage-1.0.0-windows-x64-UNTESTED.zip
-            dist/MyImage-1.0.0-windows-x64-UNTESTED.zip.sha256
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
           if-no-files-found: error
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
@@ -61,7 +68,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
+          PACKAGE_ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
           if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?$') { throw 'Invalid release tag' }
-          gh release upload $env:RELEASE_TAG dist/MyImage-1.0.0-windows-x64-UNTESTED.zip dist/MyImage-1.0.0-windows-x64-UNTESTED.zip.sha256 --repo $env:GITHUB_REPOSITORY
+          if ($env:RELEASE_TAG -ne "v$env:PACKAGE_VERSION") { throw 'Release tag does not match package version' }
+          gh release upload $env:RELEASE_TAG $env:PACKAGE_ARCHIVE "$($env:PACKAGE_ARCHIVE).sha256" --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }

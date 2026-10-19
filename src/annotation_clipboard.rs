@@ -344,7 +344,7 @@ impl EditorState {
                 document.annotations.push(plan.removal);
                 history.commit(plan.before, document);
                 let focus = self.focus_canvas;
-                self.set_area_move_mode(false, document);
+                self.deselect_pixels();
                 self.focus_canvas = focus;
                 self.confirm_copy(format!("{w} × {h} px · Cut to transparency"));
                 Ok(format!("Copied to clipboard · {w} × {h} px. Cut area is transparent. Undo restores it."))
@@ -766,6 +766,8 @@ mod tests {
                     .unwrap()
                     .contains("40 × 20 px")
             );
+            assert!(e.area.is_none() && e.selected.is_none());
+            assert!(e.area_mask.is_empty() && e.pixel_mask.is_none());
             assert!(Arc::ptr_eq(&d.image, &pixels));
             assert_eq!(d.annotations.len(), 1);
             let flat = render::flatten(&d).unwrap();
@@ -856,7 +858,8 @@ mod tests {
                 .unwrap()
                 .contains("70 × 80 px")
         );
-        assert_eq!(e.area.unwrap().size(), egui::vec2(70., 80.));
+        assert!(e.area.is_none());
+        assert!(e.selected.is_none());
     }
 
     #[test]
@@ -990,6 +993,18 @@ mod tests {
             let y = 40. + (i / 5) as f32 * 160.;
             let mut a = object(kind, [x, y], [x + 60., y + 55.]);
             a.layer.name = format!("Annotation {}", i + 1);
+            if kind == AnnotationKind::Arrow {
+                a.arrow.curve = Some([
+                    Point {
+                        x: x + 20.,
+                        y: y - 20.,
+                    },
+                    Point {
+                        x: x + 40.,
+                        y: y + 75.,
+                    },
+                ]);
+            }
             if kind == AnnotationKind::Text || kind == AnnotationKind::Callout {
                 a.text = "Editable ✓".into();
             }

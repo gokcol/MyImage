@@ -260,6 +260,11 @@ impl EditorState {
                     matches!(target, LayerTarget::Annotation(_)),
                     document,
                 );
+                // Choosing a layer supersedes any prior pixel marquee, including effects.
+                self.area = None;
+                self.area_mask.clear();
+                self.pixel_mask = None;
+                self.area_aspect_ratio = None;
                 self.layer_target = Some(target);
                 self.focus_canvas = true;
             }

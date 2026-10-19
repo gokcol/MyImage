@@ -44,7 +44,7 @@ use eframe::egui::{
     StrokeKind, Vec2,
 };
 
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Tool {
     #[default]
     Select,
@@ -105,17 +105,26 @@ impl Tool {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Handle {
     ArrowStart,
     ArrowEnd,
+    ArrowBend,
+    ArrowCurvePoint(usize),
     TopLeft,
     TopRight,
     BottomLeft,
     BottomRight,
+    Left,
+    Right,
+    Top,
+    Bottom,
     TextSize,
     CalloutTail,
 }
+
+// On-curve adjustment handles, between the endpoints and the center bend handle.
+const ARROW_CURVE_PARAMETERS: [f32; 2] = [0.25, 0.75];
 
 enum GestureKind {
     Draw(usize),
@@ -192,6 +201,7 @@ pub struct EditorState {
     selected: Option<usize>,
     additional: Vec<usize>,
     focus_canvas: bool,
+    object_press: bool,
     snapping: bool,
     snap_guides: Vec<annotation_layout::SnapGuide>,
     color: [u8; 4],
@@ -262,6 +272,7 @@ impl Default for EditorState {
             selected: None,
             additional: Vec::new(),
             focus_canvas: false,
+            object_press: false,
             snapping: true,
             snap_guides: Vec::new(),
             color: [230, 66, 55, 255],
@@ -411,11 +422,6 @@ impl EditorState {
             return;
         }
         history.commit(gesture.before, document);
-        if let GestureKind::Draw(index) = gesture.kind
-            && document.annotations[index].kind == AnnotationKind::Freehand
-        {
-            self.clear_selection();
-        }
         if let Some(index) = callout {
             self.tool = Tool::Select;
             self.select(Some(index), document);
@@ -642,51 +648,67 @@ impl EditorState {
                     && !self
                         .style_kind(document)
                         .is_some_and(|k| k.is_area_edit() || k == AnnotationKind::Fill);
-                let scroll_height =
-                    (ui.available_height() - if footer { 64. } else { 0. }).max(80.);
-                egui::ScrollArea::vertical()
-                    .id_salt("annotation-inspector-scroll")
-                    .max_height(scroll_height)
-                    .min_scrolled_height(scroll_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        if !self.layers_open
-                            && !self.presets_open
-                            && self.extra_panel_active(document)
-                        {
-                            self.extra_tools_panel(ui, document, history);
-                        } else if !self.layers_open
-                            && !self.presets_open
-                            && (self.tool == Tool::Fill
-                                || self.style_kind(document) == Some(AnnotationKind::Fill))
-                        {
-                            self.fill_panel(ui, document, history);
-                        } else if self.tool == Tool::Area
-                            && self.additional.is_empty()
-                            && (self.selected.is_none()
-                                || self
-                                    .selected
-                                    .is_some_and(|i| document.annotations[i].kind.is_area_edit()))
-                            && !self.layers_open
-                            && !self.presets_open
-                        {
-                            self.area_inspector(ui, document, history);
-                        } else if self.tool == Tool::Crop {
-                            self.crop_inspector(ui, document, history);
-                        } else if self.presets_open {
-                            self.presets_panel(ui, document, history);
-                        } else if self.layers_open {
-                            self.layers_panel(ui, document, history);
-                        } else if self.style_kind(document) == Some(AnnotationKind::Stamp) {
-                            self.stamp_panel(ui, document, history);
-                        } else {
-                            self.inspector(ui, document, history);
+                // Let the footer claim its real height before laying out the
+                // scroll area. A guessed reserve lets selection controls enlarge
+                // the whole workspace, refitting the canvas under a held pointer.
+                ui.allocate_ui_with_layout(
+                    ui.available_size(),
+                    egui::Layout::bottom_up(egui::Align::Min),
+                    |ui| {
+                        if footer {
+                            self.selection_footer(ui, document, history);
+                            ui.separator();
                         }
-                    });
-                if footer {
-                    ui.separator();
-                    self.selection_footer(ui, document, history);
-                }
+                        ui.allocate_ui_with_layout(
+                            ui.available_size(),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("annotation-inspector-scroll")
+                                    .max_height(ui.available_height().max(0.))
+                                    .min_scrolled_height(0.)
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        if !self.layers_open
+                                            && !self.presets_open
+                                            && self.extra_panel_active(document)
+                                        {
+                                            self.extra_tools_panel(ui, document, history);
+                                        } else if !self.layers_open
+                                            && !self.presets_open
+                                            && (self.tool == Tool::Fill
+                                                || self.style_kind(document)
+                                                    == Some(AnnotationKind::Fill))
+                                        {
+                                            self.fill_panel(ui, document, history);
+                                        } else if self.tool == Tool::Area
+                                            && self.additional.is_empty()
+                                            && (self.selected.is_none()
+                                                || self.selected.is_some_and(|i| {
+                                                    document.annotations[i].kind.is_area_edit()
+                                                }))
+                                            && !self.layers_open
+                                            && !self.presets_open
+                                        {
+                                            self.area_inspector(ui, document, history);
+                                        } else if self.tool == Tool::Crop {
+                                            self.crop_inspector(ui, document, history);
+                                        } else if self.presets_open {
+                                            self.presets_panel(ui, document, history);
+                                        } else if self.layers_open {
+                                            self.layers_panel(ui, document, history);
+                                        } else if self.style_kind(document)
+                                            == Some(AnnotationKind::Stamp)
+                                        {
+                                            self.stamp_panel(ui, document, history);
+                                        } else {
+                                            self.inspector(ui, document, history);
+                                        }
+                                    });
+                            },
+                        );
+                    },
+                );
             });
         let hint = match self.tool {
             Tool::Wand => "Click a color to select matching pixels • Adjust tolerance on the right",
@@ -708,7 +730,9 @@ impl EditorState {
             }
             Tool::Stamp => "Choose a stamp on the right • Click to place • Drag corners to resize",
             Tool::Text => "Click to write text • Double-click existing text to edit",
-            Tool::Arrow => "Drag from the arrow tail to its tip",
+            Tool::Arrow => {
+                "Drag to draw • Click an arrow to select • Drag its center handle to bend"
+            }
             Tool::Pen => "Draw with the pen • Select a stroke later to change color or thickness",
             Tool::Eraser => "Drag to erase parts of pen strokes • Undo restores the whole gesture",
             Tool::Rectangle => "Drag to draw a rectangle",
@@ -723,6 +747,13 @@ impl EditorState {
             Tool::Highlighter => {
                 "Drag to highlight an area • Adjust color and opacity in the inspector"
             }
+        };
+        let hint = if self.draws_objects() {
+            format!(
+                "{hint} • Click/drag existing objects to edit • Hold Alt/Option to draw over them"
+            )
+        } else {
+            hint.to_owned()
         };
         egui::TopBottomPanel::bottom("editor-canvas-status")
             .exact_height(24.)
@@ -856,6 +887,33 @@ impl EditorState {
         document: &mut Document,
         history: &mut EditHistory,
     ) {
+        if self.area.is_some() || self.selected.is_some() {
+            let pixels = self.area.is_some();
+            let enabled = self.selected.is_none() || self.can_edit_selection(document);
+            let label = if pixels {
+                "Delete selected area"
+            } else {
+                "Delete selected layers"
+            };
+            if crate::appearance::action_button(
+                ui,
+                label,
+                crate::appearance::Icon::Trash,
+                enabled,
+                false,
+            )
+            .on_hover_text(if pixels {
+                "Clear these pixels to transparency as an editable layer (Delete / Backspace)"
+            } else {
+                "Remove selected annotations or groups; keep underlying layers (Delete / Backspace)"
+            })
+            .clicked()
+            {
+                self.delete_current_selection(document, history);
+                ui.close();
+            }
+            ui.separator();
+        }
         self.image_menu(ui, document, history);
         ui.separator();
         self.edit_actions(ui, document, history);
@@ -1296,6 +1354,13 @@ impl EditorState {
                 } else {
                     rect
                 };
+                // The margin owns focus independently: using the image response
+                // for an outside click loses focus again on release.
+                let margin_response = ui.interact(
+                    space,
+                    ui.id().with("annotation-canvas-margin"),
+                    Sense::click(),
+                );
                 let response = ui.interact(
                     hit_rect,
                     ui.id().with("annotation-canvas"),
@@ -1321,15 +1386,21 @@ impl EditorState {
                     })
                 });
                 if ui.is_enabled()
+                    && self.selected.is_some()
+                    && let Some(position) = press
+                    && space.intersect(ui.clip_rect()).contains(position)
+                    && !hit_rect.contains(position)
+                    && ui.ctx().layer_id_at(position) == Some(ui.layer_id())
+                {
+                    margin_response.request_focus();
+                    self.finish_annotation_gesture(document, history);
+                    self.clear_selection();
+                    self.object_press = false;
+                }
+                if ui.is_enabled()
                     && !matches!(
                         self.tool,
-                        Tool::Text
-                            | Tool::Stamp
-                            | Tool::Fill
-                            | Tool::Wand
-                            | Tool::Step
-                            | Tool::Pen
-                            | Tool::Eraser
+                        Tool::Fill | Tool::Wand | Tool::Pen | Tool::Eraser
                     )
                     && let Some(position) = press
                     && hit_rect.intersect(ui.clip_rect()).contains(position)
@@ -1389,7 +1460,8 @@ impl EditorState {
                             modifiers.alt,
                         );
                     } else {
-                        self.begin_gesture(point, scale, document);
+                        let m = ui.input(|i| i.modifiers);
+                        self.begin_tool_gesture(point, scale, document, m.shift, m.alt);
                     }
                 }
 
@@ -1409,10 +1481,13 @@ impl EditorState {
                             {
                                 response.request_focus();
                                 self.finish_annotation_gesture(document, history);
-                                self.begin_gesture(
+                                let m = ui.input(|i| i.modifiers);
+                                self.begin_tool_gesture(
                                     image_point(pos, rect, scale, document),
                                     scale,
                                     document,
+                                    m.shift,
+                                    m.alt,
                                 );
                             }
                             egui::Event::PointerMoved(pos) if self.gesture.is_some() => {
@@ -1460,7 +1535,7 @@ impl EditorState {
                     response.request_focus();
                     if let Some(position) = response.interact_pointer_pos() {
                         let point = image_point(position, rect, scale, document);
-                        if self.tool == Tool::Text {
+                        if self.tool == Tool::Text && !self.object_press {
                             let before = document.edit_state();
                             let mut annotation = self.new_annotation(AnnotationKind::Text, point);
                             if annotation.text.is_empty() {
@@ -1471,11 +1546,11 @@ impl EditorState {
                             self.open_text_editor(document.annotations.len() - 1, before, document);
                         } else if self.tool == Tool::Wand {
                             self.place_wand(ui.ctx(), point, document);
-                        } else if self.tool == Tool::Step {
+                        } else if self.tool == Tool::Step && !self.object_press {
                             self.stamp_step(point, document, history);
                         } else if self.tool == Tool::Fill {
                             self.place_fill(ui.ctx(), point, document);
-                        } else if self.tool == Tool::Stamp {
+                        } else if self.tool == Tool::Stamp && !self.object_press {
                             self.place_stamp(point, document, history);
                         } else if response.double_clicked()
                             && self.selected_indices(document).len() == 1
@@ -1563,7 +1638,10 @@ impl EditorState {
                 }
                 // egui may surrender focus on Escape before this response is
                 // inspected. A gesture still owns cancellation until release.
-                if (response.has_focus() || self.gesture.is_some() || self.area_drag.is_some())
+                if (response.has_focus()
+                    || margin_response.has_focus()
+                    || self.gesture.is_some()
+                    || self.area_drag.is_some())
                     && ui.is_enabled()
                 {
                     self.keyboard(ui, document, history);
@@ -1730,14 +1808,7 @@ impl EditorState {
                     } else if let Some(annotation) =
                         self.selected.and_then(|i| document.annotations.get(i))
                     {
-                        paint_selection(
-                            &painter,
-                            annotation,
-                            document,
-                            rect.min,
-                            scale,
-                            ui.visuals().selection.bg_fill,
-                        );
+                        paint_selection(&painter, annotation, document, rect.min, scale);
                     }
                 }
                 if let Some(Gesture {
@@ -1884,7 +1955,10 @@ impl EditorState {
                     (!a.kind.needs_composite() || a.kind.is_studio() || !self.additional.is_empty())
                         && (handles.is_some() || hit.is_some_and(|i| selected.contains(&i)))
                 });
-        if self.tool == Tool::Select || (self.tool == Tool::Area && selected_object) {
+        if self.tool == Tool::Select
+            || (self.tool == Tool::Area && selected_object)
+            || (self.draws_objects() && self.object_target(at, scale, document))
+        {
             if let Some(handle) = handles {
                 return handle_cursor(handle, document);
             }
@@ -1934,7 +2008,10 @@ impl EditorState {
             text_style: self.text_style.clone(),
             pixel_mask: None,
             arrow: if kind == AnnotationKind::Arrow {
-                self.arrow.clone()
+                crate::arrow_style::ArrowStyle {
+                    curve: None,
+                    ..self.arrow.clone()
+                }
             } else {
                 Default::default()
             },
@@ -1951,7 +2028,54 @@ impl EditorState {
         }
     }
 
+    #[cfg(test)]
     fn begin_gesture(&mut self, point: Point, scale: f32, document: &mut Document) {
+        self.begin_tool_gesture(point, scale, document, false, false);
+    }
+
+    fn draws_objects(&self) -> bool {
+        !matches!(
+            self.tool,
+            Tool::Select
+                | Tool::Area
+                | Tool::Crop
+                | Tool::CutOut
+                | Tool::Wand
+                | Tool::Fill
+                | Tool::Eraser
+        )
+    }
+
+    fn object_target(&self, at: Point, scale: f32, document: &Document) -> bool {
+        let indices = self.selected_indices(document);
+        (self.can_edit_selection(document)
+            && if indices.len() > 1 {
+                selection_handle(document, &indices, at, scale).is_some()
+            } else {
+                self.selected
+                    .and_then(|i| document.annotations.get(i))
+                    .filter(|a| a.visible())
+                    .and_then(|a| hit_document_handle(a, at, scale, document))
+                    .is_some()
+            })
+            || hit_document_annotation(document, at, scale).is_some()
+    }
+
+    fn begin_tool_gesture(
+        &mut self,
+        point: Point,
+        scale: f32,
+        document: &mut Document,
+        toggle: bool,
+        force_draw: bool,
+    ) {
+        self.object_press =
+            !force_draw && self.draws_objects() && self.object_target(point, scale, document);
+        if self.object_press {
+            self.begin_selection_gesture(point, scale, document, toggle, false);
+            return;
+        }
+
         if self.tool == Tool::Select {
             self.begin_selection_gesture(point, scale, document, false, false);
             return;
@@ -1971,15 +2095,15 @@ impl EditorState {
         let kind = if self.tool == Tool::Eraser {
             self.clear_selection();
             Some(GestureKind::Erase { last: point })
-        } else if let Some(kind) = self
-            .tool
-            .kind()
-            .filter(|k| !matches!(k, AnnotationKind::Text | AnnotationKind::Step))
-        {
+        } else if let Some(kind) = self.tool.kind().filter(|k| {
+            !matches!(
+                k,
+                AnnotationKind::Text | AnnotationKind::Step | AnnotationKind::Stamp
+            )
+        }) {
             let index = document.annotations.len();
             document.annotations.push(self.new_annotation(kind, point));
-            self.additional.clear();
-            self.selected = Some(index);
+            self.clear_selection();
             Some(GestureKind::Draw(index))
         } else {
             None
@@ -2115,7 +2239,18 @@ impl EditorState {
                     gesture.before.annotations.get(index),
                     document.annotations.get_mut(index),
                 ) {
-                    *annotation = resized(original, handle, point);
+                    // Clicking within a handle's hit target is selection, not
+                    // an edit. Keep the grab offset during the subsequent drag.
+                    let delta = Vec2::new(point.x - gesture.origin.x, point.y - gesture.origin.y);
+                    *annotation = if delta == Vec2::ZERO {
+                        original.clone()
+                    } else {
+                        let anchor = handles(original)
+                            .into_iter()
+                            .find(|(candidate, _)| *candidate == handle)
+                            .map_or(Pos2::new(gesture.origin.x, gesture.origin.y), |(_, p)| p);
+                        resized(original, handle, from_pos(anchor + delta))
+                    };
                     if annotation.kind == AnnotationKind::Step {
                         let bounds = interaction_bounds(annotation);
                         let bounds = step_bounds(
@@ -2295,7 +2430,7 @@ impl EditorState {
         for &index in indices.iter().rev() {
             document.annotations.remove(index);
         }
-        self.clear_selection();
+        self.deselect_pixels();
         history.commit(before, document);
         self.focus_canvas = true;
     }
@@ -2456,9 +2591,14 @@ fn hit_document_handle(
     let at = output_point(at, document);
     handles(annotation)
         .into_iter()
-        .find(|(_, position)| {
-            output_point(from_pos(*position), document).distance(at) * scale <= 8.0
+        .map(|(handle, position)| {
+            (
+                handle,
+                output_point(from_pos(position), document).distance(at) * scale,
+            )
         })
+        .filter(|(_, distance)| *distance <= 8.)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(handle, _)| handle)
 }
 
@@ -2547,7 +2687,7 @@ fn hits_transformed(annotation: &Annotation, at: Point, scale: f32, document: &D
                     .length()
                     .max(f32::EPSILON);
             let threshold = (6.0 / scale).max(annotation.stroke_width * stroke_scale * 0.5);
-            segment_distance(at, start, end) <= threshold
+            (annotation.arrow.curve.is_none() && segment_distance(at, start, end) <= threshold)
                 || crate::arrow_style::parts(annotation).iter().any(|part| {
                     let points: Vec<_> = part
                         .points
@@ -2639,10 +2779,28 @@ fn hits_transformed(annotation: &Annotation, at: Point, scale: f32, document: &D
 }
 
 fn handle_cursor(handle: Handle, document: &Document) -> CursorIcon {
-    if matches!(handle, Handle::CalloutTail) {
-        return CursorIcon::Crosshair;
+    if matches!(
+        handle,
+        Handle::CalloutTail
+            | Handle::ArrowStart
+            | Handle::ArrowEnd
+            | Handle::ArrowBend
+            | Handle::ArrowCurvePoint(_)
+    ) {
+        return CursorIcon::Move;
     }
     let reverse = !document.geometry.quarter_turns.is_multiple_of(2);
+    if matches!(
+        handle,
+        Handle::Left | Handle::Right | Handle::Top | Handle::Bottom
+    ) {
+        let horizontal = matches!(handle, Handle::Left | Handle::Right) ^ reverse;
+        return if horizontal {
+            CursorIcon::ResizeHorizontal
+        } else {
+            CursorIcon::ResizeVertical
+        };
+    }
     let rising = matches!(handle, Handle::TopRight | Handle::BottomLeft);
     if rising ^ reverse {
         CursorIcon::ResizeNeSw
@@ -3203,13 +3361,33 @@ fn has_extent(annotation: &Annotation) -> bool {
 fn handles(annotation: &Annotation) -> Vec<(Handle, Pos2)> {
     let bounds = interaction_bounds(annotation);
     match annotation.kind {
-        AnnotationKind::Arrow => vec![
-            (Handle::ArrowStart, point(annotation.start)),
-            (Handle::ArrowEnd, point(annotation.end)),
-        ],
+        AnnotationKind::Arrow => {
+            let mut h = vec![
+                (Handle::ArrowStart, point(annotation.start)),
+                (Handle::ArrowEnd, point(annotation.end)),
+                (
+                    Handle::ArrowBend,
+                    crate::arrow_style::curve_point(annotation, 0.5),
+                ),
+            ];
+            if annotation.arrow.curve.is_some() {
+                h.extend(
+                    ARROW_CURVE_PARAMETERS
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, t)| {
+                            (
+                                Handle::ArrowCurvePoint(i),
+                                crate::arrow_style::curve_point(annotation, t),
+                            )
+                        }),
+                );
+            }
+            h
+        }
         AnnotationKind::Text => vec![(Handle::TextSize, bounds.right_bottom())],
         _ => {
-            let mut handles = Vec::with_capacity(5);
+            let mut handles = Vec::with_capacity(9);
             if annotation.kind == AnnotationKind::Callout
                 && let Some(tail) = annotation.tail
             {
@@ -3221,6 +3399,15 @@ fn handles(annotation: &Annotation) -> Vec<(Handle, Pos2)> {
                 (Handle::BottomLeft, bounds.left_bottom()),
                 (Handle::BottomRight, bounds.right_bottom()),
             ]);
+            // Numbered step markers retain their circular, uniform corner resize.
+            if annotation.kind != AnnotationKind::Step {
+                handles.extend([
+                    (Handle::Left, bounds.left_center()),
+                    (Handle::Right, bounds.right_center()),
+                    (Handle::Top, bounds.center_top()),
+                    (Handle::Bottom, bounds.center_bottom()),
+                ]);
+            }
             handles
         }
     }
@@ -3275,6 +3462,10 @@ fn translated(original: &Annotation, delta: Vec2, image_size: Vec2) -> Annotatio
     annotation.start = from_pos(point(original.start) + delta);
     annotation.end = from_pos(point(original.end) + delta);
     annotation.tail = original.tail.map(|tail| from_pos(point(tail) + delta));
+    annotation.arrow.curve = original
+        .arrow
+        .curve
+        .map(|c| c.map(|p| from_pos(point(p) + delta)));
     if annotation.kind == AnnotationKind::Freehand {
         annotation.points = original
             .points
@@ -3290,8 +3481,35 @@ fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
     let mut annotation = original.clone();
     let bounds = interaction_bounds(original);
     match handle {
-        Handle::ArrowStart => annotation.start = at,
-        Handle::ArrowEnd => annotation.end = at,
+        Handle::ArrowStart => {
+            annotation.start = at;
+            if let Some(c) = &mut annotation.arrow.curve {
+                c[0] = from_pos(point(c[0]) + (point(at) - point(original.start)));
+            }
+        }
+        Handle::ArrowEnd => {
+            annotation.end = at;
+            if let Some(c) = &mut annotation.arrow.curve {
+                c[1] = from_pos(point(c[1]) + (point(at) - point(original.end)));
+            }
+        }
+        Handle::ArrowBend => {
+            // Moving both controls by 4/3 delta places B(0.5) exactly under the pointer.
+            let delta = (point(at) - crate::arrow_style::curve_point(original, 0.5)) * 4. / 3.;
+            annotation.arrow.curve =
+                Some(crate::arrow_style::controls(original).map(|p| from_pos(p + delta)));
+        }
+        Handle::ArrowCurvePoint(index) => {
+            let mut controls = crate::arrow_style::controls(original);
+            let delta = point(at)
+                - crate::arrow_style::curve_point(original, ARROW_CURVE_PARAMETERS[index]);
+            // Invert the cubic's weights at t=1/4 and t=3/4. The grabbed
+            // point follows the pointer exactly; the opposite adjustment point
+            // and both endpoints stay fixed. Stored Bézier controls stay internal.
+            controls[index] += delta * (8. / 3.);
+            controls[1 - index] -= delta * (8. / 9.);
+            annotation.arrow.curve = Some(controls.map(from_pos));
+        }
         Handle::CalloutTail => annotation.tail = Some(at),
         Handle::TextSize => {
             let size = point(at) - point(original.start);
@@ -3304,10 +3522,17 @@ fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
                 Handle::TopLeft => bounds.right_bottom(),
                 Handle::TopRight => bounds.left_bottom(),
                 Handle::BottomLeft => bounds.right_top(),
-                Handle::BottomRight => bounds.left_top(),
+                Handle::BottomRight | Handle::Right | Handle::Bottom => bounds.left_top(),
+                Handle::Left | Handle::Top => bounds.right_bottom(),
                 _ => unreachable!(),
             };
-            let mut corner = point(at);
+            let mut corner = match handle {
+                Handle::Left => Pos2::new(at.x, bounds.top()),
+                Handle::Right => Pos2::new(at.x, bounds.bottom()),
+                Handle::Top => Pos2::new(bounds.left(), at.y),
+                Handle::Bottom => Pos2::new(bounds.right(), at.y),
+                _ => point(at),
+            };
             if original.kind == AnnotationKind::Step {
                 let delta = corner - opposite;
                 let side = delta.x.abs().max(delta.y.abs()).max(1.0);
@@ -3361,38 +3586,57 @@ fn paint_checkerboard_at(painter: &egui::Painter, rect: Rect, origin: Pos2) {
     }
 }
 
+/// Small, high-contrast visual handles keep their larger invisible hit target.
+fn paint_object_handle(painter: &egui::Painter, center: Pos2, adjustment: bool) {
+    let outline = Stroke::new(1., Color32::from_rgb(32, 35, 39));
+    if adjustment {
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                center + Vec2::new(0., -4.2),
+                center + Vec2::new(4.2, 0.),
+                center + Vec2::new(0., 4.2),
+                center + Vec2::new(-4.2, 0.),
+            ],
+            Color32::from_rgb(255, 218, 40),
+            outline,
+        ));
+    } else {
+        painter.circle(center, 3.3, Color32::WHITE, outline);
+    }
+}
+
 fn paint_selection(
     painter: &egui::Painter,
     annotation: &Annotation,
     document: &Document,
     origin: Pos2,
     scale: f32,
-    accent: Color32,
 ) {
     let bounds = mapped_bounds(interaction_bounds(annotation), document);
     let screen = Rect::from_min_max(
         origin + bounds.min.to_vec2() * scale,
         origin + bounds.max.to_vec2() * scale,
     );
-    painter.rect_stroke(
-        screen.expand(2.0),
-        1,
-        Stroke::new(1.2, accent),
-        StrokeKind::Outside,
-    );
+    if !annotation.kind.is_shape()
+        && !matches!(
+            annotation.kind,
+            AnnotationKind::Arrow | AnnotationKind::Callout | AnnotationKind::Step
+        )
+    {
+        // Shapes already define their edges. Only surround content that needs a
+        // selection box, keeping the hairline outside its pixels or stroke.
+        for stroke in [
+            Stroke::new(1.8, Color32::WHITE),
+            Stroke::new(0.7, Color32::from_gray(80)),
+        ] {
+            painter.rect_stroke(screen.expand(3.), 0, stroke, StrokeKind::Middle);
+        }
+    }
     for (handle, position) in handles(annotation) {
         let center = origin + output_point(from_pos(position), document).to_vec2() * scale;
-        if matches!(handle, Handle::CalloutTail) {
-            painter.circle(center, 5.0, Color32::WHITE, Stroke::new(1.5, accent));
-            continue;
-        }
-        painter.rect(
-            Rect::from_center_size(center, Vec2::splat(8.0)),
-            2,
-            Color32::WHITE,
-            Stroke::new(1.5, accent),
-            StrokeKind::Inside,
-        );
+        let adjustment = matches!(handle, Handle::ArrowCurvePoint(_) | Handle::CalloutTail)
+            || (matches!(handle, Handle::ArrowBend) && annotation.arrow.curve.is_none());
+        paint_object_handle(painter, center, adjustment);
     }
 }
 
@@ -3440,6 +3684,317 @@ mod tests {
             geometry: ImageGeometry::default(),
         };
         hits_transformed(annotation, from_pos(at), zoom, &document)
+    }
+
+    #[test]
+    fn drawing_tools_select_move_and_bend_existing_arrows_without_new_objects() {
+        let mut a = annotation(AnnotationKind::Arrow);
+        a.start = Point { x: 30., y: 160. };
+        a.end = Point { x: 260., y: 160. };
+        let mut d = Document {
+            image: std::sync::Arc::new(image::RgbaImage::new(400, 300)),
+            annotations: vec![a],
+            geometry: Default::default(),
+        };
+        let mut e = EditorState {
+            tool: Tool::Arrow,
+            ..Default::default()
+        };
+        let mut h = EditHistory::new(d.edit_state());
+        // First body click selects, rather than creating a second arrow.
+        e.begin_gesture(Point { x: 100., y: 160. }, 1., &mut d);
+        assert!(matches!(
+            e.gesture.as_ref().unwrap().kind,
+            GestureKind::Move(0)
+        ));
+        e.finish_annotation_gesture(&mut d, &mut h);
+        e.reconcile_selection(&d);
+        assert_eq!(d.annotations.len(), 1);
+        assert!(!h.can_undo());
+        assert_eq!(
+            e.canvas_cursor(Point { x: 100., y: 160. }, 1., &d),
+            CursorIcon::Grab
+        );
+        let middle = crate::arrow_style::curve_point(&d.annotations[0], 0.5);
+        e.begin_gesture(from_pos(middle), 1., &mut d);
+        assert!(matches!(
+            e.gesture.as_ref().unwrap().kind,
+            GestureKind::Resize(0, Handle::ArrowBend)
+        ));
+        e.update_gesture(
+            Point {
+                x: middle.x,
+                y: 80.,
+            },
+            &mut d,
+        );
+        e.finish_annotation_gesture(&mut d, &mut h);
+        e.reconcile_selection(&d);
+        let curved = d.edit_state();
+        assert!((crate::arrow_style::curve_point(&d.annotations[0], 0.5).y - 80.).abs() < 0.01);
+        assert!(hits_at(&d.annotations[0], Pos2::new(middle.x, 80.), 1.));
+        assert!(!hits_at(&d.annotations[0], middle, 1.));
+        assert!(h.undo(&mut d));
+        assert!(d.annotations[0].arrow.curve.is_none());
+        assert!(h.redo(&mut d));
+        assert_eq!(d.edit_state(), curved);
+        let moved = translated(
+            &d.annotations[0],
+            Vec2::new(10., 12.),
+            Vec2::new(400., 300.),
+        );
+        assert_eq!(
+            moved.arrow.curve.unwrap()[0],
+            from_pos(point(d.annotations[0].arrow.curve.unwrap()[0]) + Vec2::new(10., 12.))
+        );
+        // New arrows use appearance, never another object's absolute curve points.
+        assert!(
+            e.new_annotation(AnnotationKind::Arrow, Point { x: 5., y: 5. })
+                .arrow
+                .curve
+                .is_none()
+        );
+        e.begin_tool_gesture(
+            from_pos(crate::arrow_style::curve_point(&d.annotations[0], 0.5)),
+            1.,
+            &mut d,
+            false,
+            true,
+        );
+        assert!(matches!(
+            e.gesture.as_ref().unwrap().kind,
+            GestureKind::Draw(1)
+        ));
+    }
+
+    #[test]
+    fn on_curve_handles_follow_drag_and_keep_the_opposite_point_and_endpoints_fixed() {
+        let mut arrow = annotation(AnnotationKind::Arrow);
+        arrow.start = Point { x: 40., y: 180. };
+        arrow.end = Point { x: 350., y: 160. };
+        arrow.arrow.curve = Some([Point { x: 120., y: 20. }, Point { x: 270., y: 260. }]);
+        for index in 0..2 {
+            let mut d = Document {
+                image: std::sync::Arc::new(image::RgbaImage::new(400, 300)),
+                annotations: vec![arrow.clone()],
+                geometry: Default::default(),
+            };
+            let before = d.edit_state();
+            let mut h = EditHistory::new(before.clone());
+            let mut e = EditorState {
+                tool: Tool::Arrow,
+                ..Default::default()
+            };
+            e.select(Some(0), &d);
+            let grabbed = crate::arrow_style::curve_point(&arrow, ARROW_CURVE_PARAMETERS[index]);
+            let opposite =
+                crate::arrow_style::curve_point(&arrow, ARROW_CURVE_PARAMETERS[1 - index]);
+            let handle = handles(&arrow)
+                .into_iter()
+                .find(|(h, _)| matches!(h, Handle::ArrowCurvePoint(i) if *i == index))
+                .unwrap();
+            assert_eq!(
+                handle.1, grabbed,
+                "The visible handle must lie on the curve"
+            );
+            assert!(hits_at(&arrow, grabbed, 1.));
+            e.begin_gesture(from_pos(grabbed), 1., &mut d);
+            assert!(
+                matches!(e.gesture.as_ref().unwrap().kind, GestureKind::Resize(0, Handle::ArrowCurvePoint(i)) if i == index)
+            );
+            for delta in [
+                Vec2::new(12., -30.),
+                Vec2::new(-24., 45.),
+                Vec2::new(30., 25.),
+            ] {
+                let target = grabbed + delta;
+                e.update_gesture(from_pos(target), &mut d);
+                let a = &d.annotations[0];
+                assert!(
+                    crate::arrow_style::curve_point(a, ARROW_CURVE_PARAMETERS[index])
+                        .distance(target)
+                        < 0.001
+                );
+                assert!(
+                    crate::arrow_style::curve_point(a, ARROW_CURVE_PARAMETERS[1 - index])
+                        .distance(opposite)
+                        < 0.001
+                );
+                assert_eq!((a.start, a.end), (arrow.start, arrow.end));
+            }
+            e.finish_annotation_gesture(&mut d, &mut h);
+            let after = d.edit_state();
+            assert!(h.undo(&mut d));
+            assert_eq!(d.edit_state(), before);
+            assert!(!h.can_undo(), "A drag must be one undo step");
+            assert!(h.redo(&mut d));
+            assert_eq!(d.edit_state(), after);
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("direct-curve.myimage");
+            crate::document::save_project(&d, &path).unwrap();
+            let reopened = crate::document::load_project(&path).unwrap();
+            assert_eq!(reopened.edit_state(), after);
+            for (h, p) in handles(&reopened.annotations[0]) {
+                if let Handle::ArrowCurvePoint(i) = h {
+                    assert!(
+                        p.distance(crate::arrow_style::curve_point(
+                            &reopened.annotations[0],
+                            ARROW_CURVE_PARAMETERS[i]
+                        )) < 0.001
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn on_curve_handles_hit_after_rotation_resize_and_zoom() {
+        let mut arrow = annotation(AnnotationKind::Arrow);
+        arrow.start = Point { x: 40., y: 180. };
+        arrow.end = Point { x: 350., y: 160. };
+        arrow.arrow.curve = Some([Point { x: 120., y: 20. }, Point { x: 270., y: 260. }]);
+        let d = Document {
+            image: std::sync::Arc::new(image::RgbaImage::new(400, 300)),
+            annotations: vec![arrow],
+            geometry: ImageGeometry {
+                quarter_turns: 1,
+                resize: Some([600, 800]),
+                ..Default::default()
+            },
+        };
+        for zoom in [0.25, 1., 2.] {
+            for (index, t) in ARROW_CURVE_PARAMETERS.into_iter().enumerate() {
+                let p = crate::arrow_style::curve_point(&d.annotations[0], t);
+                assert!(
+                    matches!(hit_document_handle(&d.annotations[0], from_pos(p), zoom, &d), Some(Handle::ArrowCurvePoint(i)) if i == index)
+                );
+                let moved = resized(
+                    &d.annotations[0],
+                    Handle::ArrowCurvePoint(index),
+                    from_pos(p + Vec2::new(10., 15.)),
+                );
+                let screen = output_point(from_pos(crate::arrow_style::curve_point(&moved, t)), &d)
+                    .to_vec2()
+                    * zoom;
+                let expected = output_point(from_pos(p + Vec2::new(10., 15.)), &d).to_vec2() * zoom;
+                assert!((screen - expected).length() < 0.001);
+            }
+        }
+    }
+
+    #[test]
+    fn shape_side_handles_resize_one_axis_and_preserve_editable_history() {
+        for kind in [
+            AnnotationKind::Rectangle,
+            AnnotationKind::RoundedRectangle,
+            AnnotationKind::Ellipse,
+            AnnotationKind::Triangle,
+        ] {
+            for (handle, delta) in [
+                (Handle::Left, Vec2::new(-10., 12.)),
+                (Handle::Right, Vec2::new(30., 12.)),
+                (Handle::Top, Vec2::new(12., -10.)),
+                (Handle::Bottom, Vec2::new(12., 30.)),
+            ] {
+                let a = annotation(kind);
+                let original = interaction_bounds(&a);
+                let mut d = Document {
+                    image: std::sync::Arc::new(image::RgbaImage::new(400, 300)),
+                    annotations: vec![a],
+                    geometry: Default::default(),
+                };
+                let mut e = EditorState {
+                    tool: Tool::Shape(kind),
+                    ..Default::default()
+                };
+                e.select(Some(0), &d);
+                let before = d.edit_state();
+                let mut history = EditHistory::new(before.clone());
+                let positions = handles(&d.annotations[0]);
+                assert_eq!(positions.len(), 8);
+                let anchor = positions.into_iter().find(|(h, _)| *h == handle).unwrap().1;
+                // A slightly off-center press should keep the same grab offset.
+                let press = anchor + Vec2::splat(1.);
+                e.begin_gesture(from_pos(press), 1., &mut d);
+                assert!(
+                    matches!(e.gesture.as_ref().unwrap().kind, GestureKind::Resize(0, h) if h == handle)
+                );
+                e.update_gesture(from_pos(press), &mut d);
+                assert_eq!(d.edit_state(), before, "Clicking a handle must not edit");
+                e.update_gesture(from_pos(press + delta), &mut d);
+                let bounds = interaction_bounds(&d.annotations[0]);
+                match handle {
+                    Handle::Left | Handle::Right => {
+                        assert_eq!(bounds.y_range(), original.y_range());
+                        if handle == Handle::Left {
+                            assert_eq!(bounds.right(), original.right());
+                            assert_eq!(bounds.left(), original.left() + delta.x);
+                        } else {
+                            assert_eq!(bounds.left(), original.left());
+                            assert_eq!(bounds.right(), original.right() + delta.x);
+                        }
+                    }
+                    _ => {
+                        assert_eq!(bounds.x_range(), original.x_range());
+                        if handle == Handle::Top {
+                            assert_eq!(bounds.bottom(), original.bottom());
+                            assert_eq!(bounds.top(), original.top() + delta.y);
+                        } else {
+                            assert_eq!(bounds.top(), original.top());
+                            assert_eq!(bounds.bottom(), original.bottom() + delta.y);
+                        }
+                    }
+                }
+                e.finish_annotation_gesture(&mut d, &mut history);
+                let after = d.edit_state();
+                assert!(history.undo(&mut d));
+                assert_eq!(d.edit_state(), before);
+                assert!(!history.can_undo());
+                assert!(history.redo(&mut d));
+                assert_eq!(d.edit_state(), after);
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().join("side-resize.myimage");
+                crate::document::save_project(&d, &path).unwrap();
+                assert_eq!(
+                    crate::document::load_project(&path).unwrap().edit_state(),
+                    after
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn small_shape_handles_choose_nearest_point_under_zoom_and_rotation() {
+        let a = annotation(AnnotationKind::RoundedRectangle);
+        for quarter_turns in 0..4 {
+            let d = Document {
+                image: std::sync::Arc::new(image::RgbaImage::new(400, 300)),
+                annotations: vec![a.clone()],
+                geometry: ImageGeometry {
+                    quarter_turns,
+                    flip_horizontal: true,
+                    resize: Some([600, 400]),
+                    ..Default::default()
+                },
+            };
+            for (handle, pos) in handles(&a) {
+                // At low zoom the hit targets overlap; the nearest visible point wins.
+                for zoom in [0.15, 1., 2.] {
+                    assert_eq!(
+                        hit_document_handle(&a, from_pos(pos), zoom, &d),
+                        Some(handle)
+                    );
+                }
+            }
+            assert_eq!(
+                handle_cursor(Handle::Right, &d),
+                if quarter_turns % 2 == 0 {
+                    CursorIcon::ResizeHorizontal
+                } else {
+                    CursorIcon::ResizeVertical
+                }
+            );
+        }
     }
 
     #[test]
@@ -3695,6 +4250,223 @@ mod tests {
             button: PointerButton::Primary,
             pressed,
             modifiers: Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn selecting_and_deselecting_keeps_canvas_stationary_and_does_not_edit_artwork() {
+        for tool in [Tool::Arrow, Tool::Ellipse] {
+            let ctx = egui::Context::default();
+            crate::appearance::apply(&ctx);
+            let texture = ctx.load_texture(
+                "stationary image",
+                egui::ColorImage::new([1, 1], vec![Color32::WHITE]),
+                Default::default(),
+            );
+            let mut a = annotation(AnnotationKind::Arrow);
+            a.start = Point { x: 200., y: 250. };
+            a.end = Point { x: 700., y: 250. };
+            let mut d = Document {
+                image: std::sync::Arc::new(image::RgbaImage::new(900, 500)),
+                annotations: vec![a],
+                geometry: Default::default(),
+            };
+            let before = d.edit_state();
+            let mut e = EditorState {
+                tool,
+                ..Default::default()
+            };
+            let mut h = EditHistory::new(before.clone());
+            let mut preview = crate::privacy_preview::PrivacyPreview::default();
+            let mut frame = |e: &mut EditorState, d: &mut Document, h: &mut EditHistory, events| {
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 500.))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            e.ui(ui, d, h, &texture, &mut preview);
+                        });
+                    },
+                );
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Mesh(m) if m.texture_id == texture.id() => {
+                            Some(m.calc_bounds())
+                        }
+                        _ => None,
+                    })
+                    .fold(Rect::NOTHING, Rect::union)
+            };
+            for _ in 0..3 {
+                frame(&mut e, &mut d, &mut h, vec![]);
+            }
+            let image = frame(&mut e, &mut d, &mut h, vec![]);
+            assert!(image.is_positive());
+            let zoom = e.zoom;
+            let body = image.min + Vec2::new(300., 250.) * zoom;
+            let handle = image.min + Vec2::new(450., 250.) * zoom + Vec2::new(2., 2.);
+            let blank = image.min + Vec2::new(100., 60.) * zoom;
+            let margin = Pos2::new(image.left() - 10., image.center().y);
+            for (at, selected) in [
+                (body, Some(0)),
+                (handle, Some(0)),
+                (blank, None),
+                (body, Some(0)),
+                (margin, None),
+            ] {
+                for events in [
+                    vec![egui::Event::PointerMoved(at), button_event(at, true)],
+                    vec![],
+                    vec![button_event(at, false)],
+                    vec![],
+                ] {
+                    let shown = frame(&mut e, &mut d, &mut h, events);
+                    assert_eq!(
+                        shown, image,
+                        "Selecting/deselecting changed the canvas rectangle"
+                    );
+                    assert_eq!(e.zoom, zoom);
+                }
+                assert_eq!(
+                    d.edit_state(),
+                    before,
+                    "A click must not move or create an object"
+                );
+                assert!(!h.can_undo());
+                assert_eq!(e.selected, selected);
+            }
+            // The canvas margin must retain keyboard focus after release too.
+            d.annotations[0].color = [12, 34, 56, 255];
+            h.commit(before.clone(), &d);
+            frame(
+                &mut e,
+                &mut d,
+                &mut h,
+                vec![egui::Event::Key {
+                    key: Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::COMMAND,
+                }],
+            );
+            assert_eq!(
+                d.edit_state(),
+                before,
+                "Undo must still work after margin deselection"
+            );
+        }
+    }
+
+    #[test]
+    fn drag_drawings_remain_unselected_until_explicitly_clicked() {
+        for tool in [
+            Tool::Arrow,
+            Tool::Rectangle,
+            Tool::Ellipse,
+            Tool::Shape(AnnotationKind::Triangle),
+            Tool::Highlighter,
+            Tool::Pen,
+            Tool::Blur,
+            Tool::Pixelate,
+        ] {
+            let mut d = Document {
+                image: std::sync::Arc::new(image::RgbaImage::new(400, 300)),
+                annotations: vec![],
+                geometry: Default::default(),
+            };
+            let mut e = EditorState {
+                tool,
+                ..Default::default()
+            };
+            let mut h = EditHistory::new(d.edit_state());
+            e.begin_gesture(Point { x: 40., y: 60. }, 1., &mut d);
+            e.update_gesture(Point { x: 200., y: 180. }, &mut d);
+            assert!(
+                e.selected_indices(&d).is_empty(),
+                "{tool:?} showed handles while drawing"
+            );
+            e.finish_annotation_gesture(&mut d, &mut h);
+            assert_eq!(d.annotations.len(), 1);
+            assert!(
+                e.selected_indices(&d).is_empty(),
+                "{tool:?} auto-selected the drawing"
+            );
+            assert!(h.can_undo());
+            let saved = d.edit_state();
+            let hit = if matches!(tool, Tool::Ellipse | Tool::Shape(_)) {
+                Point { x: 120., y: 60. }
+            } else {
+                d.annotations[0].start
+            };
+            e.begin_gesture(hit, 1., &mut d);
+            assert_eq!(e.selected, Some(0), "{tool:?}");
+            e.finish_annotation_gesture(&mut d, &mut h);
+            assert_eq!(d.edit_state(), saved);
+        }
+    }
+
+    #[test]
+    fn drawing_mode_click_selects_top_object_without_placing_text_stamps_or_steps() {
+        for tool in [
+            Tool::Arrow,
+            Tool::Rectangle,
+            Tool::Text,
+            Tool::Stamp,
+            Tool::Step,
+            Tool::Pen,
+            Tool::Highlighter,
+        ] {
+            let ctx = egui::Context::default();
+            let texture = ctx.load_texture(
+                "object hit",
+                egui::ColorImage::new([1, 1], vec![Color32::WHITE]),
+                Default::default(),
+            );
+            let mut a = annotation(AnnotationKind::Rectangle);
+            a.start = Point { x: 20., y: 20. };
+            a.end = Point { x: 80., y: 80. };
+            a.fill = true;
+            let mut d = Document {
+                image: std::sync::Arc::new(image::RgbaImage::new(200, 200)),
+                annotations: vec![a],
+                geometry: Default::default(),
+            };
+            let before = d.edit_state();
+            let mut h = EditHistory::new(before.clone());
+            let mut e = EditorState {
+                tool,
+                fit: false,
+                ..Default::default()
+            };
+            canvas_frame(&mut e, &mut d, &mut h, &ctx, &texture, vec![]);
+            let p = Pos2::new(70., 70.);
+            canvas_frame(
+                &mut e,
+                &mut d,
+                &mut h,
+                &ctx,
+                &texture,
+                vec![egui::Event::PointerMoved(p), button_event(p, true)],
+            );
+            canvas_frame(
+                &mut e,
+                &mut d,
+                &mut h,
+                &ctx,
+                &texture,
+                vec![button_event(p, false)],
+            );
+            assert_eq!(e.selected, Some(0), "{tool:?}");
+            assert_eq!(e.tool, tool);
+            assert_eq!(d.edit_state(), before, "{tool:?} must not insert an object");
+            assert!(!h.can_undo());
+            assert!(e.text_dialog.is_none());
         }
     }
 
@@ -5223,7 +5995,7 @@ mod tests {
                 &texture,
                 vec![],
             );
-            let pos = Pos2::new(80.0, 70.0);
+            let pos = Pos2::new(80.0, if tool == Tool::Pen { 110.0 } else { 70.0 });
             canvas_frame(
                 &mut editor,
                 &mut document,

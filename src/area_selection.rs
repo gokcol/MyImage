@@ -588,6 +588,19 @@ impl EditorState {
         rect.is_positive().then_some(rect)
     }
 
+    /// A marquee deletes pixels; an object/layer selection deletes its layers.
+    pub(super) fn delete_current_selection(
+        &mut self,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
+        if self.area.is_some() {
+            self.apply_area_action(AnnotationKind::DeleteArea, document, history);
+        } else {
+            self.delete(document, history);
+        }
+    }
+
     pub(super) fn apply_area_action(
         &mut self,
         kind: AnnotationKind,
@@ -649,8 +662,12 @@ impl EditorState {
             return;
         }
         history.commit(before, document);
-        self.select(Some(index), document);
-        self.area = (!kind.is_studio()).then_some(rect);
+        if kind == AnnotationKind::DeleteArea {
+            self.deselect_pixels();
+        } else {
+            self.select(Some(index), document);
+            self.area = (!kind.is_studio()).then_some(rect);
+        }
         self.tool = Tool::Area;
         self.focus_canvas = true;
     }
@@ -951,7 +968,7 @@ impl EditorState {
             i.consume_key(Modifiers::NONE, Key::Delete)
                 || i.consume_key(Modifiers::NONE, Key::Backspace)
         }) {
-            self.apply_area_action(AnnotationKind::DeleteArea, document, history);
+            self.delete_current_selection(document, history);
             return true;
         }
         false
@@ -1050,6 +1067,90 @@ mod tests {
     }
     fn rectangle() -> Rect {
         Rect::from_min_max(egui::pos2(20., 20.), egui::pos2(60., 60.))
+    }
+
+    #[test]
+    fn deleting_pixels_clears_selection_and_keeps_an_editable_removal_layer() {
+        let mut d = doc();
+        let source = d.image.clone();
+        let mut e = EditorState {
+            tool: Tool::Area,
+            area: Some(rectangle()),
+            area_aspect_ratio: Some(1.),
+            ..Default::default()
+        };
+        let mut h = EditHistory::new(d.edit_state());
+        e.delete_current_selection(&mut d, &mut h);
+        assert!(e.area.is_none() && e.selected.is_none());
+        assert!(e.area_mask.is_empty() && e.pixel_mask.is_none());
+        assert!(e.area_aspect_ratio.is_none());
+        assert_eq!(d.annotations.len(), 1);
+        assert_eq!(d.annotations[0].kind, AnnotationKind::DeleteArea);
+        assert!(std::sync::Arc::ptr_eq(&source, &d.image));
+        let deleted = d.edit_state();
+        e.delete_current_selection(&mut d, &mut h);
+        assert_eq!(
+            d.edit_state(),
+            deleted,
+            "A second Delete has no stale selection"
+        );
+        let flat = render::flatten(&d).unwrap();
+        assert_eq!(flat.get_pixel(30, 30)[3], 0);
+        assert_eq!(flat.get_pixel(10, 10), source.get_pixel(10, 10));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("deleted.myimage");
+        crate::document::save_project(&d, &path).unwrap();
+        let reopened = crate::document::load_project(&path).unwrap();
+        assert_eq!(reopened.edit_state(), deleted);
+        assert_eq!(render::flatten(&reopened).unwrap(), flat);
+        assert!(h.undo(&mut d));
+        assert!(d.annotations.is_empty());
+        assert!(!h.can_undo());
+        assert!(h.redo(&mut d));
+        // Layers above the removal remain visible, and hiding the removal restores pixels.
+        let mut above = e.new_annotation(AnnotationKind::Rectangle, Point { x: 25., y: 25. });
+        above.end = Point { x: 45., y: 45. };
+        above.fill = true;
+        above.color = [255, 0, 0, 255];
+        d.annotations.push(above);
+        assert_eq!(
+            render::flatten(&d).unwrap().get_pixel(35, 35).0,
+            [255, 0, 0, 255]
+        );
+        d.annotations[0].layer.hidden = true;
+        assert_eq!(
+            render::flatten(&d).unwrap().get_pixel(50, 50),
+            source.get_pixel(50, 50)
+        );
+    }
+
+    #[test]
+    fn deleting_selected_layers_respects_groups_and_locks_without_erasing_underneath() {
+        let mut d = doc();
+        let mut e = EditorState::default();
+        for kind in [AnnotationKind::Blur, AnnotationKind::Rectangle] {
+            let mut a = e.new_annotation(kind, Point { x: 20., y: 20. });
+            a.end = Point { x: 60., y: 60. };
+            a.group_id = Some(1);
+            d.annotations.push(a);
+        }
+        let mut h = EditHistory::new(d.edit_state());
+        e.choose_annotation(Some(0), false, false, &d);
+        d.annotations[0].group_layer.locked = true;
+        d.annotations[1].group_layer.locked = true;
+        let before = d.edit_state();
+        e.delete_current_selection(&mut d, &mut h);
+        assert_eq!(d.edit_state(), before);
+        assert_eq!(e.selected_indices(&d), vec![0, 1]);
+        for a in &mut d.annotations {
+            a.group_layer.locked = false;
+        }
+        e.delete_current_selection(&mut d, &mut h);
+        assert!(d.annotations.is_empty());
+        assert!(e.area.is_none() && e.selected_indices(&d).is_empty());
+        assert_eq!(render::flatten(&d).unwrap(), *d.image);
+        assert!(h.undo(&mut d));
+        assert_eq!(d.annotations.len(), 2);
     }
 
     #[test]

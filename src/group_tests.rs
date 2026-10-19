@@ -57,6 +57,10 @@ fn fixture() -> Document {
     let mut arrow = object(AnnotationKind::Arrow, [465.0, 320.0], [535.0, 320.0]);
     arrow.color = [230, 66, 55, 255];
     arrow.stroke_width = 6.0;
+    arrow.arrow.curve = Some([
+        crate::document::Point { x: 485., y: 290. },
+        crate::document::Point { x: 515., y: 290. },
+    ]);
     arrow.group_id = Some(2);
     d.annotations.push(arrow);
     d

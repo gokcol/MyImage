@@ -367,6 +367,14 @@ fn arrow_presets(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle) 
 
 fn arrow_controls(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle) -> bool {
     let mut changed = false;
+    ui.small("Drag the yellow points on the arrow to reshape it.");
+    if ui
+        .add_enabled(arrow.curve.is_some(), egui::Button::new("Straighten"))
+        .clicked()
+    {
+        arrow.curve = None;
+        changed = true;
+    }
     if egui::containers::menu::is_in_menu(ui) {
         changed |= arrow_presets(ui, arrow);
     } else {

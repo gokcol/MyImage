@@ -26,7 +26,7 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"MYIMAGE\0";
-const VERSION: u32 = 17;
+const VERSION: u32 = 18;
 const HEADER_BYTES: u64 = 24;
 const MAX_PROJECT_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_METADATA_BYTES: usize = 48 * 1024 * 1024;
@@ -633,6 +633,9 @@ pub fn load_project(path: &Path) -> Result<Document, String> {
         serde_json::from_slice(&json)
             .map_err(|error| format!("Cannot read project metadata: {error}"))?
     };
+    if version < 18 && metadata.annotations.iter().any(|a| a.arrow.curve.is_some()) {
+        return Err("Curved arrows require MyImage project version 18.".into());
+    }
     if version < 17 && metadata.geometry.viewport.is_some() {
         return Err("Reversible canvas windows require MyImage project version 17.".into());
     }

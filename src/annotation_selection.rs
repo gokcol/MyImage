@@ -365,6 +365,7 @@ pub(super) fn offset_annotation(original: &Annotation, delta: Vec2) -> Annotatio
     a.start = from_pos(point(a.start) + delta);
     a.end = from_pos(point(a.end) + delta);
     a.tail = a.tail.map(|p| from_pos(point(p) + delta));
+    a.arrow.curve = a.arrow.curve.map(|c| c.map(|p| from_pos(point(p) + delta)));
     for p in &mut a.points {
         *p = from_pos(point(*p) + delta);
     }
@@ -411,6 +412,7 @@ pub(super) fn resize_selection(
         a.start = transform(a.start);
         a.end = transform(a.end);
         a.tail = a.tail.map(transform);
+        a.arrow.curve = a.arrow.curve.map(|c| c.map(transform));
         for p in &mut a.points {
             *p = transform(*p);
         }
@@ -473,13 +475,7 @@ pub(super) fn paint_many(
     );
     for (_, p) in group_handles(bounds) {
         let center = origin + output_point(from_pos(p), document).to_vec2() * scale;
-        painter.rect(
-            Rect::from_center_size(center, Vec2::splat(8.0)),
-            2,
-            Color32::WHITE,
-            Stroke::new(1.5, accent),
-            StrokeKind::Inside,
-        );
+        paint_object_handle(painter, center, false);
     }
 }
 
@@ -649,11 +645,20 @@ mod tests {
         let mut text = object(AnnotationKind::Text, [150.0, 200.0], [150.0, 200.0]);
         text.text = "Label".into();
         d.annotations.push(text);
+        let mut arrow = object(AnnotationKind::Arrow, [40., 50.], [100., 50.]);
+        arrow.arrow.curve = Some([Point { x: 60., y: 20. }, Point { x: 80., y: 20. }]);
+        d.annotations.push(arrow);
         let indices: Vec<_> = (0..d.annotations.len()).collect();
         let before = d.edit_state();
         let bounds = selection_bounds(&d, &indices);
         let target = from_pos(bounds.min + bounds.size() * 1.5);
         resize_selection(&mut d, &before, &indices, Handle::BottomRight, target).unwrap();
+        assert_eq!(
+            d.annotations[6].arrow.curve,
+            before.annotations[6].arrow.curve.map(|controls| {
+                controls.map(|p| from_pos(bounds.min + (point(p) - bounds.min) * 1.5))
+            })
+        );
         assert_eq!(d.annotations[5].font_size, 42.0);
         assert_eq!(d.annotations[4].step_number, 7);
         assert!((d.annotations[4].end.x - d.annotations[4].start.x - 45.0).abs() < 0.01);

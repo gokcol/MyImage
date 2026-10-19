@@ -1,64 +1,161 @@
-//! Small native first-run guide, also available from the App menu.
+//! Calico welcome and compact native shortcut guide.
 use crate::appearance::{self, Icon};
-use eframe::egui;
+use eframe::egui::{self, Color32, RichText};
 
-pub const VERSION: u8 = 1;
+pub const VERSION: u8 = 2;
 
-pub fn show(ctx: &egui::Context, open: &mut bool) -> bool {
+pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) -> bool {
     if !*open {
         return false;
     }
     let mut dismissed = false;
-    egui::Modal::new(egui::Id::new("quick_start")).show(ctx, |ui| {
-        ui.set_width(450.0_f32.min((ctx.content_rect().width() - 48.).max(240.)));
-        ui.heading("Meet MyImage");
-        ui.weak("Capture a moment. Make it clear. Keep it editable.");
-        ui.add_space(12.);
-        egui::ScrollArea::vertical()
-            .id_salt("quick_start_body")
-            .max_height((ctx.content_rect().height() - 220.).clamp(140., 460.))
-            .show(ui, |ui| {
-        for (icon, title, body) in [
-            (Icon::Capture, "1 · Capture", "Use Capture Now or Control + Shift + . to select a region, window or full screen. On Mac, Command + Shift + . works too."),
-            (Icon::Edit, "2 · Annotate", "Choose a tool, then draw on the image. Click an object to adjust its style. Drag a selection to move its pixels; drag its handles to resize the boundary."),
-            (Icon::Save, "3 · Save & share", "Save a .myimage project to keep every annotation editable. Export makes a finished image or PDF. Autosave protects unfinished work in a separate recovery copy."),
-        ] {
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(32., 32.), egui::Sense::hover());
-                    appearance::icon(ui.painter(), rect.center(), icon, appearance::INK, 23.);
-                    ui.vertical(|ui| { ui.strong(title); ui.add(egui::Label::new(body).wrap()); });
+    egui::Modal::new(egui::Id::new("quick_start"))
+        .frame(egui::Frame::popup(&ctx.style()).fill(appearance::PAPER).corner_radius(16).inner_margin(18))
+        .show(ctx, |ui| {
+            ui.set_width(490.0_f32.min((ctx.content_rect().width() - 64.).max(240.)));
+            ui.spacing_mut().item_spacing.y = 7.;
+            ui.horizontal(|ui| {
+                let (badge, _) = ui.allocate_exact_size(egui::vec2(80., 86.), egui::Sense::hover());
+                ui.painter().circle_filled(badge.center(), 38., appearance::CREAM);
+                ui.painter().image(calico.id(), badge.shrink(3.), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)), Color32::WHITE);
+                appearance::calico_tabs(ui.painter(), badge.left_bottom() + egui::vec2(24., -2.));
+                ui.add_space(9.);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("WELCOME TO MYIMAGE").size(11.).strong().color(appearance::ACCENT));
+                    ui.label(RichText::new("Small paws. Big ideas.").size(25.).strong().color(appearance::INK));
+                    ui.label(RichText::new("Capture it. Make it yours.").color(appearance::MUTED));
                 });
             });
-            ui.add_space(5.);
-        }
-        ui.collapsing("Keyboard & mouse shortcuts", |ui| {
-            let key = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl" };
-            egui::Grid::new("shortcut_reference").spacing(egui::vec2(16., 4.)).show(ui, |ui| {
-                for (keys, action) in [
-                    (format!("{key} + S"), "Save editable project"),
-                    (format!("{key} + Shift + S"), "Save as a new project"),
-                    (format!("{key} + C / X / V"), "Copy / cut / paste"),
-                    (format!("{key} + A"), "Select the whole image or focused collection"),
-                    (format!("{key} + Z / Shift + Z"), "Undo / redo"),
-                    ("Escape".into(), "Cancel the current selection or operation"),
-                    ("Pinch / Ctrl + scroll".into(), "Zoom around the pointer"),
-                    ("Ctrl / ⌘ + click".into(), "Select multiple Library or Recents items"),
-                    ("Right-click image".into(), "Image and canvas actions"),
-                ] { ui.strong(keys); ui.label(action); ui.end_row(); }
+            ui.add_space(6.);
+            egui::ScrollArea::vertical()
+                .id_salt("quick_start_body")
+                .max_height((ctx.content_rect().height() - 250.).clamp(130., 440.))
+                .show(ui, |ui| {
+                    step_card(ui, "01", Icon::Capture, "Catch a moment", "Capture a region, a window, or your whole screen.", "Ctrl + Shift + .  ·  On Mac, ⌘ + Shift + . also works", appearance::CREAM, appearance::ACCENT);
+                    step_card(ui, "02", Icon::Edit, "Make your mark", "Add arrows, text and stamps. Click an object to style it.", "Drag a selection to move pixels; use its handles to adjust the boundary.", Color32::from_rgb(229, 242, 239), Color32::from_rgb(30, 104, 94));
+                    step_card(ui, "03", Icon::Save, "Keep it editable. Share it anywhere.", "Save .myimage for the layers. Export an image or PDF to share.", "Right-click a selection for actions, including Delete.", Color32::from_rgb(239, 234, 227), appearance::INK);
+                    ui.add_space(3.);
+                    egui::Frame::new().fill(appearance::CREAM).corner_radius(7).inner_margin(9).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.label(RichText::new("A little peace of mind").strong().color(appearance::ACCENT));
+                        ui.add(egui::Label::new(RichText::new("Autosave keeps a separate editable recovery copy. If a session ends unexpectedly, choose what to recover next time.").small().color(appearance::INK)).wrap());
+                    });
+                    ui.add_space(4.);
+                    shortcuts(ui);
+                });
+            ui.add_space(7.);
+            ui.horizontal_wrapped(|ui| {
+                if appearance::action_button(ui, "Let's create", Icon::Edit, true, true).clicked() {
+                    dismissed = true;
+                }
+                ui.small(RichText::new("Your calico App menu keeps this guide handy.").color(appearance::MUTED));
             });
+            dismissed |= ctx.input(|i| i.key_pressed(egui::Key::Escape));
         });
-        });
-        ui.add_space(10.);
-        ui.horizontal(|ui| {
-            if ui.add(appearance::primary("Let's go")).clicked() || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                dismissed = true;
-            }
-            ui.weak("Reopen this guide from the calico App menu.");
-        });
-    });
     if dismissed {
         *open = false;
     }
     dismissed
+}
+
+#[allow(clippy::too_many_arguments)]
+fn step_card(
+    ui: &mut egui::Ui,
+    number: &str,
+    icon: Icon,
+    title: &str,
+    body: &str,
+    tip: &str,
+    tint: Color32,
+    accent: Color32,
+) {
+    egui::Frame::new()
+        .fill(Color32::WHITE)
+        .stroke(egui::Stroke::new(
+            1.,
+            appearance::BORDER.gamma_multiply(0.6),
+        ))
+        .corner_radius(9)
+        .inner_margin(12)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(42., 48.), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    egui::Rect::from_center_size(
+                        rect.center_top() + egui::vec2(0., 17.),
+                        egui::vec2(34., 34.),
+                    ),
+                    8,
+                    tint,
+                );
+                appearance::icon(
+                    ui.painter(),
+                    rect.center_top() + egui::vec2(0., 17.),
+                    icon,
+                    accent,
+                    23.,
+                );
+                ui.painter().text(
+                    rect.center_bottom(),
+                    egui::Align2::CENTER_BOTTOM,
+                    number,
+                    egui::FontId::proportional(10.),
+                    accent,
+                );
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(title).strong().color(appearance::INK));
+                    ui.add(egui::Label::new(RichText::new(body).color(appearance::INK)).wrap());
+                    ui.add(
+                        egui::Label::new(RichText::new(tip).small().color(appearance::MUTED))
+                            .wrap(),
+                    );
+                });
+            });
+        });
+}
+
+fn shortcuts(ui: &mut egui::Ui) {
+    ui.collapsing("Shortcuts & little tricks", |ui| {
+        let key = if cfg!(target_os = "macos") {
+            "⌘"
+        } else {
+            "Ctrl"
+        };
+        let column_width = ((ui.available_width() - 16.) / 2.).max(80.);
+        egui::Grid::new("shortcut_reference")
+            .min_col_width(column_width)
+            .max_col_width(column_width)
+            .spacing(egui::vec2(16., 4.))
+            .show(ui, |ui| {
+                for (keys, action) in [
+                    (format!("{key} + S"), "Save editable project"),
+                    (format!("{key} + Shift + S"), "Save as a new project"),
+                    (format!("{key} + C / X / V"), "Copy / cut / paste"),
+                    (
+                        format!("{key} + A"),
+                        "Select all in the focused image or collection",
+                    ),
+                    (format!("{key} + Z / Shift + Z"), "Undo / redo"),
+                    (
+                        "Delete / Backspace".into(),
+                        "Delete the selected area or layers",
+                    ),
+                    ("Escape".into(), "Cancel a selection or operation"),
+                    ("Pinch / Ctrl + scroll".into(), "Zoom around the pointer"),
+                    (
+                        "Ctrl / ⌘ + click".into(),
+                        "Select several Library or Recents items",
+                    ),
+                    (
+                        "Right-click image".into(),
+                        "Selection, image and canvas actions",
+                    ),
+                ] {
+                    ui.label(RichText::new(keys).small().strong());
+                    ui.add(egui::Label::new(RichText::new(action).small()).wrap());
+                    ui.end_row();
+                }
+            });
+    });
 }

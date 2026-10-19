@@ -9,6 +9,42 @@ pub(super) struct RegionDrag {
     adjustment: Option<(Pos2, Rect, [bool; 4])>,
 }
 impl RegionDrag {
+    /// A click snaps to the frontmost window; a drag remains a free region.
+    fn update_smart_region(
+        &mut self,
+        events: &[egui::Event],
+        bounds: Rect,
+        controls: Rect,
+        windows: &[(u32, Rect)],
+    ) {
+        for event in events {
+            let snap = if let egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                ..
+            } = event
+            {
+                (self.active
+                    && self.adjustment.is_none()
+                    && self.start.is_some_and(|p| p.distance(*pos) < 3.))
+                .then(|| {
+                    windows
+                        .iter()
+                        .find(|(_, r)| r.contains(*pos))
+                        .map(|(_, r)| r.intersect(bounds))
+                })
+                .flatten()
+            } else {
+                None
+            };
+            self.update(std::slice::from_ref(event), bounds, controls);
+            if let Some(rect) = snap {
+                self.start = Some(rect.min);
+                self.end = Some(rect.max);
+            }
+        }
+    }
     fn update_window(
         &mut self,
         events: &[egui::Event],
@@ -253,14 +289,33 @@ impl MyImageApp {
         {
             selection.pointer_ready = true;
         }
-        let mode = self.settings.capture_mode;
+        let mut mode = self.settings.capture_mode;
+        if ctx.input(|i| i.key_pressed(egui::Key::Space)) && mode != CaptureMode::Scrolling {
+            mode = if mode == CaptureMode::Window {
+                CaptureMode::Region
+            } else {
+                CaptureMode::Window
+            };
+            selection.drag = RegionDrag::default();
+            selection.window_id = None;
+        }
+        let old_mode = self.settings.capture_mode;
         let mut accepted = None;
         let mut cancel = false;
         let mut window = None;
         // Place the controller before the canvas so its hit region takes priority.
-        let bar = egui::Area::new(egui::Id::new("capture-now-controls"))
-            .order(egui::Order::Foreground)
-            .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0., -24.))
+        let area =
+            egui::Area::new(egui::Id::new("capture-now-controls")).order(egui::Order::Foreground);
+        let area = if let Some(rect) = selection.drag.bounds().filter(|_| !selection.drag.active) {
+            area.fixed_pos(controls_position(
+                ctx.content_rect(),
+                rect,
+                Vec2::new(600., 62.),
+            ))
+        } else {
+            area.anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0., -24.))
+        };
+        let bar = area
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(appearance::NAVY)
@@ -269,11 +324,12 @@ impl MyImageApp {
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 10.;
                         ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(format!("Capture Now  ·  {}", mode.label()))
-                                    .strong()
-                                    .color(Color32::WHITE),
-                            );
+                            ui.label(egui::RichText::new("Capture Now").strong().color(Color32::WHITE));
+                            egui::ComboBox::from_id_salt("capture_mode_live").selected_text(mode.label()).width(110.).show_ui(ui, |ui| {
+                                for choice in [CaptureMode::Region,CaptureMode::Window,CaptureMode::Scrolling] {
+                                    ui.selectable_value(&mut mode,choice,choice.label());
+                                }
+                            }).response.on_hover_text("Space switches Region / Window. Click a window or drag a region.");
                             ui.checkbox(
                                 &mut selection.magnifier,
                                 egui::RichText::new("Magnifier").color(Color32::WHITE),
@@ -309,6 +365,12 @@ impl MyImageApp {
             })
             .response
             .rect;
+        if mode != old_mode {
+            selection.drag = RegionDrag::default();
+            selection.window_id = None;
+            selection.hover_cycle = 0;
+            self.settings.capture_mode = mode;
+        }
         let confirm = accepted.take().is_some() || ctx.input(|i| i.key_pressed(egui::Key::Enter));
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
@@ -339,17 +401,31 @@ impl MyImageApp {
                         ),
                     )
                 };
-                let hovered_window = if matches!(mode, CaptureMode::Window | CaptureMode::Scrolling)
-                {
-                    pointer.filter(|p| !bar.contains(*p)).and_then(|p| {
+                if ctx.input(|i| {
+                    i.events
+                        .iter()
+                        .any(|e| matches!(e, egui::Event::PointerMoved(_)))
+                }) {
+                    selection.hover_cycle = 0;
+                }
+                if ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
+                    selection.hover_cycle = selection.hover_cycle.wrapping_add(1);
+                }
+                let candidates: Vec<_> = pointer
+                    .filter(|p| !bar.contains(*p))
+                    .map(|p| {
                         selection
                             .windows
                             .iter()
-                            .find(|w| window_rect(w).contains(p))
+                            .filter(|w| window_rect(w).contains(p))
+                            .collect()
                     })
-                } else {
-                    None
-                };
+                    .unwrap_or_default();
+                let hovered_window = (!candidates.is_empty())
+                    .then(|| candidates[selection.hover_cycle % candidates.len()]);
+                if mode == CaptureMode::Window && response.hovered() {
+                    ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                }
                 if mode == CaptureMode::Window {
                     if response.clicked()
                         && let Some(w) = hovered_window
@@ -373,13 +449,29 @@ impl MyImageApp {
                         &mut selection.window_id,
                     );
                 } else {
-                    selection
-                        .drag
-                        .update(&ctx.input(|i| i.events.clone()), bounds, bar);
+                    let windows: Vec<_> = hovered_window
+                        .into_iter()
+                        .chain(
+                            selection
+                                .windows
+                                .iter()
+                                .filter(|w| Some(w.id) != hovered_window.map(|w| w.id)),
+                        )
+                        .map(|w| (w.id, window_rect(w)))
+                        .collect();
+                    selection.drag.update_smart_region(
+                        &ctx.input(|i| i.events.clone()),
+                        bounds,
+                        bar,
+                        &windows,
+                    );
                 }
                 let chosen = selection.drag.bounds().map(|r| r.intersect(bounds));
-                let selected =
-                    chosen.or_else(|| hovered_window.map(|w| window_rect(w).intersect(bounds)));
+                let selected = chosen.or_else(|| {
+                    (!selection.drag.active)
+                        .then(|| hovered_window.map(|w| window_rect(w).intersect(bounds)))
+                        .flatten()
+                });
                 let painter = ui.painter();
                 painter.image(
                     selection.texture.id(),
@@ -486,11 +578,11 @@ impl MyImageApp {
                         .paint(painter, p, bounds, bar, &selection.image);
                 }
                 let hint = if mode == CaptureMode::Window {
-                    "Click a window · Enter to capture · Esc to cancel"
+                    "Click a window · Tab cycles overlapping windows · Enter captures"
                 } else if mode == CaptureMode::Scrolling {
                     "Click a window or drag an area · Adjust edges · Start scrolling"
                 } else {
-                    "Drag to select · Move inside / resize edges · Enter to capture"
+                    "Click a window or drag an area · Space switches mode · Enter captures"
                 };
                 let hintrect = Rect::from_center_size(
                     Pos2::new(bounds.center().x, 36.),
@@ -510,6 +602,11 @@ impl MyImageApp {
                             .windows
                             .iter()
                             .find(|w| Some(w.id) == selection.window_id)
+                            .or_else(|| {
+                                (mode == CaptureMode::Window)
+                                    .then_some(hovered_window)
+                                    .flatten()
+                            })
                         {
                             window = Some((
                                 w.id,
@@ -914,6 +1011,23 @@ pub(super) fn demo_scroll_pixel(x: u32, y: u32) -> image::Rgba<u8> {
     ])
 }
 
+/// Keep confirmation controls close to the selection and inside the display.
+fn controls_position(bounds: Rect, selected: Rect, size: Vec2) -> Pos2 {
+    let x = (selected.center().x - size.x / 2.).clamp(
+        bounds.left() + 8.,
+        (bounds.right() - size.x - 8.).max(bounds.left() + 8.),
+    );
+    let below = selected.bottom() + 12.;
+    let y = if below + size.y <= bounds.bottom() - 8. {
+        below
+    } else if selected.top() - 12. - size.y >= bounds.top() + 8. {
+        selected.top() - 12. - size.y
+    } else {
+        bounds.bottom() - size.y - 12.
+    };
+    Pos2::new(x, y.max(bounds.top() + 8.))
+}
+
 /// Ratios remain valid across logical/display pixels and native window capture scale.
 fn window_selection(area: Rect, window: Rect) -> Option<[f32; 4]> {
     let area = area.intersect(window);
@@ -931,6 +1045,84 @@ fn window_selection(area: Rect, window: Rect) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn smart_region_clicks_front_window_but_drags_and_handles_remain_free() {
+        let bounds = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 700.));
+        let front = Rect::from_min_max(egui::pos2(100., 100.), egui::pos2(500., 400.));
+        let back = Rect::from_min_max(egui::pos2(50., 50.), egui::pos2(900., 650.));
+        let windows = [(1, front), (2, back)];
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let click = egui::pos2(200., 200.);
+        let mut d = RegionDrag::default();
+        d.update_smart_region(
+            &[button(click, true), button(click, false)],
+            bounds,
+            Rect::NOTHING,
+            &windows,
+        );
+        assert_eq!(d.bounds(), Some(front));
+        // Resizing after a snapped click must not select a different window.
+        d.update_smart_region(
+            &[
+                button(front.right_bottom(), true),
+                egui::Event::PointerMoved(egui::pos2(700., 500.)),
+                button(egui::pos2(700., 500.), false),
+            ],
+            bounds,
+            Rect::NOTHING,
+            &windows,
+        );
+        assert_eq!(d.bounds().unwrap().max, egui::pos2(700., 500.));
+        d = RegionDrag::default();
+        d.update_smart_region(
+            &[
+                button(click, true),
+                egui::Event::PointerMoved(egui::pos2(800., 600.)),
+                button(egui::pos2(800., 600.), false),
+            ],
+            bounds,
+            Rect::NOTHING,
+            &windows,
+        );
+        assert_eq!(
+            d.bounds(),
+            Some(Rect::from_min_max(click, egui::pos2(800., 600.)))
+        );
+        d = RegionDrag::default();
+        d.update_smart_region(
+            &[button(click, true), button(click, false)],
+            bounds,
+            front,
+            &windows,
+        );
+        assert!(
+            d.bounds().is_none(),
+            "Clicks on controls never select windows"
+        );
+    }
+
+    #[test]
+    fn capture_confirmation_stays_near_selection_and_inside_screen() {
+        let bounds = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 700.));
+        let size = Vec2::new(600., 62.);
+        for selection in [
+            Rect::from_min_max(egui::pos2(10., 10.), egui::pos2(300., 200.)),
+            Rect::from_min_max(egui::pos2(800., 600.), egui::pos2(990., 690.)),
+            bounds,
+        ] {
+            let panel = Rect::from_min_size(controls_position(bounds, selection, size), size);
+            assert!(bounds.contains_rect(panel));
+            if selection != bounds {
+                assert!(!panel.intersects(selection));
+            }
+        }
+    }
+
     #[test]
     fn scrolling_window_click_drag_and_adjust_share_the_same_boundary() {
         let bounds = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 700.));

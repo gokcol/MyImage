@@ -36,7 +36,7 @@ impl CaptureMode {
     }
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Region => "Drag a rectangle around anything on screen.",
+            Self::Region => "Click a window or drag an area. Adjust its edges before capturing.",
             Self::Window => "Point to a window, click to select, then capture.",
             Self::FullScreen => "Capture the entire selected display.",
             Self::Scrolling => {
@@ -460,7 +460,7 @@ mod macos {
 
     fn describe_error(action: &str, error: &NSError) -> String {
         format!(
-            "ScreenCaptureKit could not {action}: {} ({} {}). Check MyImage's Screen & System Audio Recording permission, then quit and reopen this exact app bundle. A rebuilt ad-hoc signed app may need its permission renewed.",
+            "ScreenCaptureKit could not {action}: {} ({} {}). Check MyImage's Screen & System Audio Recording permission, then quit and reopen this exact app bundle. If access is already enabled, macOS may be retaining a grant for an older signing identity.",
             error.localizedDescription(),
             error.domain(),
             error.code(),

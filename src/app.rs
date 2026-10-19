@@ -94,6 +94,7 @@ struct Selection {
     placement_frames: u8,
     windows: Vec<capture::WindowInfo>,
     window_id: Option<u32>,
+    hover_cycle: usize,
     magnifier: bool,
     magnifier_preview: crate::capture_magnifier::CaptureMagnifier,
     pointer_ready: bool,
@@ -475,7 +476,9 @@ impl MyImageApp {
                     },
                     windows: if matches!(
                         mode,
-                        capture::CaptureMode::Window | capture::CaptureMode::Scrolling
+                        capture::CaptureMode::Region
+                            | capture::CaptureMode::Window
+                            | capture::CaptureMode::Scrolling
                     ) {
                         vec![capture::WindowInfo {
                             id: 0,
@@ -493,9 +496,15 @@ impl MyImageApp {
                 capture::capture_display(display.id, pointer).and_then(|image| {
                     let windows = if matches!(
                         mode,
-                        capture::CaptureMode::Window | capture::CaptureMode::Scrolling
+                        capture::CaptureMode::Region
+                            | capture::CaptureMode::Window
+                            | capture::CaptureMode::Scrolling
                     ) {
-                        capture::windows()?
+                        match capture::windows() {
+                            Ok(w) => w,
+                            Err(_) if mode == capture::CaptureMode::Region => Vec::new(),
+                            Err(e) => return Err(e),
+                        }
                     } else {
                         vec![]
                     };
@@ -1021,6 +1030,7 @@ impl MyImageApp {
                                 placement_frames: 0,
                                 windows: frame.windows,
                                 window_id: None,
+                                hover_cycle: 0,
                                 magnifier: true,
                                 magnifier_preview: Default::default(),
                                 pointer_ready: false,
@@ -1961,7 +1971,7 @@ impl eframe::App for MyImageApp {
                                 ui.set_min_width(210.);
                                 ui.horizontal(|ui| {
                                     ui.strong("MyImage");
-                                    ui.weak("1.0.0 · build 40");
+                                    ui.weak(concat!(env!("CARGO_PKG_VERSION"), " · build 45"));
                                 });
                                 ui.separator();
                                 let enabled = self.document.is_some()
@@ -2199,7 +2209,7 @@ impl eframe::App for MyImageApp {
             && !self.recovery.prompt
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
-            && crate::onboarding::show(ctx, &mut self.guide_open)
+            && crate::onboarding::show(ctx, &mut self.guide_open, &self.app_icon)
         {
             self.settings.guide_version = crate::onboarding::VERSION;
             self.persist_settings();
