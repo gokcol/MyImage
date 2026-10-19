@@ -10,7 +10,7 @@ Real capture, rounded PNG saving/viewing, and both physical capture shortcuts we
 
 ## Run
 
-Install a current stable Rust toolchain and your platform's native build tools: Xcode Command Line Tools on macOS, or the Visual Studio C++ build tools with a Windows SDK on Windows.
+Install rustup (the repository pins Rust 1.93.1) and your platform's native build tools: Xcode Command Line Tools on macOS, or the Visual Studio C++ build tools with a Windows SDK on Windows.
 
 ```sh
 cargo run
@@ -326,7 +326,7 @@ cargo run -- --demo
 
 `--demo` substitutes a generated 1600 × 1000 test image for screen pixels. It exercises selection, masks, saving, and viewing without requesting Screen Recording access. Every demo launch starts with isolated defaults and an output folder at the system temporary directory's `MyImage-demo` subfolder; it does not load or persist normal settings. Demo success does not validate real capture, monitor placement, permissions, or global shortcuts.
 
-See [docs/VALIDATION.md](docs/RELEASE-VALIDATION.md) for the manual desktop checks and verification record.
+See [release validation](docs/RELEASE-VALIDATION.md) for the manual desktop checks and verification record.
 
 ### Play with Calico
 

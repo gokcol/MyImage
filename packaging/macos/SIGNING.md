@@ -56,8 +56,9 @@ app startup, and never reset any other app's permissions.
 
 Disposable builds can explicitly use `bundle --ad-hoc`; these are unsuitable for
 normal installation because their privacy identity changes on rebuild.
-The macOS CI job explicitly uses this mode for its development artifacts, without
-creating or importing any signing credentials on a hosted runner.
+The macOS CI job runs formatting, lint and unit checks without creating or
+importing signing credentials on a hosted runner. Public signing stays on the
+maintainer's Mac.
 
 ## Calico icon
 

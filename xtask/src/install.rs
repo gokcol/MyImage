@@ -38,6 +38,16 @@ fn verify(app: &Path) -> TaskResult<()> {
     }
     Ok(())
 }
+fn verify_requirement(app: &Path, expression: &str) -> TaskResult<()> {
+    // codesign treats -R values as filenames unless an inline expression starts with '='.
+    checked(
+        Command::new("/usr/bin/codesign")
+            .args(["--verify", "-R"])
+            .arg(format!("={expression}"))
+            .arg(app),
+        "Verify required signer",
+    )
+}
 fn requirement(app: &Path) -> TaskResult<String> {
     let out = text(
         Command::new("/usr/bin/codesign")
@@ -101,7 +111,10 @@ pub fn run(workspace: &Path, migration: bool, unnotarized: bool) -> TaskResult<(
     stopped()?;
     verify(&source)?;
     // Updates must be signed by this app's distributor, not merely any Apple developer.
-    checked(Command::new("/usr/bin/codesign").args(["--verify", "-R", "anchor apple generic and identifier \"com.myimage.app\" and certificate leaf[subject.OU] = \"HXDYTBC6ZT\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists"]).arg(&source), "Verify MyImage Developer ID")?;
+    verify_requirement(
+        &source,
+        "anchor apple generic and identifier \"com.myimage.app\" and certificate leaf[subject.OU] = \"HXDYTBC6ZT\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists",
+    )?;
     if !unnotarized {
         checked(
             Command::new("/usr/sbin/spctl")
@@ -227,6 +240,14 @@ pub fn notarize(workspace: &Path, profile: &str) -> TaskResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inline_requirement_is_parsed_and_enforced_by_codesign() {
+        let apple_binary = Path::new("/usr/bin/true");
+        assert!(verify_requirement(apple_binary, "anchor apple").is_ok());
+        assert!(
+            verify_requirement(apple_binary, "identifier \"com.myimage.nonexistent\"").is_err()
+        );
+    }
     #[test]
     fn update_rejects_same_build_and_downgrades() {
         assert!(check_upgrade(40, 39).is_ok());
