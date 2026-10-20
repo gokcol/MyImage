@@ -7,9 +7,9 @@ pending, including real capture, clipboard, DPI, permissions and tray behavior.
 
 ## Signing
 
-The Mac GitHub release is Developer ID signed and notarized. The Windows portable
-GitHub download is **UNTESTED and unsigned** unless a production Windows signing
-service is configured. A Mac certificate cannot sign Windows binaries.
+The Mac GitHub release is Developer ID signed and notarized. Windows builds are **UNTESTED**. The GitHub release workflow refuses to upload
+a Windows download until a production Windows signing service is configured
+and a trusted timestamped signature is verified. A Mac certificate cannot sign Windows binaries.
 
 Microsoft signs an MSIX after Store submission/certification. The unsigned MSIX
 produced here is an upload artifact, not a direct GitHub installer. Test identities

@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 1.2](https://github.com/gokcol/MyImage/releases/tag/v1.2) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
+[Download MyImage 1.2](https://github.com/gokcol/MyImage/releases/tag/v1.2) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; its release download requires production signing.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -12,8 +12,9 @@ Real capture, rounded PNG saving/viewing, and both physical capture shortcuts we
 
 ## Microsoft Store and signing
 
-The macOS release is signed with Developer ID and notarized. The Windows GitHub
-portable build is **UNTESTED and unsigned**. Store packaging is a separate MSIX
+The macOS release is signed with Developer ID and notarized. Windows builds remain **UNTESTED**. A GitHub release download is uploaded only
+after its production signature and timestamp are verified; signing configuration
+is still required. Store packaging is a separate MSIX
 pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
