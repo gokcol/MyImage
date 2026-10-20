@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 pub struct Options {
     pub zoom: f32,
     pub ellipse: bool,
+    pub rounded: bool,
+    pub linked: bool,
+    /// Source displacement in lens widths/heights; transforms with the object.
+    pub source_offset: [f32; 2],
     pub dim: u8,
     pub blur: u32,
 }
@@ -16,6 +20,9 @@ impl Default for Options {
         Self {
             zoom: 2.,
             ellipse: true,
+            rounded: false,
+            linked: false,
+            source_offset: [-0.85, -0.65],
             dim: 60,
             blur: 0,
         }
@@ -30,6 +37,10 @@ impl Options {
             || !(1.0..=8.).contains(&self.zoom)
             || self.dim > 100
             || self.blur > 128
+            || self
+                .source_offset
+                .iter()
+                .any(|v| !v.is_finite() || v.abs() > 32768.)
         {
             Err("Invalid magnification or spotlight settings.".into())
         } else {
@@ -50,21 +61,55 @@ pub fn polygon_contains(points: &[crate::document::Point], x: f32, y: f32) -> bo
     }
     inside
 }
+pub fn lens_rect(a: &Annotation) -> eframe::egui::Rect {
+    eframe::egui::Rect::from_two_pos(
+        eframe::egui::pos2(a.start.x, a.start.y),
+        eframe::egui::pos2(a.end.x, a.end.y),
+    )
+}
+pub fn source_center(a: &Annotation) -> eframe::egui::Pos2 {
+    let r = lens_rect(a);
+    r.center() + r.size() * eframe::egui::vec2(a.studio.source_offset[0], a.studio.source_offset[1])
+}
+pub fn set_source_center(a: &mut Annotation, center: eframe::egui::Pos2) {
+    let r = lens_rect(a);
+    let offset = (center - r.center()) / r.size().max(eframe::egui::Vec2::splat(1.));
+    a.studio.source_offset = [offset.x, offset.y];
+}
+pub fn source_rect(a: &Annotation) -> eframe::egui::Rect {
+    eframe::egui::Rect::from_center_size(source_center(a), lens_rect(a).size() / a.studio.zoom)
+}
+pub fn advanced(a: &Options) -> bool {
+    a.rounded || a.linked
+}
+/// Positive distance inside the silhouette, in image pixels.
+fn inset_distance(rect: eframe::egui::Rect, p: eframe::egui::Pos2, options: &Options) -> f32 {
+    let half = rect.size() / 2.;
+    if half.x <= 0. || half.y <= 0. {
+        return -1.;
+    }
+    let v = p - rect.center();
+    if options.ellipse {
+        (1. - (v / half).length()) * half.min_elem()
+    } else if options.rounded {
+        let radius = half.min_elem() * 0.32;
+        let q = v.abs() - half + eframe::egui::Vec2::splat(radius);
+        radius - q.max(eframe::egui::Vec2::ZERO).length() - q.max_elem().min(0.)
+    } else {
+        (half - v.abs()).min_elem()
+    }
+}
 pub fn contains(a: &Annotation, x: f32, y: f32) -> bool {
-    let l = a.start.x.min(a.end.x);
-    let t = a.start.y.min(a.end.y);
-    let w = (a.end.x - a.start.x).abs();
-    let h = (a.end.y - a.start.y).abs();
-    if w <= 0. || h <= 0. {
+    let r = lens_rect(a);
+    if r.width() <= 0. || r.height() <= 0. {
         return false;
     }
-    let nx = (x - l) / w;
-    let ny = (y - t) / h;
-    (0.0..1.).contains(&nx)
-        && (0.0..1.).contains(&ny)
-        && (!a.studio.ellipse || (nx * 2. - 1.).powi(2) + (ny * 2. - 1.).powi(2) <= 1.)
-        && a.pixel_mask.as_ref().is_none_or(|m| m.contains(nx, ny))
-        && (a.area_mask.is_empty() || polygon_contains(&a.area_mask, nx, ny))
+    let p = eframe::egui::pos2(x, y);
+    let n = (p - r.min) / r.size();
+    r.contains(p)
+        && inset_distance(r, p, &a.studio) >= 0.
+        && a.pixel_mask.as_ref().is_none_or(|m| m.contains(n.x, n.y))
+        && (a.area_mask.is_empty() || polygon_contains(&a.area_mask, n.x, n.y))
 }
 fn blend(dst: &mut Rgba<u8>, color: [u8; 4]) {
     let a = color[3] as f32 / 255.;
@@ -98,41 +143,66 @@ pub fn apply(
     }
     match a.kind {
         AnnotationKind::Magnify => {
-            // Snapshot only the source rectangle; never sample already enlarged pixels.
-            let x = l.floor().clamp(0., image.width() as f32) as u32;
-            let y = t.floor().clamp(0., image.height() as f32) as u32;
-            let right = r.ceil().clamp(0., image.width() as f32) as u32;
-            let bottom = b.ceil().clamp(0., image.height() as f32) as u32;
-            if right <= x || bottom <= y {
-                return Ok(());
-            }
-            let source = image::imageops::crop_imm(image, x, y, right - x, bottom - y).to_image();
-            let cx = (l + r) / 2.;
-            let cy = (t + b) / 2.;
+            let lens = lens_rect(&a);
+            let source_bounds = if a.studio.linked {
+                source_rect(&a)
+            } else {
+                eframe::egui::Rect::from_center_size(lens.center(), lens.size() / a.studio.zoom)
+            };
+            // Snapshot the actual source before painting either the connector or lens.
+            let sx0 = source_bounds.left().floor().clamp(0., image.width() as f32) as u32;
+            let sy0 = source_bounds.top().floor().clamp(0., image.height() as f32) as u32;
+            let sx1 = source_bounds.right().ceil().clamp(0., image.width() as f32) as u32;
+            let sy1 = source_bounds
+                .bottom()
+                .ceil()
+                .clamp(0., image.height() as f32) as u32;
+            let source =
+                image::imageops::crop_imm(image, sx0, sy0, sx1 - sx0, sy1 - sy0).to_image();
             let border = annotation.stroke_width * scale[0].min(scale[1]);
-            for py in y..bottom {
-                for px in x..right {
-                    let fx = px as f32 + 0.5;
-                    let fy = py as f32 + 0.5;
-                    if !contains(&a, fx, fy) {
+            if a.studio.linked {
+                let bounds = lens.union(source_bounds).expand(border);
+                let start = source_bounds.center();
+                let end = lens.center();
+                let d = end - start;
+                for py in bounds.top().floor().max(0.) as u32
+                    ..bounds.bottom().ceil().clamp(0., image.height() as f32) as u32
+                {
+                    for px in bounds.left().floor().max(0.) as u32
+                        ..bounds.right().ceil().clamp(0., image.width() as f32) as u32
+                    {
+                        let p = eframe::egui::pos2(px as f32 + 0.5, py as f32 + 0.5);
+                        let edge = inset_distance(source_bounds, p, &a.studio);
+                        let t = ((p - start).dot(d) / d.length_sq().max(0.001)).clamp(0., 1.);
+                        let line = p.distance(start + d * t) < border * 0.5;
+                        if (edge >= 0. && edge < border)
+                            || (line && edge < 0. && inset_distance(lens, p, &a.studio) < 0.)
+                        {
+                            blend(image.get_pixel_mut(px, py), a.color);
+                        }
+                    }
+                }
+            }
+            for py in t.floor().max(0.) as u32..b.ceil().clamp(0., image.height() as f32) as u32 {
+                for px in l.floor().max(0.) as u32..r.ceil().clamp(0., image.width() as f32) as u32
+                {
+                    let p = eframe::egui::pos2(px as f32 + 0.5, py as f32 + 0.5);
+                    if !contains(&a, p.x, p.y) {
                         continue;
                     }
-                    let sx = (cx + (fx - cx) / a.studio.zoom)
-                        .floor()
-                        .clamp(x as f32, (right - 1) as f32) as u32;
-                    let sy = (cy + (fy - cy) / a.studio.zoom)
-                        .floor()
-                        .clamp(y as f32, (bottom - 1) as f32) as u32;
-                    let mut pixel = *source.get_pixel(sx - x, sy - y);
-                    let edge = if a.studio.ellipse {
-                        let d = (((fx - cx) / ((r - l) / 2.)).powi(2)
-                            + ((fy - cy) / ((b - t) / 2.)).powi(2))
-                        .sqrt();
-                        (1. - d) * (r - l).min(b - t) / 2. < border
+                    let sample = source_bounds.center() + (p - lens.center()) / a.studio.zoom;
+                    let sx = sample.x.floor() as i64;
+                    let sy = sample.y.floor() as i64;
+                    let mut pixel = if sx >= sx0 as i64
+                        && sx < sx1 as i64
+                        && sy >= sy0 as i64
+                        && sy < sy1 as i64
+                    {
+                        *source.get_pixel(sx as u32 - sx0, sy as u32 - sy0)
                     } else {
-                        (fx - l).min(r - fx).min(fy - t).min(b - fy) < border
+                        Rgba([0; 4])
                     };
-                    if edge {
+                    if inset_distance(lens, p, &a.studio) < border {
                         blend(&mut pixel, a.color);
                     }
                     image.put_pixel(px, py, pixel);

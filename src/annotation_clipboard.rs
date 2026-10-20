@@ -1,7 +1,6 @@
 //! A bounded, versioned native text clipboard payload. No source image pixels.
 use super::*;
 use crate::appearance::Icon as DialogIcon;
-use crate::dialogs;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -432,7 +431,7 @@ impl EditorState {
                     ui.painter().rect(
                         rect.shrink(1.),
                         6,
-                        dialogs::CHARCOAL,
+                        crate::appearance::palette(ui.ctx()).navy,
                         egui::Stroke::NONE,
                         egui::StrokeKind::Inside,
                     );
@@ -444,7 +443,7 @@ impl EditorState {
                         } else {
                             DialogIcon::Copy
                         },
-                        crate::appearance::GINGER,
+                        crate::appearance::palette(ui.ctx()).ginger,
                         15.,
                     );
                     let painter = ui

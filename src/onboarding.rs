@@ -15,13 +15,13 @@ pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) 
             ui.spacing_mut().item_spacing.y = 7.;
             ui.horizontal(|ui| {
                 let (badge, _) = ui.allocate_exact_size(egui::vec2(64., 68.), egui::Sense::hover());
-                ui.painter().circle_filled(badge.center(), 30., appearance::CREAM);
+                ui.painter().circle_filled(badge.center(), 30., appearance::palette(ui.ctx()).cream);
                 ui.painter().image(calico.id(), badge.shrink(3.), egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)), Color32::WHITE);
                 appearance::calico_tabs(ui.painter(), badge.left_bottom() + egui::vec2(24., -2.));
                 ui.add_space(9.);
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("Small paws. Big ideas.").size(23.).strong().color(appearance::INK));
-                    ui.label(RichText::new("Capture it. Make it yours.").color(appearance::MUTED));
+                    ui.label(RichText::new("Small paws. Big ideas.").size(23.).strong().color(appearance::palette(ui.ctx()).ink));
+                    ui.label(RichText::new("Capture it. Make it yours.").color(appearance::palette(ui.ctx()).muted));
                 });
             });
             ui.add_space(6.);
@@ -29,14 +29,14 @@ pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) 
                 .id_salt("quick_start_body")
                 .max_height((ctx.content_rect().height() - 330.).clamp(110., 400.))
                 .show(ui, |ui| {
-                    step_card(ui, "01", Icon::Capture, "Catch a moment", "Capture a region, a window, or your whole screen.", "Ctrl + Shift + .  ·  On Mac, ⌘ + Shift + . also works", appearance::CREAM, appearance::ACCENT);
+                    step_card(ui, "01", Icon::Capture, "Catch a moment", "Capture a region, a window, or your whole screen.", "Ctrl + Shift + .  ·  On Mac, ⌘ + Shift + . also works", appearance::palette(ui.ctx()).cream, appearance::palette(ui.ctx()).accent);
                     step_card(ui, "02", Icon::Edit, "Make your mark", "Add arrows, text and stamps. Click an object to style it.", "Drag a selection to move pixels; use its handles to adjust the boundary.", Color32::from_rgb(229, 242, 239), Color32::from_rgb(30, 104, 94));
-                    step_card(ui, "03", Icon::Save, "Keep it editable. Share it anywhere.", "Save .myimage for the layers. Export an image or PDF to share.", "Right-click a selection for actions, including Delete.", Color32::from_rgb(239, 234, 227), appearance::INK);
+                    step_card(ui, "03", Icon::Save, "Keep it editable. Share it anywhere.", "Save .myimage for the layers. Export an image or PDF to share.", "Right-click a selection for actions, including Delete.", Color32::from_rgb(239, 234, 227), appearance::palette(ui.ctx()).ink);
                     ui.add_space(3.);
-                    egui::Frame::new().fill(appearance::CREAM).corner_radius(7).inner_margin(9).show(ui, |ui| {
+                    egui::Frame::new().fill(appearance::palette(ui.ctx()).cream).corner_radius(7).inner_margin(9).show(ui, |ui| {
                         ui.set_width(ui.available_width());
-                        ui.label(RichText::new("A little peace of mind").strong().color(appearance::ACCENT));
-                        ui.add(egui::Label::new(RichText::new("Autosave keeps a separate editable recovery copy. If a session ends unexpectedly, choose what to recover next time.").small().color(appearance::INK)).wrap());
+                        ui.label(RichText::new("A little peace of mind").strong().color(appearance::palette(ui.ctx()).accent));
+                        ui.add(egui::Label::new(RichText::new("Autosave keeps a separate editable recovery copy. If a session ends unexpectedly, choose what to recover next time.").small().color(appearance::palette(ui.ctx()).ink)).wrap());
                     });
                     ui.add_space(4.);
                     shortcuts(ui);
@@ -46,7 +46,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) 
                 if dialogs::primary(ui, "Let's create", Icon::Edit).clicked() {
                     dismissed = true;
                 }
-                ui.small(RichText::new("Your calico App menu keeps this guide handy.").color(appearance::MUTED));
+                ui.small(RichText::new("Your calico App menu keeps this guide handy.").color(appearance::palette(ui.ctx()).muted));
             });
             dismissed |= ctx.input(|i| i.key_pressed(egui::Key::Escape));
         });
@@ -71,7 +71,7 @@ fn step_card(
         .fill(Color32::WHITE)
         .stroke(egui::Stroke::new(
             1.,
-            appearance::BORDER.gamma_multiply(0.6),
+            appearance::palette(ui.ctx()).border.gamma_multiply(0.6),
         ))
         .corner_radius(9)
         .inner_margin(12)
@@ -102,11 +102,24 @@ fn step_card(
                     accent,
                 );
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(title).strong().color(appearance::INK));
-                    ui.add(egui::Label::new(RichText::new(body).color(appearance::INK)).wrap());
+                    ui.label(
+                        RichText::new(title)
+                            .strong()
+                            .color(appearance::palette(ui.ctx()).ink),
+                    );
                     ui.add(
-                        egui::Label::new(RichText::new(tip).small().color(appearance::MUTED))
-                            .wrap(),
+                        egui::Label::new(
+                            RichText::new(body).color(appearance::palette(ui.ctx()).ink),
+                        )
+                        .wrap(),
+                    );
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(tip)
+                                .small()
+                                .color(appearance::palette(ui.ctx()).muted),
+                        )
+                        .wrap(),
                     );
                 });
             });

@@ -359,7 +359,7 @@ impl EditorState {
             badge.size(),
         );
         ui.painter()
-            .rect_filled(badge, 4., crate::dialogs::CHARCOAL);
+            .rect_filled(badge, 4., crate::appearance::palette(ui.ctx()).navy);
         ui.painter()
             .galley(badge.min + egui::vec2(8., 5.), galley, Color32::WHITE);
         ui.ctx().set_cursor_icon(drag.edge.cursor());
@@ -406,11 +406,11 @@ fn paint_handles(painter: &egui::Painter, rect: Rect, hover: Option<Edge>) {
             Rect::from_center_size(edge.position(rect), Vec2::splat(6.)),
             0.,
             if active {
-                crate::appearance::GINGER
+                crate::appearance::palette(painter.ctx()).ginger
             } else {
                 Color32::from_gray(245)
             },
-            Stroke::new(1., crate::dialogs::CHARCOAL),
+            Stroke::new(1., crate::appearance::palette(painter.ctx()).navy),
             StrokeKind::Inside,
         );
     }

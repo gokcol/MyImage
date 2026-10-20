@@ -45,6 +45,8 @@ impl UiTextSize {
 pub struct Settings {
     pub guide_version: u8,
     pub ui_text_size: UiTextSize,
+    pub gui_finish: crate::appearance::GuiFinish,
+    pub icon_style: crate::icon_style::IconStyle,
     pub output_dir: PathBuf,
     pub display_id: Option<u32>,
     pub shape: String,
@@ -68,6 +70,8 @@ impl Default for Settings {
         Self {
             guide_version: 0,
             ui_text_size: UiTextSize::Normal,
+            gui_finish: Default::default(),
+            icon_style: Default::default(),
             output_dir: base.join("MyImage"),
             display_id: None,
             shape: "rectangle".into(),
@@ -263,6 +267,30 @@ mod tests {
         );
         assert_eq!(project_save_directory(&settings, Some(&project)), directory);
         assert_eq!(fs::read(project).unwrap(), bytes);
+    }
+
+    #[test]
+    fn gui_finish_defaults_for_existing_settings_and_survives_restart() {
+        use crate::appearance::GuiFinish;
+        let legacy: Settings =
+            serde_json::from_str(r#"{"include_pointer":true,"ui_text_size":"large"}"#).unwrap();
+        assert_eq!(legacy.gui_finish, GuiFinish::CobaltSatin);
+        assert_eq!(legacy.icon_style, crate::icon_style::IconStyle::StudioColor);
+        assert_eq!(legacy.ui_text_size, UiTextSize::Large);
+        for finish in GuiFinish::ALL {
+            for icon_style in crate::icon_style::IconStyle::ALL {
+                let mut settings = legacy.clone();
+                settings.gui_finish = finish;
+                settings.icon_style = icon_style;
+                let restored: Settings =
+                    serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+                assert_eq!(restored.gui_finish, finish);
+                assert_eq!(restored.icon_style, icon_style);
+                assert_eq!(restored.output_dir, legacy.output_dir);
+                assert_eq!(restored.ui_text_size, legacy.ui_text_size);
+                assert!(restored.include_pointer);
+            }
+        }
     }
 
     #[test]

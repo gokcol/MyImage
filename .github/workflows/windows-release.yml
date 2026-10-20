@@ -1,7 +1,6 @@
 name: Windows build — UNTESTED
 on:
-  push:
-    tags: ['v*']
+  # Windows distribution uses Microsoft Store. Direct signed downloads are opt-in.
   workflow_dispatch:
     inputs:
       release_tag:

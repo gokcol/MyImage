@@ -4,10 +4,6 @@ use eframe::egui::{
     self, Color32, CornerRadius, Frame, Id, Response, RichText, Shadow, Stroke, Vec2,
 };
 
-pub const CHARCOAL: Color32 = Color32::from_rgb(41, 43, 47);
-pub const SURFACE: Color32 = Color32::from_rgb(250, 250, 250);
-pub const LINE: Color32 = Color32::from_rgb(216, 219, 223);
-pub const MUTED: Color32 = Color32::from_rgb(103, 109, 117);
 pub const DANGER: Color32 = Color32::from_rgb(157, 51, 44);
 
 pub struct Dialog<'a> {
@@ -15,6 +11,7 @@ pub struct Dialog<'a> {
     subtitle: &'a str,
     icon: Icon,
     width: f32,
+    fit_content: bool,
 }
 impl<'a> Dialog<'a> {
     pub fn new(title: &'a str, subtitle: &'a str, icon: Icon, width: f32) -> Self {
@@ -23,7 +20,12 @@ impl<'a> Dialog<'a> {
             subtitle,
             icon,
             width,
+            fit_content: false,
         }
+    }
+    pub fn fit_content(mut self) -> Self {
+        self.fit_content = true;
+        self
     }
     pub fn modal<R>(
         self,
@@ -32,7 +34,7 @@ impl<'a> Dialog<'a> {
         content: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::ModalResponse<R> {
         egui::Modal::new(id)
-            .frame(surface())
+            .frame(surface(ctx))
             .backdrop_color(Color32::from_black_alpha(85))
             .show(ctx, |ui| self.contents(ui, false, content).0)
     }
@@ -44,17 +46,22 @@ impl<'a> Dialog<'a> {
         content: impl FnOnce(&mut egui::Ui) -> R,
     ) {
         let mut close = false;
-        egui::Window::new(self.title)
+        let window = egui::Window::new(self.title)
             .id(id)
             .open(open)
             .title_bar(false)
             .collapsible(false)
             .resizable(false)
-            .frame(surface())
-            .default_width(self.width)
-            .show(ctx, |ui| {
-                close = self.contents(ui, true, content).1;
-            });
+            .frame(surface(ctx))
+            .default_width(self.width);
+        let window = if self.fit_content {
+            window.auto_sized()
+        } else {
+            window
+        };
+        window.show(ctx, |ui| {
+            close = self.contents(ui, true, content).1;
+        });
         if close {
             *open = false;
         }
@@ -72,7 +79,7 @@ impl<'a> Dialog<'a> {
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         let mut close = false;
         let header = Frame::new()
-            .fill(CHARCOAL)
+            .fill(appearance::palette(ui.ctx()).navy)
             .corner_radius(CornerRadius {
                 nw: 8,
                 ne: 8,
@@ -88,12 +95,12 @@ impl<'a> Dialog<'a> {
                 ui.horizontal_top(|ui| {
                     let (badge, _) = ui.allocate_exact_size(Vec2::splat(34.), egui::Sense::hover());
                     ui.painter()
-                        .rect_filled(badge, 7, Color32::from_rgb(65, 61, 57));
+                        .rect_filled(badge, 7, appearance::palette(ui.ctx()).ink);
                     appearance::icon(
                         ui.painter(),
                         badge.center(),
                         self.icon,
-                        appearance::GINGER,
+                        appearance::palette(ui.ctx()).ginger,
                         20.,
                     );
                     let text_width =
@@ -165,10 +172,10 @@ impl<'a> Dialog<'a> {
     }
 }
 
-pub fn surface() -> Frame {
+pub fn surface(ctx: &egui::Context) -> Frame {
     Frame::new()
-        .fill(SURFACE)
-        .stroke(Stroke::new(1., LINE))
+        .fill(appearance::palette(ctx).paper)
+        .stroke(Stroke::new(1., appearance::palette(ctx).border))
         .corner_radius(8)
         .shadow(Shadow {
             offset: [0, 12],
@@ -181,25 +188,26 @@ fn apply_style(ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(8., 8.);
     ui.spacing_mut().button_padding = egui::vec2(10., 6.);
     ui.spacing_mut().interact_size.y = 30.;
+    let palette = appearance::palette(ui.ctx());
     let visuals = &mut ui.style_mut().visuals;
-    visuals.override_text_color = Some(CHARCOAL);
-    visuals.weak_text_color = Some(MUTED);
+    visuals.override_text_color = Some(palette.navy);
+    visuals.weak_text_color = Some(palette.muted);
     visuals.extreme_bg_color = Color32::WHITE;
-    visuals.selection.bg_fill = Color32::from_rgb(242, 220, 194);
+    visuals.selection.bg_fill = palette.cream;
     for widget in [
         &mut visuals.widgets.inactive,
         &mut visuals.widgets.hovered,
         &mut visuals.widgets.active,
     ] {
         widget.corner_radius = CornerRadius::same(5);
-        widget.bg_stroke = Stroke::new(1., LINE);
+        widget.bg_stroke = Stroke::new(1., palette.border);
     }
     visuals.widgets.inactive.bg_fill = Color32::WHITE;
     visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
-    visuals.widgets.hovered.bg_fill = Color32::from_rgb(242, 237, 230);
+    visuals.widgets.hovered.bg_fill = palette.cream;
     visuals.widgets.hovered.weak_bg_fill = visuals.widgets.hovered.bg_fill;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1., appearance::ACCENT);
-    visuals.widgets.active.bg_stroke = Stroke::new(1.5, appearance::ACCENT);
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1., palette.accent);
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5, palette.accent);
 }
 
 #[derive(Clone, Copy)]
@@ -217,11 +225,15 @@ pub fn button(
 ) -> Response {
     let (fill, ink, line) = match action {
         Action::Primary => (
-            appearance::ACCENT,
+            appearance::palette(ui.ctx()).accent,
             Color32::WHITE,
-            Color32::from_rgb(126, 61, 23),
+            appearance::palette(ui.ctx()).accent,
         ),
-        Action::Secondary => (Color32::WHITE, CHARCOAL, LINE),
+        Action::Secondary => (
+            Color32::WHITE,
+            appearance::palette(ui.ctx()).navy,
+            appearance::palette(ui.ctx()).border,
+        ),
         Action::Danger => (
             Color32::from_rgb(253, 240, 237),
             DANGER,
@@ -250,6 +262,15 @@ pub fn button(
     if ui.is_rect_visible(response.rect) {
         let active = enabled && ui.is_enabled();
         if active {
+            if !matches!(action, Action::Danger) {
+                appearance::satin(
+                    ui.painter(),
+                    response.rect,
+                    6.,
+                    matches!(action, Action::Primary),
+                    response.is_pointer_button_down_on(),
+                );
+            }
             ui.painter().set(
                 shadow_index,
                 Shadow {
@@ -264,7 +285,7 @@ pub fn button(
                 ui.painter().rect_stroke(
                     response.rect.expand(1.),
                     7,
-                    Stroke::new(1.5, appearance::ACCENT),
+                    Stroke::new(1.5, appearance::palette(ui.ctx()).accent),
                     egui::StrokeKind::Outside,
                 );
             }
@@ -311,14 +332,14 @@ pub fn notice(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str, error: boo
         .fill(if error {
             Color32::from_rgb(253, 241, 238)
         } else {
-            Color32::from_rgb(239, 241, 243)
+            appearance::palette(ui.ctx()).base
         })
         .stroke(Stroke::new(
             1.,
             if error {
                 Color32::from_rgb(231, 201, 195)
             } else {
-                LINE
+                appearance::palette(ui.ctx()).border
             },
         ))
         .corner_radius(6)
@@ -330,18 +351,26 @@ pub fn notice(ui: &mut egui::Ui, icon: Icon, title: &str, text: &str, error: boo
                     ui.painter(),
                     rect.center(),
                     icon,
-                    if error { DANGER } else { appearance::ACCENT },
+                    if error {
+                        DANGER
+                    } else {
+                        appearance::palette(ui.ctx()).accent
+                    },
                     18.,
                 );
                 ui.vertical(|ui| {
                     if !title.is_empty() {
-                        ui.label(RichText::new(title).strong().color(CHARCOAL));
+                        ui.label(
+                            RichText::new(title)
+                                .strong()
+                                .color(appearance::palette(ui.ctx()).navy),
+                        );
                     }
                     ui.add(
                         egui::Label::new(RichText::new(text).color(if error {
                             DANGER
                         } else {
-                            MUTED
+                            appearance::palette(ui.ctx()).muted
                         }))
                         .wrap(),
                     );

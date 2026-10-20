@@ -44,11 +44,13 @@ struct TextKey {
     size: [u32; 2],
     number: u32,
     style: crate::text_style::TextStyle,
+    callout_style: crate::callout_style::CalloutStyle,
 }
 
 impl TextKey {
     fn matches(&self, annotation: &Annotation) -> bool {
         self.style == annotation.text_style
+            && self.callout_style == annotation.callout_style
             && self.text == annotation.text
             && self.font_size == annotation.font_size.to_bits()
             && self.kind == Self::kind(annotation)
@@ -65,6 +67,7 @@ impl TextKey {
         Self {
             text: annotation.text.clone(),
             style: annotation.text_style.clone(),
+            callout_style: annotation.callout_style,
             font_size: annotation.font_size.to_bits(),
             kind: Self::kind(annotation),
             size: Self::size(annotation),
@@ -223,7 +226,12 @@ fn text_layout(
         let shift = -galley.rect.min.to_vec2();
         return Ok((galley, shift));
     }
-    let body = Rect::from_two_pos(pos(annotation.start), pos(annotation.end));
+    let original_body = Rect::from_two_pos(pos(annotation.start), pos(annotation.end));
+    let body = if annotation.kind == AnnotationKind::Callout {
+        crate::callout_style::text_body(annotation)
+    } else {
+        original_body
+    };
     let step = annotation.kind == AnnotationKind::Step;
     let diameter = body.width().min(body.height());
     let padding = if step {
@@ -296,8 +304,33 @@ fn text_layout(
         }
     }
     let bounds = galley.rect.union(galley.mesh_bounds);
-    let shift = (body.size() - bounds.size()) * 0.5 - bounds.min.to_vec2();
+    let shift =
+        (body.size() - bounds.size()) * 0.5 - bounds.min.to_vec2() + (body.min - original_body.min);
     Ok((galley, shift))
+}
+
+/// Metrics from the same layout used by saved and exported annotation text.
+pub(crate) struct EditableTextLayout {
+    pub origin: Pos2,
+    pub size: Vec2,
+    pub font_size: f32,
+    pub wrap_width: f32,
+}
+pub(crate) fn editable_text_layout(annotation: &Annotation) -> Result<EditableTextLayout, String> {
+    FONTS.with_borrow_mut(|fonts| {
+        fonts.begin_pass(TEXT_ATLAS_SIDE, TEXT_ALPHA);
+        let (galley, shift) = text_layout(fonts, annotation)?;
+        Ok(EditableTextLayout {
+            origin: text_anchor(annotation) + shift + galley.rect.min.to_vec2(),
+            size: galley.size(),
+            font_size: galley
+                .job
+                .sections
+                .first()
+                .map_or(annotation.font_size, |s| s.format.font_id.size),
+            wrap_width: galley.job.wrap.max_width,
+        })
+    })
 }
 
 fn styled_layout(
@@ -381,7 +414,7 @@ pub fn callout_tail(annotation: &Annotation) -> [Pos2; 3] {
 }
 
 /// One simple outline means translucent body and tail are blended only once.
-fn callout_outline(annotation: &Annotation) -> Vec<Pos2> {
+pub(crate) fn callout_outline(annotation: &Annotation) -> Vec<Pos2> {
     let rect = Rect::from_two_pos(pos(annotation.start), pos(annotation.end));
     if !rect.is_positive() {
         return Vec::new();
@@ -510,11 +543,18 @@ pub fn annotation_bounds(annotation: &Annotation) -> Rect {
             }
             bounds.expand(annotation.stroke_width * 0.5)
         }
+        AnnotationKind::Magnify => {
+            let lens = crate::studio::lens_rect(annotation);
+            if annotation.studio.linked {
+                lens.union(crate::studio::source_rect(annotation))
+            } else {
+                lens
+            }
+        }
         AnnotationKind::Fill
         | AnnotationKind::Stamp
         | AnnotationKind::Blur
         | AnnotationKind::Pixelate
-        | AnnotationKind::Magnify
         | AnnotationKind::Spotlight
         | AnnotationKind::Simplify
         | AnnotationKind::MoveArea
@@ -526,7 +566,10 @@ pub fn annotation_bounds(annotation: &Annotation) -> Rect {
         }
         AnnotationKind::Callout => {
             let mut bounds = Rect::from_two_pos(pos(annotation.start), pos(annotation.end));
-            for point in callout_tail(annotation) {
+            for point in crate::callout_style::parts(annotation)
+                .into_iter()
+                .flatten()
+            {
                 bounds.extend_with(point);
             }
             bounds
@@ -747,10 +790,9 @@ fn annotation_shapes(
                 ));
             }
             AnnotationKind::Callout => {
-                shapes.push(Shape::mesh(polygon_mesh(
-                    &callout_outline(annotation),
-                    color,
-                )));
+                for outline in crate::callout_style::parts(annotation) {
+                    shapes.push(Shape::mesh(polygon_mesh(&outline, color)));
+                }
             }
             AnnotationKind::Highlighter => {
                 shapes.push(Shape::rect_filled(rect, 0.0, color));
@@ -1587,16 +1629,17 @@ fn paint_shape(overlay: &mut Pixmap, annotation: &Annotation, transform: Transfo
     let rect = Rect::from_two_pos(pos(annotation.start), pos(annotation.end));
     let mut builder = PathBuilder::new();
     if annotation.kind == AnnotationKind::Callout {
-        let points = callout_outline(annotation);
-        if let Some(first) = points.first() {
-            builder.move_to(first.x, first.y);
-            for point in points.iter().skip(1) {
-                builder.line_to(point.x, point.y);
+        for points in crate::callout_style::parts(annotation) {
+            if let Some(first) = points.first() {
+                builder.move_to(first.x, first.y);
+                for point in points.iter().skip(1) {
+                    builder.line_to(point.x, point.y);
+                }
+                builder.close();
             }
-            builder.close();
-            if let Some(path) = builder.finish() {
-                overlay.fill_path(&path, &paint, FillRule::Winding, transform, None);
-            }
+        }
+        if let Some(path) = builder.finish() {
+            overlay.fill_path(&path, &paint, FillRule::Winding, transform, None);
         }
         return;
     }
@@ -2150,6 +2193,7 @@ mod tests {
             stamp: None,
             fill_region: None,
             text_style: Default::default(),
+            callout_style: Default::default(),
             pixel_mask: None,
             arrow: Default::default(),
             studio: Default::default(),
@@ -3019,6 +3063,70 @@ mod tests {
                 "tail {point:?}: {expected} vs {actual}"
             );
             assert!(annotation_bounds(&callout).contains(egui::pos2(point[0], point[1])));
+        }
+    }
+
+    #[test]
+    fn every_callout_style_triangulates_and_respects_alpha_and_text_interior() {
+        let cross = |a: Pos2, b: Pos2| a.x * b.y - a.y * b.x;
+        for style in crate::callout_style::CalloutStyle::ALL {
+            let mut a = crate::callout_style::sample_annotation();
+            a.start = Point { x: 100., y: 80. };
+            a.end = Point { x: 260., y: 180. };
+            a.callout_style = style;
+            a.color = [230, 66, 55, 128];
+            for tip in [
+                [180., 20.],
+                [320., 130.],
+                [180., 240.],
+                [40., 130.],
+                [310., 220.],
+                [180., 130.],
+            ] {
+                a.tail = Some(Point {
+                    x: tip[0],
+                    y: tip[1],
+                });
+                for outline in crate::callout_style::parts(&a) {
+                    let expected = outline
+                        .iter()
+                        .copied()
+                        .zip(outline.iter().copied().cycle().skip(1))
+                        .map(|(a, b)| cross(a, b))
+                        .sum::<f32>()
+                        * 0.5;
+                    let mesh = polygon_mesh(&outline, Color32::WHITE);
+                    let actual = mesh
+                        .indices
+                        .chunks_exact(3)
+                        .map(|t| {
+                            let [a, b, c] =
+                                [t[0], t[1], t[2]].map(|i| mesh.vertices[i as usize].pos);
+                            (cross(a, b) + cross(b, c) + cross(c, a)) * 0.5
+                        })
+                        .sum::<f32>();
+                    assert!(
+                        (expected - actual).abs() < 0.05,
+                        "{style:?} {tip:?}: {expected} / {actual}"
+                    );
+                }
+                let mut doc = document(vec![a.clone()]);
+                doc.image = Arc::new(RgbaImage::new(400, 300));
+                let output = flatten(&doc).unwrap();
+                assert!(output.pixels().any(|p| p[3] > 0));
+                assert!(
+                    output.pixels().all(|p| p[3] <= 128),
+                    "overlapping alpha for {style:?}"
+                );
+                let mut text = a.clone();
+                text.text = "Hello there\nCallout".into();
+                let metrics = editable_text_layout(&text).unwrap();
+                let text_rect = Rect::from_min_size(metrics.origin, metrics.size);
+                assert!(
+                    crate::callout_style::text_body(&text).contains_rect(text_rect),
+                    "{style:?} {text_rect:?}"
+                );
+            }
         }
     }
 

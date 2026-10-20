@@ -1,5 +1,19 @@
 # Release validation — MyImage
 
+## Version 1.3.0 — build 61
+
+This release combines the inline text/callout editor, twelve callout shapes, visual Magnify, compact Library and toolbar refinements, dedicated Fill pointer, three GUI finishes and three independent icon styles. Capture Now retains its 560 × 300 layout with refreshed controls. Project format remains 22. The Store package advances to 1.13.0.0 with the existing Partner Center identity. Windows distribution remains through Microsoft Store; direct Windows downloads are manual-only and still require a trusted production signature.
+
+Local validation passed: 467 application tests and 15 packaging tests, with 16 explicitly ignored diagnostics/integration tests; formatting, strict workspace Clippy and whitespace checks passed. The packaging signer test passed with normal macOS trust access after the sandbox rejected Apple system-binary verification. Apple signing/notarization and GitHub CI results are recorded in the v1.3 release notes. Windows interactive validation of this version remains pending. Publishing GitHub artifacts does not install the update or submit it for Microsoft certification.
+
+## Version 1.2.0 — build 59: inline editing and visual Magnify
+
+Text and callouts edit directly on the canvas with a compact formatting strip and shared rendering/alignment metrics. Callouts offer twelve visual shapes. Magnify adds twenty visual presets, oval/rectangular/rounded lenses, linked source regions, adjustable zoom and outlines, and a draggable source point. Magnify is included in the default main toolbar; More retains its label and uses a narrower menu. Toolbar customization fits its contents, and the Library sidebar has denser rows, calendar icons and clearer selection styling. Project format is version 22.
+
+Validation: 462 application tests passed, with 15 explicitly ignored diagnostics/integration tests. Strict Clippy, formatting and whitespace checks passed. Native review exercised the Magnify gallery, linked source dragging, lens resizing, and toolbar controls. The final narrower menu/customization layout and Library refinements compiled successfully, but their last native visual check was interrupted by UI automation timeouts. Windows interactive validation of these changes remains pending.
+
+The optimized macOS bundle was signed with the existing Developer ID identity and passed signature verification. After the user restored the existing `MyPDF` Keychain profile, Apple accepted notarization submission `35628b5f-5b66-4a4b-a31c-aa629fe0347c`; stapling, ticket validation and Gatekeeper assessment passed. Installed build 59 with a verified rollback of the previous app, preserving captures, projects, settings and permission records. Launched the installed app and opened its Editor successfully.
+
 ## Version 1.2.0 — build 58
 
 Public version 1.2.0 consolidates builds 50–57: visual Selection/Layers/Presets, compact Recents and stable ordering, clipboard capture and recent-file Copy, expanded editable image effects, five graphical stroke patterns, multiple-region capture, optional capture on release and the compact native Capture Now launcher. Mac build numbers continue increasing. Project format is version 21. Store package version is independently 1.12.0.0 to preserve ordering after 1.11.x.
@@ -160,3 +174,25 @@ Validation: 411 application tests and 15 packaging tests passed, with 16 explici
 Native macOS review used a disposable 400 × 240 image in an isolated app. An arrow started entirely outside the image expanded the canvas left and upward to 487 × 327 with checkerboard transparency. Another arrow crossed the right and bottom edges and grew it to 532 × 292. Each Undo restored the clean 400 × 240 document. The review app was then closed. Windows interactive validation remains deferred.
 
 Build 46 notarization submission `ab45e550-610d-460b-b1eb-9ea99708738f` was Accepted, stapled and validated; Gatekeeper reports Notarized Developer ID. Release cleanup removed build caches and retained the rollback. The isolated review bundle was removed. After the user saved and quit, the installer verified the signature and notarization, retained the actual installed build 45 as rollback, and installed build 46 without modifying captures, projects, settings or permission records. The app was reopened at Home and its App menu confirmed `1.1.0 · build 46`. The published v1.1.0 release and its Windows UNTESTED artifact are unchanged.
+
+
+## Cobalt Satin GUI finishes — unreleased source update (2026-10-20)
+
+Cobalt Satin is the default GUI finish. App menu → Settings · Appearance offers Cobalt Satin, Amber Enamel and Jade Graphite, applies each immediately, and persists the choice in existing settings. Legacy settings select Cobalt Satin without changing interface size or other preferences. Colors are context-local; annotation colors, image data and project serialization are independent of the interface finish.
+
+Shared chrome, editor tools, capture controls, Library/Recents, properties, floating controls and dialogs use the selected palette. Selected controls use a subtle satin gradient, fine border and restrained shadow. Existing control positions, dimensions, typography and spacing are preserved; the new Appearance entry is appended to the existing app menu.
+
+Validation: 462 existing application tests passed (15 explicitly ignored), plus three new tests covering settings compatibility/persistence, context isolation and unchanged control geometry/scaling, and text contrast. All four appearance tests and the new settings test passed. Strict workspace Clippy with all targets, formatting, debug build and diff whitespace checks passed. Native macOS review verified all three finishes switch immediately and inspected Cobalt Satin in the editor and Settings dialog. A screenshot is retained at `target/review/cobalt-satin-editor.png`. The review copy received manual edits and was left open to preserve its unsaved work. This source update has not been packaged, installed or published; Windows interactive review remains pending.
+
+
+### Build 60 installation (2026-10-20)
+
+After the user saved and quit both apps, the Cobalt Satin source update was packaged as version 1.2.0 build 60 with the existing Developer ID signing identity. Apple notarization submission `a966faf7-1506-43cc-8324-0cf96320e155` was Accepted; its ticket was stapled and validated, and Gatekeeper reported Notarized Developer ID. The installer verified and retained installed build 59 for rollback, installed build 60, and preserved captures, projects, settings and permission records. The installed app was opened successfully at Home for the user to try. No GitHub release was published by this installation.
+
+## Unreleased — selectable icon styles and Capture Now polish
+
+Appearance settings now offer independent Studio Color (default), Cobalt Duotone and Precision Outline icon styles alongside the three GUI finishes. Native vector glyphs replace the principal editor and shared action icons; restrained family colors, rounded strokes and subtle fills respond immediately to the selection. Selected, disabled and destructive foreground colors remain intact. Existing settings migrate to Studio Color; all nine finish/style combinations round-trip without altering capture preferences.
+
+Capture Now retains its 560 × 300 layout, control positions and actions, with updated capture-mode icons, a satin capture button, quieter outlines, softer switches and a highlighted header edge. The editor and document rendering are unaffected by interface color preferences.
+
+Validation: 465 existing application tests passed; two added tests passed for icon bounds and context/semantic-color isolation. Updated persistence and capture-control checks passed, together with strict workspace Clippy, formatting and whitespace validation. Native macOS review verified Appearance choices and the compact Capture Now panel; screenshot: target/review/studio-color-capture-now.png. Review copy left open after it received user input. This source update is not yet packaged, installed or released; the regular installed app remains build 60. Windows interactive verification remains deferred.

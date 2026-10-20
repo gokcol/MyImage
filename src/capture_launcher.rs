@@ -120,6 +120,7 @@ impl MyImageApp {
             && !self.recovery.prompt
             && !self.guide_open
             && !self.about_open
+            && !self.appearance_open
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
             && !self.export_panel.open
@@ -166,7 +167,7 @@ impl MyImageApp {
                     .show(child, &mut content);
             } else {
                 egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(appearance::PAPER))
+                    .frame(egui::Frame::NONE.fill(appearance::palette(child).paper))
                     .show(child, &mut content);
             }
         });
@@ -214,13 +215,14 @@ fn switch(ui: &mut egui::Ui, value: &mut bool, label: &str, help: &str) -> bool 
         rect.right_center() - Vec2::new(19., 0.),
         Vec2::new(36., 20.),
     );
+    let palette = appearance::palette(ui.ctx());
     ui.painter().rect_filled(
         track,
         10,
         if *value {
-            appearance::ACCENT
+            appearance::palette(ui.ctx()).accent
         } else {
-            Color32::from_rgb(177, 178, 180)
+            palette.border
         },
     );
     let center = egui::pos2(
@@ -231,19 +233,26 @@ fn switch(ui: &mut egui::Ui, value: &mut bool, label: &str, help: &str) -> bool 
         },
         track.center().y,
     );
+    ui.painter().circle_filled(
+        center + Vec2::new(0., 1.),
+        8.5,
+        Color32::from_black_alpha(22),
+    );
     ui.painter().circle_filled(center, 8., Color32::WHITE);
+    ui.painter()
+        .circle_stroke(center, 8., Stroke::new(0.5, palette.paper));
     ui.painter().text(
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(13.),
-        appearance::INK,
+        appearance::palette(ui.ctx()).ink,
     );
     if response.has_focus() {
         ui.painter().rect_stroke(
             rect,
             4,
-            Stroke::new(1., appearance::ACCENT),
+            Stroke::new(1., appearance::palette(ui.ctx()).accent),
             egui::StrokeKind::Inside,
         );
     }
@@ -259,11 +268,18 @@ fn launcher_content(
 ) -> (bool, Option<Action>) {
     let mut changed = false;
     let mut action = None;
+    let palette = appearance::palette(ui.ctx());
+    ui.painter().rect_filled(ui.max_rect(), 0, palette.paper);
     ui.spacing_mut().item_spacing = Vec2::new(8., 4.);
     ui.spacing_mut().button_padding = Vec2::new(8., 3.);
     ui.spacing_mut().interact_size.y = 24.;
     let (header, _) = ui.allocate_exact_size(Vec2::new(SIZE.x, 36.), egui::Sense::hover());
-    ui.painter().rect_filled(header, 0, appearance::NAVY);
+    ui.painter()
+        .rect_filled(header, 0, appearance::palette(ui.ctx()).navy);
+    ui.painter().line_segment(
+        [header.left_bottom(), header.right_bottom()],
+        Stroke::new(2., palette.accent_top),
+    );
     let cat_rect =
         Rect::from_center_size(header.left_center() + Vec2::new(27., 0.), Vec2::splat(26.));
     ui.painter().image(
@@ -277,14 +293,14 @@ fn launcher_content(
         egui::Align2::LEFT_CENTER,
         "Capture Now",
         egui::FontId::proportional(16.),
-        appearance::CREAM,
+        appearance::palette(ui.ctx()).cream,
     );
     ui.painter().text(
         header.right_center() - Vec2::new(50., 0.),
         egui::Align2::RIGHT_CENTER,
         "READY WHEN YOU ARE",
         egui::FontId::proportional(10.),
-        appearance::GINGER,
+        appearance::palette(ui.ctx()).ginger,
     );
     let close_rect =
         Rect::from_center_size(header.right_center() - Vec2::new(26., 0.), Vec2::splat(26.));
@@ -296,11 +312,15 @@ fn launcher_content(
     close.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close capture panel")
     });
+    if close.hovered() || close.has_focus() {
+        ui.painter()
+            .rect_filled(close_rect, 6, Color32::from_white_alpha(22));
+    }
     appearance::icon(
         ui.painter(),
         close_rect.center(),
         Icon::Close,
-        appearance::CREAM,
+        appearance::palette(ui.ctx()).cream,
         15.,
     );
     if close.clicked() {
@@ -358,18 +378,24 @@ fn launcher_content(
                     let (rect,response) = ui.allocate_exact_size(Vec2::splat(100.),egui::Sense::click());
                     response.widget_info(||egui::WidgetInfo::labeled(egui::WidgetType::Button,ui.is_enabled(),"Capture now"));
                     let c=rect.center();
-                    ui.painter().circle_filled(c+Vec2::new(0.,3.),49.,Color32::from_black_alpha(30));
-                    ui.painter().circle_filled(c,48.,if !ui.is_enabled() {appearance::BORDER} else if response.hovered() {appearance::GINGER} else {appearance::ACCENT});
-                    ui.painter().circle_stroke(c,47.,Stroke::new(3.,appearance::GINGER));
+                    let palette = appearance::palette(ui.ctx());
+                    ui.painter().circle_filled(c+Vec2::new(0.,3.),49.,Color32::from_black_alpha(20));
+                    ui.painter().circle_filled(c,49.,palette.cream);
+                    if ui.is_enabled() {
+                        appearance::satin(ui.painter(), Rect::from_center_size(c, Vec2::splat(94.)), 47., true, response.is_pointer_button_down_on());
+                        ui.painter().circle_stroke(c,46.,Stroke::new(1.,if response.hovered() {palette.ginger} else {palette.accent_top}));
+                    } else {
+                        ui.painter().circle_filled(c,47.,palette.border);
+                    }
                     appearance::icon(ui.painter(),c-Vec2::new(0.,17.),Icon::Capture,Color32::WHITE,24.);
                     ui.painter().text(c+Vec2::new(0.,17.),egui::Align2::CENTER_CENTER,"Capture",egui::FontId::proportional(16.),Color32::WHITE);
-                    if response.has_focus() {ui.painter().circle_stroke(c,50.,Stroke::new(2.,appearance::INK));}
+                    if response.has_focus() {ui.painter().circle_stroke(c,50.,Stroke::new(2.,appearance::palette(ui.ctx()).ink));}
                     response
                 }).inner;
                 if r.clicked() {action=Some(Action::Capture);}
                 ui.add_space(6.);
-                ui.label(egui::RichText::new(if cfg!(target_os="macos") {"⌃⇧.  /  ⌘⇧."} else {"Ctrl + Shift + ."}).small().color(appearance::MUTED));
-                if !enabled {ui.label(egui::RichText::new("Open Editor to finish the current task").small().color(appearance::MUTED));}
+                ui.label(egui::RichText::new(if cfg!(target_os="macos") {"⌃⇧.  /  ⌘⇧."} else {"Ctrl + Shift + ."}).small().color(appearance::palette(ui.ctx()).muted));
+                if !enabled {ui.label(egui::RichText::new("Open Editor to finish the current task").small().color(appearance::palette(ui.ctx()).muted));}
             });
         });
     });

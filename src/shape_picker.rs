@@ -73,7 +73,7 @@ impl EditorState {
             ui.label(
                 egui::RichText::new(shapes::name(current))
                     .size(11.)
-                    .color(appearance::MUTED),
+                    .color(appearance::palette(ui.ctx()).muted),
             );
         });
         let enabled = self.selected.is_none() || self.can_edit_selection(document);
@@ -108,9 +108,9 @@ impl EditorState {
                         };
                         ui.painter().rect_filled(rect, 5, fill);
                         let color = if selected {
-                            appearance::ACCENT
+                            appearance::palette(ui.ctx()).accent
                         } else {
-                            appearance::INK
+                            appearance::palette(ui.ctx()).ink
                         };
                         let bounds = Rect::from_center_size(rect.center(), Vec2::new(24., 20.));
                         ui.painter().add(egui::Shape::closed_line(
@@ -125,7 +125,7 @@ impl EditorState {
                             ui.painter().rect_stroke(
                                 rect,
                                 5,
-                                Stroke::new(1., appearance::ACCENT),
+                                Stroke::new(1., appearance::palette(ui.ctx()).accent),
                                 StrokeKind::Inside,
                             );
                         }

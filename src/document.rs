@@ -26,7 +26,7 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"MYIMAGE\0";
-const VERSION: u32 = 21;
+const VERSION: u32 = 22;
 const HEADER_BYTES: u64 = 24;
 const MAX_PROJECT_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_METADATA_BYTES: usize = 48 * 1024 * 1024;
@@ -216,6 +216,11 @@ pub struct Annotation {
         skip_serializing_if = "crate::text_style::TextStyle::is_default"
     )]
     pub text_style: crate::text_style::TextStyle,
+    #[serde(
+        default,
+        skip_serializing_if = "crate::callout_style::CalloutStyle::is_default"
+    )]
+    pub callout_style: crate::callout_style::CalloutStyle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pixel_mask: Option<crate::fill::FillRegion>,
     #[serde(default, skip_serializing_if = "crate::studio::Options::is_default")]
@@ -365,6 +370,9 @@ pub(crate) fn validate_annotations(annotations: &[Annotation]) -> Result<(), Str
 }
 
 pub(crate) fn validate_annotation(annotation: &Annotation) -> Result<(), String> {
+    if annotation.kind != AnnotationKind::Callout && !annotation.callout_style.is_default() {
+        return Err("Callout shapes require a callout object.".into());
+    }
     annotation.studio.validate()?;
     annotation.arrow.validate()?;
     if annotation.kind != AnnotationKind::Arrow {
@@ -639,6 +647,16 @@ pub fn load_project(path: &Path) -> Result<Document, String> {
         serde_json::from_slice(&json)
             .map_err(|error| format!("Cannot read project metadata: {error}"))?
     };
+    if version < 22
+        && metadata
+            .annotations
+            .iter()
+            .any(|a| !a.callout_style.is_default() || crate::studio::advanced(&a.studio))
+    {
+        return Err(
+            "Callout shapes and advanced lenses require MyImage project version 22.".into(),
+        );
+    }
     if version < 21
         && metadata.annotations.iter().any(|a| {
             matches!(
@@ -962,6 +980,7 @@ mod tests {
                 stamp: None,
                 fill_region: None,
                 text_style: Default::default(),
+                callout_style: Default::default(),
                 pixel_mask: None,
                 arrow: Default::default(),
                 studio: Default::default(),

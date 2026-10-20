@@ -206,7 +206,7 @@ impl EditorState {
         if !kind.is_shape() {
             ui.label(egui::RichText::new(kind_name(kind)).size(18.).strong());
         }
-        ui.label(egui::RichText::new("Quick styles").color(appearance::MUTED));
+        ui.label(egui::RichText::new("Quick styles").color(appearance::palette(ui.ctx()).muted));
         ui.add_space(4.);
         let width = (ui.available_width() - 16.) / 3.;
         let enabled = self.selected.is_none() || self.can_edit_selection(document);
@@ -272,9 +272,9 @@ fn preview(
         rect,
         7,
         if selected {
-            Color32::from_rgb(229, 245, 244)
+            appearance::palette(ui.ctx()).cream
         } else {
-            appearance::PAPER
+            appearance::palette(ui.ctx()).paper
         },
     );
     painter.rect_stroke(
@@ -283,9 +283,9 @@ fn preview(
         Stroke::new(
             if selected { 2. } else { 1. },
             if selected || hovered {
-                appearance::ACCENT
+                appearance::palette(ui.ctx()).accent
             } else {
-                Color32::from_rgb(221, 228, 234)
+                appearance::palette(ui.ctx()).border
             },
         ),
         StrokeKind::Inside,
@@ -317,6 +317,7 @@ fn preview(
         stamp: None,
         fill_region: None,
         text_style: Default::default(),
+        callout_style: Default::default(),
         pixel_mask: None,
         arrow: Default::default(),
         studio: Default::default(),
@@ -355,7 +356,7 @@ fn preview(
                 egui::Align2::CENTER_CENTER,
                 "Text",
                 egui::FontId::proportional(17. * preview_scale),
-                appearance::INK,
+                appearance::palette(ui.ctx()).ink,
             );
         }
         _ => {}
@@ -393,7 +394,7 @@ fn preview(
         egui::Align2::CENTER_CENTER,
         style.label,
         egui::FontId::proportional(11.),
-        appearance::INK,
+        appearance::palette(ui.ctx()).ink,
     );
 }
 

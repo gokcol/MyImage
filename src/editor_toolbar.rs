@@ -74,6 +74,14 @@ impl EditorState {
                 result.push(pin);
             }
         }
+        if result
+            == [
+                "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill",
+            ]
+        {
+            result.push("Magnify".into());
+            self.toolbar_changed = true;
+        }
         self.toolbar_pins = result;
     }
     pub fn take_toolbar_change(&mut self) -> Option<Vec<String>> {
@@ -151,34 +159,25 @@ impl EditorState {
                 self.choose_tool(tool, document, history);
             }
         }
-        let current = tools
-            .iter()
-            .find(|(tool, _, _)| *tool == self.tool)
-            .map(|(_, l, _)| *l)
-            .unwrap_or("More");
         let hidden_active =
             !visible.iter().any(|(t, _, _)| *t == self.tool) && self.tool != Tool::Select;
         ui.menu_button(
-            egui::RichText::new(if hidden_active {
-                format!("{current} ▾")
-            } else {
-                "More ▾".into()
-            })
-            .size(12.)
-            .color(if hidden_active {
-                crate::appearance::ACCENT
-            } else {
-                crate::appearance::INK
-            }),
+            egui::RichText::new("More ▾")
+                .size(12.)
+                .color(if hidden_active {
+                    crate::appearance::palette(ui.ctx()).accent
+                } else {
+                    crate::appearance::palette(ui.ctx()).ink
+                }),
             |ui| {
-                ui.set_width(216.);
+                ui.set_width(160.);
                 ui.spacing_mut().item_spacing.y = 1.;
                 for &(tool, label, hint) in &tools {
                     if visible.iter().any(|(t, _, _)| *t == tool) {
                         continue;
                     }
                     let (rect, response) =
-                        ui.allocate_exact_size(egui::vec2(216., 28.), Sense::click());
+                        ui.allocate_exact_size(egui::vec2(160., 27.), Sense::click());
                     response.widget_info(|| {
                         egui::WidgetInfo::selected(
                             egui::WidgetType::SelectableLabel,
@@ -188,21 +187,24 @@ impl EditorState {
                         )
                     });
                     if response.hovered() || self.tool == tool {
-                        ui.painter()
-                            .rect_filled(rect, 4., Color32::from_rgb(230, 246, 246));
+                        ui.painter().rect_filled(
+                            rect,
+                            4.,
+                            crate::appearance::palette(ui.ctx()).cream,
+                        );
                     }
                     paint_tool_icon(
                         ui.painter(),
                         rect.left_center() + egui::vec2(14., 0.),
                         tool,
-                        crate::appearance::INK,
+                        crate::appearance::palette(ui.ctx()).ink,
                     );
                     ui.painter().text(
                         rect.left_center() + egui::vec2(34., 0.),
                         egui::Align2::LEFT_CENTER,
                         label,
                         egui::FontId::proportional(13.),
-                        crate::appearance::INK,
+                        crate::appearance::palette(ui.ctx()).ink,
                     );
                     if response.on_hover_text(hint).clicked() {
                         self.choose_tool(tool, document, history);
@@ -210,7 +212,10 @@ impl EditorState {
                     }
                 }
                 ui.separator();
-                if ui.button("Customize toolbar…").clicked() {
+                if ui
+                    .button(egui::RichText::new("Customize toolbar…").size(13.))
+                    .clicked()
+                {
                     self.toolbar_customizer = true;
                     ui.close();
                 }
@@ -243,24 +248,45 @@ impl EditorState {
             "Customize toolbar",
             "Pin everyday tools. Find the rest in More.",
             DialogIcon::Settings,
-            390.,
+            280.,
         )
+        .fit_content()
         .window(ctx, egui::Id::new("Customize toolbar"), &mut open, |ui| {
             let tools = self.tools();
             let before = self.toolbar_pins.clone();
+            ui.spacing_mut().item_spacing = egui::vec2(5., 3.);
+            ui.spacing_mut().button_padding = egui::vec2(5., 3.);
+            ui.spacing_mut().interact_size.y = 25.;
             egui::ScrollArea::vertical()
-                .max_height(450.)
+                .max_height(360.)
                 .show(ui, |ui| {
                     for (tool, label, _) in tools {
                         ui.horizontal(|ui| {
-                            let mut pinned = self.toolbar_pins.iter().any(|p| p == label);
-                            if ui.checkbox(&mut pinned, label).changed() {
-                                if pinned {
-                                    self.toolbar_pins.push(label.into());
-                                } else {
-                                    self.toolbar_pins.retain(|p| p != label);
-                                }
-                            }
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(154., 25.),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    let (icon_rect, _) = ui
+                                        .allocate_exact_size(egui::vec2(24., 25.), Sense::hover());
+                                    paint_tool_icon(
+                                        ui.painter(),
+                                        icon_rect.center(),
+                                        tool,
+                                        crate::appearance::palette(ui.ctx()).ink,
+                                    );
+                                    let mut pinned = self.toolbar_pins.iter().any(|p| p == label);
+                                    if ui
+                                        .checkbox(&mut pinned, egui::RichText::new(label).size(13.))
+                                        .changed()
+                                    {
+                                        if pinned {
+                                            self.toolbar_pins.push(label.into());
+                                        } else {
+                                            self.toolbar_pins.retain(|p| p != label);
+                                        }
+                                    }
+                                },
+                            );
                             if let Some(i) = self.toolbar_pins.iter().position(|p| p == label) {
                                 if ui
                                     .add_enabled(i > 0, egui::Button::new("↑"))
@@ -281,7 +307,6 @@ impl EditorState {
                                 }
                                 ui.weak(format!("{}", i + 1));
                             }
-                            let _ = tool;
                         });
                     }
                 });

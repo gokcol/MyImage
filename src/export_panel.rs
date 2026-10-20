@@ -29,10 +29,10 @@ impl ExportPanel {
         let modal = Dialog::new("Export a copy", "A finished image, ready to share.", DialogIcon::Export, 480.).modal(ctx, egui::Id::new("export_options"), |ui| {
             ui.label(
                 RichText::new(format!("{} × {} pixels · Includes all annotations", size[0], size[1]))
-                    .color(appearance::MUTED),
+                    .color(appearance::palette(ui.ctx()).muted),
             );
             ui.add_space(12.0);
-            ui.label(RichText::new("FORMAT").small().strong().color(appearance::MUTED));
+            ui.label(RichText::new("FORMAT").small().strong().color(appearance::palette(ui.ctx()).muted));
             ui.horizontal_wrapped(|ui| {
                 for format in ExportFormat::ALL {
                     if ui.selectable_value(&mut self.options.format, format, format.label()).changed() {
@@ -80,7 +80,7 @@ impl ExportPanel {
                     ui.label(RichText::new(match self.options.pdf_page_size {
                         PdfPageSize::Image => "Page follows the image proportions at 96 dpi; very large pages are scaled to PDF limits.",
                         PdfPageSize::A4 | PdfPageSize::Letter => "Fits the whole image with margins. Portrait or landscape is chosen automatically.",
-                    }).small().color(appearance::MUTED));
+                    }).small().color(appearance::palette(ui.ctx()).muted));
                 }
             }
             ui.add_space(14.0);

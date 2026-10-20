@@ -80,6 +80,62 @@ impl FillState {
     }
 }
 impl EditorState {
+    pub(super) fn paint_fill_cursor(&self, ctx: &egui::Context, tip: Pos2) {
+        // Screen-space artwork stays legible at every image zoom. The droplet's
+        // bottom tip is the actual fill seed, rather than the bucket's center.
+        let painter = ctx.layer_painter(egui::LayerId::new(
+            egui::Order::Tooltip,
+            egui::Id::new("fill-pointer"),
+        ));
+        let ink = Color32::from_rgb(28, 31, 36);
+        let p = |x, y| tip + egui::vec2(x, y);
+        let bucket = vec![p(6., -16.), p(17., -27.), p(28., -16.), p(17., -5.)];
+        painter.add(egui::Shape::convex_polygon(
+            bucket,
+            Color32::WHITE,
+            Stroke::new(4., Color32::WHITE),
+        ));
+        let color = self.fill_tool.color;
+        for (x, y) in [(14., -19.), (17., -16.)] {
+            painter.rect_filled(
+                Rect::from_min_size(p(x, y), Vec2::splat(3.)),
+                0.,
+                Color32::from_gray(160),
+            );
+        }
+        painter.add(egui::Shape::convex_polygon(
+            vec![p(6., -16.), p(17., -27.), p(28., -16.), p(17., -5.)],
+            Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+            Stroke::new(1.5, ink),
+        ));
+        let handle = vec![p(11., -19.), p(11., -29.), p(18., -29.), p(22., -24.)];
+        for stroke in [Stroke::new(4., Color32::WHITE), Stroke::new(1.5, ink)] {
+            painter.add(egui::Shape::line(handle.clone(), stroke));
+            painter.line_segment([p(6., -16.), p(28., -16.)], stroke);
+        }
+        let drop = vec![
+            p(3., -12.),
+            p(-1., -6.),
+            p(-1., -3.),
+            tip,
+            p(4., -3.),
+            p(5., -6.),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            drop.clone(),
+            Color32::WHITE,
+            Stroke::new(4., Color32::WHITE),
+        ));
+        painter.add(egui::Shape::convex_polygon(
+            drop,
+            Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3]),
+            Stroke::new(1.5, ink),
+        ));
+        if color[3] == 0 {
+            painter.line_segment([p(13., -12.), p(21., -20.)], Stroke::new(2., ink));
+        }
+    }
+
     pub(super) fn activate_fill(&mut self, document: &mut Document, history: &mut EditHistory) {
         self.finish_gesture(document, history);
         // Preserve a rectangle/lasso when switching from Select to Fill.

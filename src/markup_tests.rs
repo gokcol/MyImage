@@ -40,6 +40,7 @@ pub(crate) fn object(kind: AnnotationKind, start: [f32; 2], end: [f32; 2]) -> An
         stamp: None,
         fill_region: None,
         text_style: Default::default(),
+        callout_style: Default::default(),
         pixel_mask: None,
         arrow: Default::default(),
         studio: Default::default(),

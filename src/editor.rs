@@ -134,6 +134,7 @@ enum Handle {
     Bottom,
     TextSize,
     CalloutTail,
+    MagnifySource,
 }
 
 // On-curve adjustment handles, between the endpoints and the center bend handle.
@@ -189,7 +190,7 @@ impl ResizeDraft {
 
 pub fn default_toolbar() -> Vec<String> {
     [
-        "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill",
+        "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill", "Magnify",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -256,6 +257,7 @@ pub struct EditorState {
     fill_tool: fill_tool::FillState,
     text_dialog: Option<text_editor::TextDraft>,
     text_style: crate::text_style::TextStyle,
+    callout_style: crate::callout_style::CalloutStyle,
     layer_target: Option<annotation_layers::LayerTarget>,
     rename_layer: Option<annotation_layers::RenameDraft>,
     image_error: Option<String>,
@@ -329,6 +331,7 @@ impl Default for EditorState {
             fill_tool: Default::default(),
             text_dialog: None,
             text_style: Default::default(),
+            callout_style: Default::default(),
             layer_target: None,
             rename_layer: None,
             image_error: None,
@@ -741,13 +744,20 @@ impl EditorState {
                     },
                 );
             });
+        // Inline typing owns pointer input, but the image must retain its real
+        // colors instead of inheriting the disabled workspace's fade.
+        let workspace_opacity = ui.opacity();
+        if self.text_dialog.is_some() {
+            ui.set_opacity(1.);
+        }
         egui::Frame::new()
-            .fill(Color32::from_rgb(36, 41, 48))
+            .fill(crate::appearance::palette(ui.ctx()).navy)
             .inner_margin(12)
             .corner_radius(8)
             .show(ui, |ui| {
                 self.canvas(ui, document, history, texture, preview)
             });
+        ui.set_opacity(workspace_opacity);
     }
 
     /// Image-level controls share the Recents row to leave more canvas space.
@@ -802,7 +812,7 @@ impl EditorState {
         ui.label(
             egui::RichText::new(format!("{width} × {height} px"))
                 .size(11.)
-                .color(appearance::MUTED),
+                .color(appearance::palette(ui.ctx()).muted),
         )
         .on_hover_text("Image dimensions · Use the image tools menu to resize");
         let scope = self.copy_scope(document);
@@ -1302,6 +1312,7 @@ impl EditorState {
                         }
                     }
                     AnnotationKind::Callout => {
+                        annotation.callout_style = self.callout_style;
                         annotation.text.clone_from(&self.text);
                         annotation.font_size = self.font_size;
                         annotation.text_color = self.text_color;
@@ -1750,6 +1761,17 @@ impl EditorState {
                     .as_ref()
                     .or(expansion.as_ref())
                     .map_or((&*document, rect), |(doc, bounds)| (doc, *bounds));
+                // Keep the original editable text in the document, but omit its
+                // painted copy while the on-canvas TextEdit owns the glyphs.
+                let text_preview = self.text_dialog.as_mut().map(|draft| {
+                    draft.canvas = Some((rect.min, scale, ui.clip_rect()));
+                    let mut text_preview = paint_document.clone();
+                    if let Some(annotation) = text_preview.annotations.get_mut(draft.index) {
+                        annotation.text.clear();
+                    }
+                    text_preview
+                });
+                let paint_document = text_preview.as_ref().unwrap_or(paint_document);
                 let mut presentation = paint_document.clone();
                 if stable_frame.is_some() {
                     // Sample the fixed retained canvas, but display only the current
@@ -1790,7 +1812,11 @@ impl EditorState {
                             );
                         }
                         result => {
-                            painter.rect_filled(paint_rect, 0, Color32::from_rgb(36, 41, 48));
+                            painter.rect_filled(
+                                paint_rect,
+                                0,
+                                crate::appearance::palette(ui.ctx()).navy,
+                            );
                             let status = match result {
                                 Ok(None) => "Updating image preview…".to_owned(),
                                 Err(error) => format!("Image preview unavailable: {error}"),
@@ -1808,13 +1834,13 @@ impl EditorState {
                 } else {
                     paint_checkerboard_at(&painter, paint_rect, rect.min);
                     render::paint_document_image(&painter, texture.id(), &presentation, paint_rect);
-                    render::paint_document_annotations(&painter, document, rect.min, scale);
+                    render::paint_document_annotations(&painter, paint_document, rect.min, scale);
                 }
                 if expansion.is_some() {
                     painter.rect_stroke(
                         paint_rect,
                         0,
-                        Stroke::new(1., crate::appearance::ACCENT),
+                        Stroke::new(1., crate::appearance::palette(ui.ctx()).accent),
                         StrokeKind::Inside,
                     );
                 }
@@ -1844,6 +1870,7 @@ impl EditorState {
                     && self.additional.is_empty()
                     && self.area_bounds(document).is_some()))
                     && self.can_edit_selection(document)
+                    && self.text_dialog.is_none()
                     && self
                         .selected_indices(document)
                         .iter()
@@ -1919,7 +1946,7 @@ impl EditorState {
                     ui.painter().rect_stroke(
                         screen.expand(3.),
                         3.,
-                        Stroke::new(1., crate::appearance::ACCENT),
+                        Stroke::new(1., crate::appearance::palette(ui.ctx()).accent),
                         StrokeKind::Inside,
                     );
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Copy);
@@ -1950,7 +1977,7 @@ impl EditorState {
                             Stroke::new(1.5, Color32::WHITE),
                         ));
                     }
-                    let cursor = response
+                    let mut cursor = response
                         .hover_pos()
                         .map_or(CursorIcon::Default, |position| {
                             self.canvas_cursor(
@@ -1959,6 +1986,11 @@ impl EditorState {
                                 document,
                             )
                         });
+                    if cursor == CursorIcon::None
+                        && (!ui.is_enabled() || egui::Popup::is_any_open(ui.ctx()))
+                    {
+                        cursor = CursorIcon::Default;
+                    }
                     response.clone().on_hover_cursor(cursor);
                 }
                 if self.area_drag.is_some()
@@ -1983,6 +2015,20 @@ impl EditorState {
                     );
                 }
                 self.paint_canvas_handles(ui, document, paint_rect);
+                // Paint after the handles so their resize cursors take priority.
+                if self.tool == Tool::Fill
+                    && ui.ctx().output(|output| output.cursor_icon) == CursorIcon::None
+                {
+                    if response.hovered()
+                        && ui.is_enabled()
+                        && !egui::Popup::is_any_open(ui.ctx())
+                        && let Some(position) = response.hover_pos()
+                    {
+                        self.paint_fill_cursor(ui.ctx(), position);
+                    } else {
+                        ui.ctx().set_cursor_icon(CursorIcon::Default);
+                    }
+                }
             });
     }
 
@@ -2043,6 +2089,13 @@ impl EditorState {
         if self.tool == Tool::Area {
             return self.area_cursor(at, document);
         }
+        if self.tool == Tool::Fill {
+            return if self.fill_tool.busy() {
+                CursorIcon::Wait
+            } else {
+                CursorIcon::None
+            };
+        }
         CursorIcon::Crosshair
     }
 
@@ -2078,6 +2131,11 @@ impl EditorState {
             stamp: None,
             fill_region: None,
             text_style: self.text_style.clone(),
+            callout_style: if kind == AnnotationKind::Callout {
+                self.callout_style
+            } else {
+                Default::default()
+            },
             pixel_mask: None,
             arrow: if kind == AnnotationKind::Arrow {
                 crate::arrow_style::ArrowStyle {
@@ -2458,6 +2516,7 @@ impl EditorState {
             self.text.clone_from(&annotation.text);
             self.font_size = annotation.font_size;
             self.text_style = annotation.text_style.clone();
+            self.callout_style = annotation.callout_style;
             self.sync_stamp_selection(annotation);
             self.sync_fill_selection(annotation);
             self.effect_size = annotation.effect_size;
@@ -2717,21 +2776,36 @@ fn hits_transformed(annotation: &Annotation, at: Point, scale: f32, document: &D
         }),
         AnnotationKind::Stamp => bounds.contains(at),
         AnnotationKind::Text => bounds.expand(2.0 / scale).contains(at),
+        AnnotationKind::Magnify => {
+            bounds.expand(2. / scale).contains(at)
+                || (annotation.studio.linked
+                    && mapped_bounds(crate::studio::source_rect(annotation), document)
+                        .expand(4. / scale)
+                        .contains(at))
+        }
         AnnotationKind::Blur
         | AnnotationKind::Pixelate
-        | AnnotationKind::Magnify
         | AnnotationKind::Spotlight
         | AnnotationKind::Simplify
         | AnnotationKind::Highlighter
         | AnnotationKind::MoveArea
         | AnnotationKind::DeleteArea => bounds.expand(2.0 / scale).contains(at),
-        AnnotationKind::Callout => {
-            bounds.expand(2.0 / scale).contains(at)
-                || inside_triangle(
-                    at,
-                    render::callout_tail(annotation).map(|p| output_point(from_pos(p), document)),
-                )
-        }
+        AnnotationKind::Callout => crate::callout_style::parts(annotation)
+            .iter()
+            .any(|outline| {
+                crate::shapes::contains(outline, source_at)
+                    || outline
+                        .iter()
+                        .copied()
+                        .zip(outline.iter().copied().cycle().skip(1))
+                        .any(|(a, b)| {
+                            segment_distance(
+                                at,
+                                output_point(from_pos(a), document),
+                                output_point(from_pos(b), document),
+                            ) <= 2.0 / scale
+                        })
+            }),
         AnnotationKind::Arrow => {
             let start = output_point(annotation.start, document);
             let end = output_point(annotation.end, document);
@@ -2837,6 +2911,7 @@ fn handle_cursor(handle: Handle, document: &Document) -> CursorIcon {
     if matches!(
         handle,
         Handle::CalloutTail
+            | Handle::MagnifySource
             | Handle::ArrowStart
             | Handle::ArrowEnd
             | Handle::ArrowBend
@@ -2998,7 +3073,7 @@ fn tool_button(ui: &mut egui::Ui, tool: Tool, label: &str, selected: bool) -> eg
     });
     if ui.is_rect_visible(rect) {
         let (fill, color) = if selected {
-            (crate::appearance::CREAM, crate::appearance::ACCENT)
+            (crate::appearance::palette(ui.ctx()).accent, Color32::WHITE)
         } else if response.hovered() {
             (
                 ui.visuals().widgets.hovered.weak_bg_fill,
@@ -3008,7 +3083,17 @@ fn tool_button(ui: &mut egui::Ui, tool: Tool, label: &str, selected: bool) -> eg
             (Color32::TRANSPARENT, ui.visuals().text_color())
         };
         let painter = ui.painter();
-        painter.rect_filled(rect, 7, fill);
+        if selected {
+            crate::appearance::satin(
+                painter,
+                rect,
+                7.,
+                true,
+                response.is_pointer_button_down_on(),
+            );
+        } else {
+            painter.rect_filled(rect, 7, fill);
+        }
         let center = Pos2::new(rect.center().x, rect.top() + 14.);
         paint_tool_icon(painter, center, tool, color);
         painter.text(
@@ -3031,7 +3116,30 @@ fn tool_button(ui: &mut egui::Ui, tool: Tool, label: &str, selected: bool) -> eg
 }
 
 fn paint_tool_icon(painter: &egui::Painter, center: Pos2, tool: Tool, color: Color32) {
-    let stroke = Stroke::new(1.5, color);
+    use crate::icon_style::{self, Family, Glyph};
+    let glyph = match tool {
+        Tool::Select => Some(Glyph::Select),
+        Tool::Arrow => Some(Glyph::Arrow),
+        Tool::Text => Some(Glyph::Text),
+        Tool::Callout => Some(Glyph::Callout),
+        Tool::Rectangle | Tool::Shape(_) => Some(Glyph::Shapes),
+        Tool::Stamp => Some(Glyph::Stamp),
+        Tool::Fill => Some(Glyph::Fill),
+        Tool::Magnify => Some(Glyph::Magnify),
+        _ => None,
+    };
+    if let Some(glyph) = glyph {
+        icon_style::paint(painter, center, glyph, color, 21.);
+        return;
+    }
+    let family = match tool {
+        Tool::Highlighter | Tool::Step => Family::Amber,
+        Tool::Blur | Tool::Pixelate | Tool::Spotlight => Family::Teal,
+        Tool::Wand | Tool::Ellipse | Tool::Pen => Family::Violet,
+        _ => Family::Cobalt,
+    };
+    let color = icon_style::color(painter.ctx(), color, family);
+    let stroke = Stroke::new(icon_style::current(painter.ctx()).width(), color);
     match tool {
         Tool::Wand => {
             painter.line_segment(
@@ -3443,7 +3551,14 @@ fn handles(annotation: &Annotation) -> Vec<(Handle, Pos2)> {
         AnnotationKind::Text => vec![(Handle::TextSize, bounds.right_bottom())],
         _ => {
             let mut handles = Vec::with_capacity(9);
+            if annotation.kind == AnnotationKind::Magnify && annotation.studio.linked {
+                handles.push((
+                    Handle::MagnifySource,
+                    crate::studio::source_center(annotation),
+                ));
+            }
             if annotation.kind == AnnotationKind::Callout
+                && annotation.callout_style.has_tail()
                 && let Some(tail) = annotation.tail
             {
                 handles.push((Handle::CalloutTail, point(tail)));
@@ -3528,6 +3643,7 @@ fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
             annotation.arrow.curve = Some(controls.map(from_pos));
         }
         Handle::CalloutTail => annotation.tail = Some(at),
+        Handle::MagnifySource => crate::studio::set_source_center(&mut annotation, point(at)),
         Handle::TextSize => {
             let size = point(at) - point(original.start);
             let factor = (size.x / bounds.width().max(1.0)).max(size.y / bounds.height().max(1.0));
@@ -3562,6 +3678,12 @@ fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
             let resized = Rect::from_two_pos(opposite, corner);
             annotation.start = from_pos(resized.min);
             annotation.end = from_pos(resized.max);
+            if original.kind == AnnotationKind::Magnify && original.studio.linked {
+                crate::studio::set_source_center(
+                    &mut annotation,
+                    crate::studio::source_center(original),
+                );
+            }
             if original.kind == AnnotationKind::Freehand {
                 let factors =
                     resized.size().max(Vec2::splat(0.1)) / bounds.size().max(Vec2::splat(0.1));
@@ -3651,8 +3773,11 @@ fn paint_selection(
     }
     for (handle, position) in handles(annotation) {
         let center = origin + output_point(from_pos(position), document).to_vec2() * scale;
-        let adjustment = matches!(handle, Handle::ArrowCurvePoint(_) | Handle::CalloutTail)
-            || (matches!(handle, Handle::ArrowBend) && annotation.arrow.curve.is_none());
+        let adjustment = matches!(
+            handle,
+            Handle::ArrowCurvePoint(_) | Handle::CalloutTail | Handle::MagnifySource
+        ) || (matches!(handle, Handle::ArrowBend)
+            && annotation.arrow.curve.is_none());
         paint_object_handle(painter, center, adjustment);
     }
 }
@@ -3683,6 +3808,7 @@ mod tests {
             stamp: None,
             fill_region: None,
             text_style: Default::default(),
+            callout_style: Default::default(),
             pixel_mask: None,
             arrow: Default::default(),
             studio: Default::default(),

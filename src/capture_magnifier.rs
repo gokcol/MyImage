@@ -116,7 +116,7 @@ impl CaptureMagnifier {
         );
         let card = place_card(pointer, card_size, available);
         let lens = Rect::from_min_size(card.min + Vec2::splat(4.), display_size);
-        painter.rect_filled(card, 7, crate::appearance::NAVY);
+        painter.rect_filled(card, 7, crate::appearance::palette(painter.ctx()).navy);
         painter.image(
             texture.id(),
             lens,

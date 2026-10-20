@@ -291,8 +291,8 @@ impl LibraryPanel {
             ui.spacing_mut().interact_size.y = 22.;
             let label = if *open { "Hide recents" } else { "Show recents" };
             let toggle = ui.add_sized([28., 24.], egui::Button::new("")
-                .fill(if *open { crate::dialogs::CHARCOAL } else { appearance::PAPER })
-                .stroke(Stroke::new(1., if *open { crate::dialogs::CHARCOAL } else { appearance::BORDER }))
+                .fill(if *open { crate::appearance::palette(ui.ctx()).navy } else { appearance::palette(ui.ctx()).paper })
+                .stroke(Stroke::new(1., if *open { crate::appearance::palette(ui.ctx()).navy } else { appearance::palette(ui.ctx()).border }))
                 .corner_radius(5));
             toggle.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *open, label));
             let center = toggle.rect.center();
@@ -301,7 +301,7 @@ impl LibraryPanel {
             } else {
                 [center + Vec2::new(-2., -4.), center + Vec2::new(2., 0.), center + Vec2::new(-2., 4.)]
             };
-            ui.painter().add(egui::Shape::line(points.to_vec(), Stroke::new(1.8, if *open { appearance::GINGER } else { appearance::INK })));
+            ui.painter().add(egui::Shape::line(points.to_vec(), Stroke::new(1.8, if *open { appearance::palette(ui.ctx()).ginger } else { appearance::palette(ui.ctx()).ink })));
             if toggle.on_hover_text(label).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 *open = !*open;
             }
@@ -397,7 +397,7 @@ impl LibraryPanel {
                             rect,
                             5,
                             if selected {
-                                appearance::CREAM
+                                appearance::palette(ui.ctx()).cream
                             } else {
                                 Color32::from_gray(239)
                             },
@@ -427,7 +427,7 @@ impl LibraryPanel {
                                         egui::Align2::CENTER_CENTER,
                                         "Unavailable",
                                         FontId::proportional(10.),
-                                        appearance::MUTED,
+                                        appearance::palette(ui.ctx()).muted,
                                     );
                                 }
                             }
@@ -439,7 +439,7 @@ impl LibraryPanel {
                                 ui.painter(),
                                 image_rect.center(),
                                 appearance::Icon::View,
-                                appearance::MUTED,
+                                appearance::palette(ui.ctx()).muted,
                                 20.,
                             );
                         }
@@ -447,7 +447,10 @@ impl LibraryPanel {
                             ui.painter().rect_stroke(
                                 rect,
                                 5,
-                                Stroke::new(if is_active { 2. } else { 1.5 }, appearance::ACCENT),
+                                Stroke::new(
+                                    if is_active { 2. } else { 1.5 },
+                                    appearance::palette(ui.ctx()).accent,
+                                ),
                                 egui::StrokeKind::Inside,
                             );
                         }
@@ -459,7 +462,7 @@ impl LibraryPanel {
                         let mut job = egui::text::LayoutJob::simple_singleline(
                             label,
                             FontId::proportional(10.),
-                            appearance::INK,
+                            appearance::palette(ui.ctx()).ink,
                         );
                         job.wrap.max_width = rect.width() - 8.;
                         job.wrap.max_rows = 1;
@@ -470,13 +473,13 @@ impl LibraryPanel {
                                 rect.bottom() - 14.,
                             ),
                             galley,
-                            appearance::INK,
+                            appearance::palette(ui.ctx()).ink,
                         );
                         if is_active {
                             ui.painter().circle_filled(
                                 rect.right_top() + Vec2::new(-7., 7.),
                                 3.,
-                                appearance::ACCENT,
+                                appearance::palette(ui.ctx()).accent,
                             );
                         }
                         response.on_hover_text(format!(
@@ -700,7 +703,7 @@ impl LibraryPanel {
                 .flat_map(|days| days.values())
                 .sum(),
         );
-        ui.add_space(4.0);
+        ui.add_space(2.0);
         let newest = self.calendar.keys().next_back().copied();
         for (&year, months) in self.calendar.iter().rev() {
             let count = months.values().flat_map(|days| days.values()).sum();
@@ -745,7 +748,7 @@ impl LibraryPanel {
                                 ui,
                                 &mut filter,
                                 DateFilter::Day(day),
-                                &day.format("%d · %a").to_string(),
+                                &day.format("%b %d · %a").to_string(),
                                 count,
                             );
                         }
@@ -796,7 +799,12 @@ fn date_button(
     name: &str,
     count: usize,
 ) {
-    if browser::navigation_row(ui, name, count, *filter == value, None).clicked() {
+    let icon = match value {
+        DateFilter::All | DateFilter::Year(_) => appearance::Icon::CalendarYear,
+        DateFilter::Month(_, _) => appearance::Icon::CalendarMonth,
+        DateFilter::Day(_) => appearance::Icon::CalendarDay,
+    };
+    if browser::navigation_row(ui, name, count, *filter == value, Some(icon)).clicked() {
         *filter = value;
     }
 }
@@ -826,7 +834,7 @@ fn empty_state(ui: &mut egui::Ui, title: &str, description: &str) {
                 ui.add_space(16.0);
                 ui.label(RichText::new(title).size(22.0).strong());
                 ui.add_space(8.0);
-                ui.label(RichText::new(description).color(appearance::MUTED));
+                ui.label(RichText::new(description).color(appearance::palette(ui.ctx()).muted));
             });
         },
     );

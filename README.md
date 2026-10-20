@@ -2,13 +2,19 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 1.2](https://github.com/gokcol/MyImage/releases/tag/v1.2) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
+[Download MyImage 1.3](https://github.com/gokcol/MyImage/releases/tag/v1.3) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
 Save **`.myimage` projects** to keep the original image and annotations editable together in one portable file. **Export…** creates flattened PNG, JPEG, WebP, TIFF, or PDF copies with visible annotations included. Image edits are stored as reversible settings in the project.
 
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
+
+## New in 1.3
+
+Choose Cobalt Satin, Amber Enamel or Jade Graphite in **App menu → Settings · Appearance**, then independently select Studio Color, Cobalt Duotone or Precision Outline icons. Preferences apply immediately and persist; tool positions stay familiar. Capture Now keeps its compact layout with refreshed icons, switches and buttons.
+
+Text and twelve callout styles edit directly on the canvas. The main-toolbar Magnify tool offers twenty visual presets with adjustable lenses and linked source areas. The Library sidebar and More/customization menus are more compact, and Fill has a dedicated pointer.
 
 ## Microsoft Store and signing
 
@@ -19,7 +25,7 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 1.2 uses internal MSIX version 1.12.0.0 to
+[privacy policy](PRIVACY.md). MyImage 1.3 uses internal MSIX version 1.13.0.0 to
 preserve upgrade ordering after earlier public 1.11.x releases.
 
 ## Run

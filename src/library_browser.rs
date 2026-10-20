@@ -122,7 +122,7 @@ impl LibraryPanel {
                 .fill(Color32::WHITE)
                 .corner_radius(6)
                 .inner_margin(6)
-                .stroke(Stroke::new(1., crate::dialogs::LINE))
+                .stroke(Stroke::new(1., crate::appearance::palette(ui.ctx()).border))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         if icon_button(
@@ -191,7 +191,7 @@ impl LibraryPanel {
                                 ui.painter(),
                                 search_icon.center(),
                                 appearance::Icon::Search,
-                                appearance::MUTED,
+                                appearance::palette(ui.ctx()).muted,
                                 14.,
                             );
                         });
@@ -201,14 +201,15 @@ impl LibraryPanel {
             let height = (ui.available_height() - 43.).max(140.);
             ui.horizontal_top(|ui| {
                 egui::Frame::new()
-                    .fill(crate::dialogs::CHARCOAL)
+                    .fill(crate::appearance::palette(ui.ctx()).navy)
                     .corner_radius(6)
                     .inner_margin(10)
-                    .stroke(Stroke::new(1., crate::dialogs::CHARCOAL))
+                    .stroke(Stroke::new(1., crate::appearance::palette(ui.ctx()).navy))
                     .show(ui, |ui| {
                         ui.set_width(168.);
                         ui.visuals_mut().widgets.inactive.fg_stroke.color = Color32::from_gray(195);
-                        ui.visuals_mut().widgets.hovered.fg_stroke.color = appearance::GINGER;
+                        ui.visuals_mut().widgets.hovered.fg_stroke.color =
+                            appearance::palette(ui.ctx()).ginger;
                         ui.set_height(height - 20.);
                         ui.visuals_mut().override_text_color = Some(Color32::from_gray(225));
                         ui.visuals_mut().weak_text_color = Some(Color32::from_gray(165));
@@ -286,11 +287,15 @@ impl LibraryPanel {
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui, height: f32) {
+        ui.spacing_mut().item_spacing.y = 2.;
+        ui.spacing_mut().indent = 12.;
+        ui.spacing_mut().interact_size.y = 23.;
+        ui.visuals_mut().indent_has_left_vline = false;
         ui.label(
-            RichText::new("COLLECTIONS")
+            RichText::new("Collections")
                 .size(10.)
                 .strong()
-                .color(appearance::GINGER),
+                .color(appearance::palette(ui.ctx()).ginger),
         );
         ui.add_space(5.);
         egui::ScrollArea::vertical()
@@ -324,13 +329,19 @@ impl LibraryPanel {
                         });
                     }
                 }
-                ui.add_space(7.);
-                ui.add_space(4.);
+                ui.add_space(6.);
+                let (divider, _) = ui
+                    .allocate_exact_size(Vec2::new(ui.available_width(), 1.), egui::Sense::hover());
+                ui.painter().line_segment(
+                    [divider.left_center(), divider.right_center()],
+                    Stroke::new(1., Color32::from_gray(68)),
+                );
+                ui.add_space(5.);
                 ui.label(
-                    RichText::new("CAPTURE DATE")
+                    RichText::new("Capture date")
                         .size(10.)
                         .strong()
-                        .color(appearance::GINGER),
+                        .color(appearance::palette(ui.ctx()).ginger),
                 );
                 self.calendar_ui(ui);
             });
@@ -392,7 +403,7 @@ impl LibraryPanel {
                     if self.filtered.len() == 1 { "" } else { "s" }
                 ))
                 .small()
-                .color(appearance::MUTED),
+                .color(appearance::palette(ui.ctx()).muted),
             );
             if !self.warnings.is_empty() {
                 ui.label(
@@ -424,7 +435,7 @@ impl LibraryPanel {
                     ui.label(
                         RichText::new("Thumbnails")
                             .size(11.)
-                            .color(appearance::MUTED),
+                            .color(appearance::palette(ui.ctx()).muted),
                     );
                 });
             }
@@ -546,11 +557,11 @@ impl LibraryPanel {
             )
         });
         let border = if selected {
-            Stroke::new(2., appearance::ACCENT)
+            Stroke::new(2., appearance::palette(ui.ctx()).accent)
         } else if response.hovered() {
-            Stroke::new(1., appearance::ACCENT)
+            Stroke::new(1., appearance::palette(ui.ctx()).accent)
         } else {
-            Stroke::new(1., crate::dialogs::LINE)
+            Stroke::new(1., crate::appearance::palette(ui.ctx()).border)
         };
         ui.painter().rect_filled(
             rect.shrink(2.).translate(Vec2::new(0., 2.)),
@@ -561,7 +572,7 @@ impl LibraryPanel {
             rect.shrink(1.),
             6.,
             if selected {
-                appearance::CREAM
+                appearance::palette(ui.ctx()).cream
             } else {
                 Color32::WHITE
             },
@@ -574,7 +585,7 @@ impl LibraryPanel {
             Rect::from_min_max(rect.min + Vec2::splat(5.), rect.max - Vec2::new(5., 50.))
         };
         ui.painter()
-            .rect_filled(preview, 3., Color32::from_rgb(242, 241, 238));
+            .rect_filled(preview, 3., appearance::palette(ui.ctx()).base);
         let mut tooltip = format!(
             "{}\nModified: {}\nCreated: {}\n{}",
             entry.path.display(),
@@ -607,7 +618,7 @@ impl LibraryPanel {
                         ui.painter(),
                         preview.center(),
                         appearance::Icon::View,
-                        appearance::MUTED,
+                        appearance::palette(ui.ctx()).muted,
                         22.,
                     );
                     tooltip.push_str(&format!("\nPreview unavailable: {error}"));
@@ -624,13 +635,14 @@ impl LibraryPanel {
         }
         if entry.kind == EntryKind::Project && !list {
             let badge = Rect::from_min_size(preview.min + Vec2::splat(5.), Vec2::new(60., 19.));
-            ui.painter().rect_filled(badge, 4., appearance::GINGER);
+            ui.painter()
+                .rect_filled(badge, 4., appearance::palette(ui.ctx()).ginger);
             ui.painter().text(
                 badge.center(),
                 egui::Align2::CENTER_CENTER,
                 "PROJECT",
                 FontId::proportional(9.),
-                appearance::INK,
+                appearance::palette(ui.ctx()).ink,
             );
         }
         let favorite = self.preferences.favorites.contains(&entry.path);
@@ -657,9 +669,9 @@ impl LibraryPanel {
                 star_rect.center(),
                 appearance::Icon::Favorite,
                 if favorite {
-                    appearance::ACCENT
+                    appearance::palette(ui.ctx()).accent
                 } else {
-                    appearance::MUTED
+                    appearance::palette(ui.ctx()).muted
                 },
                 14.,
             );
@@ -685,7 +697,7 @@ impl LibraryPanel {
             if list { width - 134. } else { width - 24. },
             &entry.name,
             13.,
-            appearance::INK,
+            appearance::palette(ui.ctx()).ink,
         );
         let details = if list {
             format!(
@@ -711,7 +723,7 @@ impl LibraryPanel {
             if list { width - 112. } else { width - 24. },
             &details,
             11.,
-            appearance::MUTED,
+            appearance::palette(ui.ctx()).muted,
         );
         let mut action = None;
         if !ui.input(|i| i.modifiers.ctrl) {
@@ -773,7 +785,7 @@ impl LibraryPanel {
                             |entry| format!("{} · {}", entry.name, size_text(entry.bytes)),
                         ))
                         .small()
-                        .color(appearance::MUTED),
+                        .color(appearance::palette(ui.ctx()).muted),
                     )
                     .truncate(),
                 );
@@ -791,7 +803,7 @@ pub(super) fn navigation_row(
     icon: Option<appearance::Icon>,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width().max(40.), 29.),
+        Vec2::new(ui.available_width().max(40.), 23.),
         egui::Sense::click(),
     );
     response.widget_info(|| {
@@ -803,46 +815,63 @@ pub(super) fn navigation_row(
         )
     });
     let color = if selected {
-        appearance::INK
+        Color32::WHITE
     } else {
-        Color32::from_gray(221)
+        Color32::from_gray(226)
     };
     if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
-            4.,
+            3.,
             if selected {
-                appearance::CREAM
+                appearance::palette(ui.ctx()).accent
             } else {
-                Color32::from_rgb(58, 60, 64)
+                appearance::palette(ui.ctx()).ink
             },
+        );
+    }
+    if selected {
+        appearance::satin(
+            ui.painter(),
+            rect,
+            3.,
+            true,
+            response.is_pointer_button_down_on(),
+        );
+        ui.painter().rect_filled(
+            Rect::from_min_size(
+                rect.min + Vec2::new(0., 3.),
+                Vec2::new(2., rect.height() - 6.),
+            ),
+            1.,
+            appearance::palette(ui.ctx()).ginger,
         );
     }
     let offset = if let Some(icon) = icon {
         appearance::icon(
             ui.painter(),
-            rect.left_center() + Vec2::new(14., 0.),
+            rect.left_center() + Vec2::new(13., 0.),
             icon,
             color,
-            14.,
+            13.,
         );
-        29.
+        26.
     } else {
         7.
     };
     let count = count.to_string();
-    let badge_width = count.len() as f32 * 6. + 12.;
+    let badge_width = count.len() as f32 * 6. + 8.;
     let badge = Rect::from_center_size(
         rect.right_center() - Vec2::new(badge_width * 0.5 + 5., 0.),
-        Vec2::new(badge_width, 18.),
+        Vec2::new(badge_width, 15.),
     );
     ui.painter().rect_filled(
         badge,
-        6.,
+        3.,
         if selected {
-            appearance::GINGER
+            Color32::from_white_alpha(38)
         } else {
-            Color32::from_rgb(58, 60, 64)
+            appearance::palette(ui.ctx()).ink
         },
     );
     ui.painter().text(
@@ -851,20 +880,22 @@ pub(super) fn navigation_row(
         count,
         FontId::proportional(10.),
         if selected {
-            appearance::INK
+            Color32::WHITE
         } else {
-            Color32::from_gray(211)
+            Color32::from_gray(200)
         },
     );
     clipped_label(
         ui,
-        rect.min + Vec2::new(offset, 7.),
+        rect.min + Vec2::new(offset, 4.),
         (badge.left() - rect.left() - offset - 4.).max(10.),
         name,
         12.,
         color,
     );
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    response
+        .on_hover_text(name)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 fn icon_button(
@@ -884,7 +915,7 @@ fn icon_button(
                 rect,
                 6.,
                 if selected {
-                    appearance::CREAM
+                    appearance::palette(ui.ctx()).cream
                 } else {
                     Color32::WHITE
                 },
@@ -895,9 +926,9 @@ fn icon_button(
             rect.center(),
             icon,
             if selected {
-                appearance::ACCENT
+                appearance::palette(ui.ctx()).accent
             } else {
-                appearance::MUTED
+                appearance::palette(ui.ctx()).muted
             },
             14.,
         );
@@ -907,9 +938,11 @@ fn icon_button(
 }
 
 fn sort_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
-    let text =
-        ui.painter()
-            .layout_no_wrap(label.into(), FontId::proportional(12.), appearance::INK);
+    let text = ui.painter().layout_no_wrap(
+        label.into(),
+        FontId::proportional(12.),
+        appearance::palette(ui.ctx()).ink,
+    );
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(text.size().x + 20., 30.), egui::Sense::click());
     response.widget_info(|| {
@@ -925,7 +958,7 @@ fn sort_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
             rect,
             6.,
             if selected {
-                appearance::NAVY
+                appearance::palette(ui.ctx()).navy
             } else {
                 Color32::WHITE
             },
@@ -942,7 +975,7 @@ fn sort_tab(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
         if selected {
             Color32::WHITE
         } else {
-            appearance::MUTED
+            appearance::palette(ui.ctx()).muted
         },
     );
     response.on_hover_text("Sort by this field · Click again to reverse")

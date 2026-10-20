@@ -294,7 +294,7 @@ impl EditorState {
                 ui.painter(),
                 r.center(),
                 DialogIcon::Favorite,
-                crate::appearance::GINGER,
+                crate::appearance::palette(ui.ctx()).ginger,
                 34.,
             );
             ui.label(
@@ -398,7 +398,6 @@ impl EditorState {
 }
 
 fn preset_card(ui: &mut egui::Ui, preset: &Preset, width: f32, selected: bool) -> egui::Response {
-    use crate::appearance::{ACCENT, BORDER, CREAM, INK, MUTED};
     let response = ui.add_sized([width, 108.], egui::Button::new("").frame(false));
     response.widget_info(|| {
         egui::WidgetInfo::selected(
@@ -415,9 +414,9 @@ fn preset_card(ui: &mut egui::Ui, preset: &Preset, width: f32, selected: bool) -
             r,
             6.,
             if selected || response.hovered() {
-                CREAM
+                crate::appearance::palette(ui.ctx()).cream
             } else {
-                crate::appearance::PAPER
+                crate::appearance::palette(ui.ctx()).paper
             },
             Stroke::new(
                 if selected || response.has_focus() {
@@ -426,9 +425,9 @@ fn preset_card(ui: &mut egui::Ui, preset: &Preset, width: f32, selected: bool) -
                     1.
                 },
                 if selected || response.has_focus() {
-                    ACCENT
+                    crate::appearance::palette(ui.ctx()).accent
                 } else {
-                    BORDER
+                    crate::appearance::palette(ui.ctx()).border
                 },
             ),
             StrokeKind::Inside,
@@ -441,12 +440,16 @@ fn preset_card(ui: &mut egui::Ui, preset: &Preset, width: f32, selected: bool) -
         let mut job = egui::text::LayoutJob::simple_singleline(
             preset.name.clone(),
             egui::FontId::proportional(12.),
-            INK,
+            crate::appearance::palette(ui.ctx()).ink,
         );
         job.wrap.max_width = (width - 14.).max(1.);
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
-        painter.galley(egui::pos2(r.left() + 7., r.top() + 74.), galley, INK);
+        painter.galley(
+            egui::pos2(r.left() + 7., r.top() + 74.),
+            galley,
+            crate::appearance::palette(ui.ctx()).ink,
+        );
         painter.text(
             egui::pos2(r.left() + 7., r.top() + 91.),
             egui::Align2::LEFT_TOP,
@@ -460,11 +463,11 @@ fn preset_card(ui: &mut egui::Ui, preset: &Preset, width: f32, selected: bool) -
                 }
             ),
             egui::FontId::proportional(10.),
-            MUTED,
+            crate::appearance::palette(ui.ctx()).muted,
         );
         if selected {
             let at = egui::pos2(r.right() - 12., r.top() + 12.);
-            painter.circle_filled(at, 8., INK);
+            painter.circle_filled(at, 8., crate::appearance::palette(ui.ctx()).ink);
             crate::appearance::icon(painter, at, DialogIcon::Check, Color32::WHITE, 8.);
         }
     }
@@ -499,7 +502,7 @@ fn preset_preview(ui: &egui::Ui, preset: &Preset, rect: Rect) {
             } else {
                 inspector_widgets::Glyph::Blur
             },
-            crate::appearance::ACCENT,
+            crate::appearance::palette(ui.ctx()).accent,
             32.,
         );
         return;

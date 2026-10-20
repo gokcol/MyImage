@@ -407,7 +407,7 @@ impl MyImageApp {
         let bar = area
             .show(ctx, |ui| {
                 egui::Frame::new()
-                    .fill(appearance::NAVY)
+                    .fill(appearance::palette(ui.ctx()).navy)
                     .corner_radius(12)
                     .inner_margin(12)
                     .show(ui, |ui| {
@@ -442,7 +442,7 @@ impl MyImageApp {
                             if ui
                                 .add_enabled(
                                     ready,
-                                    appearance::primary(if mode == CaptureMode::Scrolling {
+                                    appearance::primary(ui.ctx(), if mode == CaptureMode::Scrolling {
                                         "Start scrolling"
                                     } else {
                                         self.settings.capture_destination.capture_label()
@@ -614,15 +614,15 @@ impl MyImageApp {
                             ((rect.min - bounds.min) / bounds.size()).to_pos2(),
                             ((rect.max - bounds.min) / bounds.size()).to_pos2());
                         painter.image(selection.texture.id(), rect, uv, Color32::WHITE);
-                        painter.rect_stroke(rect, 0, Stroke::new(2., appearance::ACCENT), egui::StrokeKind::Inside);
+                        painter.rect_stroke(rect, 0, Stroke::new(2., appearance::palette(ui.ctx()).accent), egui::StrokeKind::Inside);
                         let badge = Rect::from_min_size(rect.min + Vec2::splat(4.), Vec2::new(25.,22.));
-                        painter.rect_filled(badge, 4, appearance::NAVY);
+                        painter.rect_filled(badge, 4, appearance::palette(ui.ctx()).navy);
                         painter.text(badge.center(), egui::Align2::CENTER_CENTER, (index+1).to_string(), egui::FontId::proportional(12.), Color32::WHITE);
                     }
                     if let Some(rect) = chosen {
                         for p in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom(), rect.center_top(), rect.center_bottom(), rect.left_center(), rect.right_center()] {
                             painter.circle_filled(p, 4., Color32::WHITE);
-                            painter.circle_stroke(p, 4., Stroke::new(1., appearance::ACCENT));
+                            painter.circle_stroke(p, 4., Stroke::new(1., appearance::palette(ui.ctx()).accent));
                         }
                     }
                 } else if let Some(rect) = selected {
@@ -661,7 +661,7 @@ impl MyImageApp {
                         .flatten()
                     {
                         painter.circle_filled(p, 4., Color32::WHITE);
-                        painter.circle_stroke(p, 4., Stroke::new(1., appearance::ACCENT));
+                        painter.circle_stroke(p, 4., Stroke::new(1., appearance::palette(ui.ctx()).accent));
                     }
                     let label = if mode == CaptureMode::Window || chosen.is_none() {
                         selection
@@ -683,7 +683,7 @@ impl MyImageApp {
                         Pos2::new(rect.left().max(8.), (rect.top() - 31.).max(8.)),
                         Vec2::new(300_f32.min(bounds.width() - 16.), 26.),
                     );
-                    painter.rect_filled(label_rect, 5, appearance::NAVY);
+                    painter.rect_filled(label_rect, 5, appearance::palette(ui.ctx()).navy);
                     painter.with_clip_rect(label_rect.shrink(5.)).text(
                         label_rect.center(),
                         egui::Align2::CENTER_CENTER,
@@ -741,7 +741,7 @@ impl MyImageApp {
                     Pos2::new(bounds.center().x, 36.),
                     Vec2::new(580_f32.min(bounds.width() - 16.), 30.),
                 );
-                painter.rect_filled(hintrect, 8, appearance::NAVY);
+                painter.rect_filled(hintrect, 8, appearance::palette(ui.ctx()).navy);
                 painter.text(
                     hintrect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -1073,7 +1073,7 @@ impl MyImageApp {
         let mut finish = false;
         let mut cancel = false;
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(appearance::PAPER).inner_margin(18))
+            .frame(egui::Frame::new().fill(appearance::palette(ctx).paper).inner_margin(18))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Capture Now").size(21.).strong());
@@ -1119,10 +1119,10 @@ impl MyImageApp {
                             session.paused = !session.paused;
                         }
                     } else {
-                        next=ui.add_enabled(!self.busy,appearance::primary("Capture next section")).clicked();
+                        next=ui.add_enabled(!self.busy,appearance::primary(ui.ctx(), "Capture next section")).clicked();
                     }
                     finish = ui
-                        .add_enabled(!session.finish_requested, appearance::primary(self.settings.capture_destination.finish_label()))
+                        .add_enabled(!session.finish_requested, appearance::primary(ui.ctx(), self.settings.capture_destination.finish_label()))
                         .clicked();
                     cancel = ui
                         .add(egui::Button::new("Cancel"))

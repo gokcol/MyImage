@@ -66,7 +66,7 @@ pub(super) fn palette(ui: &mut egui::Ui, color: &mut [u8; 4]) -> bool {
                 Stroke::new(
                     1.,
                     if selected {
-                        crate::appearance::ACCENT
+                        crate::appearance::palette(ui.ctx()).accent
                     } else {
                         Color32::from_gray(205)
                     },
@@ -636,6 +636,10 @@ impl EditorState {
             });
         }
 
+        if kind == AnnotationKind::Callout {
+            ui.label("Callout shape");
+            changed |= crate::callout_style::picker(ui, &mut self.callout_style);
+        }
         if matches!(kind, AnnotationKind::Callout | AnnotationKind::Step) {
             ui.label("Text color");
             changed |= palette(ui, &mut self.text_color);
@@ -916,6 +920,22 @@ impl EditorState {
                                 );
                             } else if matches!(kind, AnnotationKind::Text | AnnotationKind::Callout)
                             {
+                                if kind == AnnotationKind::Callout {
+                                    let button = ui.add_sized([30., 28.], egui::Button::new(""));
+                                    crate::callout_style::paint_icon(
+                                        ui.painter(),
+                                        button.rect.shrink(3.),
+                                        self.callout_style,
+                                        crate::appearance::palette(ui.ctx()).ink,
+                                    );
+                                    let button = button.on_hover_text("Callout shape");
+                                    egui::Popup::menu(&button).show(|ui| {
+                                        changed |= crate::callout_style::picker(
+                                            ui,
+                                            &mut self.callout_style,
+                                        );
+                                    });
+                                }
                                 property_menu(ui, "Aa ▾", |ui| {
                                     ui.set_min_width(244.);
                                     changed |= text_controls(
@@ -985,13 +1005,8 @@ impl EditorState {
                                 property_menu(ui, "Effect ▾", |ui| {
                                     ui.set_min_width(244.);
                                     if kind == AnnotationKind::Magnify {
-                                        changed |= slider(
-                                            ui,
-                                            &mut self.studio.zoom,
-                                            1.0..=8.0,
-                                            "Zoom",
-                                            "×",
-                                        );
+                                        changed |=
+                                            crate::magnify_ui::controls(ui, &mut self.studio);
                                     }
                                     if kind == AnnotationKind::Spotlight {
                                         changed |= slider(
@@ -1009,8 +1024,10 @@ impl EditorState {
                                             " px",
                                         );
                                     }
-                                    changed |=
-                                        ui.checkbox(&mut self.studio.ellipse, "Oval").changed();
+                                    if kind != AnnotationKind::Magnify {
+                                        changed |=
+                                            crate::magnify_ui::shape_picker(ui, &mut self.studio);
+                                    }
                                 });
                             }
                             if !kind.is_effect() && kind != AnnotationKind::Spotlight {

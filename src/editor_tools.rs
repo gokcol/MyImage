@@ -305,28 +305,34 @@ impl EditorState {
         ui.weak("Quick styles");
         let before = document.edit_state();
         let mut changed = false;
-        ui.horizontal(|ui| {
-            for (label, ellipse) in [("Oval", true), ("Rectangle", false)] {
-                changed |= ui
-                    .selectable_value(&mut self.studio.ellipse, ellipse, label)
-                    .changed();
-            }
-        });
+        if kind == AnnotationKind::Magnify {
+            let sample = self.new_annotation(AnnotationKind::Magnify, Point { x: 0., y: 0. });
+            ui.add_enabled_ui(
+                index.is_none_or(|i| !document.annotations[i].locked()),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("magnify-quick-styles")
+                        .max_height(170.)
+                        .show(ui, |ui| {
+                            changed |= crate::magnify_ui::gallery(
+                                ui,
+                                sample,
+                                &mut self.studio,
+                                &mut self.color,
+                            );
+                        });
+                },
+            );
+        } else {
+            changed |= crate::magnify_ui::shape_picker(ui, &mut self.studio);
+        }
         ui.separator();
         ui.strong("Tool properties");
         ui.add_enabled_ui(
             index.is_none_or(|i| !document.annotations[i].locked()),
             |ui| match kind {
                 AnnotationKind::Magnify => {
-                    ui.label("Zoom");
-                    changed |= crate::appearance::value_slider(
-                        ui,
-                        &mut self.studio.zoom,
-                        1.0..=8.0,
-                        "Zoom",
-                        "×",
-                    )
-                    .changed();
+                    changed |= crate::magnify_ui::controls(ui, &mut self.studio);
                     ui.label("Border color");
                     changed |= object_properties::palette(ui, &mut self.color);
                     changed |= object_properties::slider(
@@ -586,6 +592,91 @@ mod tests {
         assert!(render::thumbnail(&loaded, 40, 30).is_ok());
         d.annotations[0].studio.zoom = f32::NAN;
         assert!(document::validate_document(&d).is_err());
+    }
+    #[test]
+    fn linked_magnify_samples_source_and_preserves_editability() {
+        let mut d = doc();
+        let original = d.image.clone();
+        let mut lens = object(AnnotationKind::Magnify, [40., 20.], [76., 56.]);
+        lens.studio.linked = true;
+        lens.studio.ellipse = false;
+        lens.studio.rounded = true;
+        lens.stroke_width = 1.;
+        crate::studio::set_source_center(&mut lens, egui::pos2(14., 14.));
+        d.annotations.push(lens.clone());
+        let flat = render::flatten(&d).unwrap();
+        assert_eq!(flat.get_pixel(58, 38), original.get_pixel(14, 14));
+        assert_eq!(flat.get_pixel(40, 20), original.get_pixel(40, 20));
+        assert_eq!(render::privacy_preview(&d, 80).unwrap(), flat);
+        let resized = resized(&lens, Handle::BottomRight, Point { x: 78., y: 58. });
+        assert!(crate::studio::source_center(&resized).distance(egui::pos2(14., 14.)) < 0.001);
+        let moved = resized_source(&lens, egui::pos2(24., 18.));
+        assert_eq!(moved.start, lens.start);
+        assert_eq!(moved.end, lens.end);
+        let mut history = EditHistory::new(d.edit_state());
+        let before = d.edit_state();
+        d.annotations[0] = moved;
+        history.commit(before, &d);
+        assert_eq!(
+            render::flatten(&d).unwrap().get_pixel(58, 38),
+            original.get_pixel(24, 18)
+        );
+        assert!(history.undo(&mut d));
+        assert_eq!(d.annotations[0], lens);
+        assert!(history.redo(&mut d));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("linked-lens.myimage");
+        document::save_project(&d, &path).unwrap();
+        let loaded = document::load_project(&path).unwrap();
+        assert_eq!(loaded.edit_state(), d.edit_state());
+        assert_eq!(
+            render::flatten(&loaded).unwrap(),
+            render::flatten(&d).unwrap()
+        );
+        d.annotations[0].studio.source_offset[0] = f32::NAN;
+        assert!(document::validate_document(&d).is_err());
+    }
+    fn resized_source(lens: &Annotation, at: egui::Pos2) -> Annotation {
+        assert!(
+            handles(lens)
+                .iter()
+                .any(|(h, _)| *h == Handle::MagnifySource)
+        );
+        resized(lens, Handle::MagnifySource, from_pos(at))
+    }
+    #[test]
+    fn linked_magnify_samples_transparency_outside_image_and_lower_layers() {
+        let mut d = doc();
+        let mut lens = object(AnnotationKind::Magnify, [40., 20.], [76., 56.]);
+        lens.studio.linked = true;
+        crate::studio::set_source_center(&mut lens, egui::pos2(-20., -20.));
+        let mut image = (*d.image).clone();
+        crate::studio::apply(&mut image, &lens, [1.; 2]).unwrap();
+        assert_eq!(image.get_pixel(58, 38)[3], 0);
+        crate::studio::set_source_center(&mut lens, egui::pos2(15., 15.));
+        let mut block = object(AnnotationKind::Simplify, [5., 5.], [25., 25.]);
+        block.studio.ellipse = false;
+        block.color = [5, 120, 180, 255];
+        d.annotations = vec![block.clone(), lens];
+        assert_eq!(
+            render::flatten(&d).unwrap().get_pixel(58, 38).0,
+            block.color
+        );
+    }
+    #[test]
+    fn former_default_toolbar_gets_magnify_without_replacing_custom_layouts() {
+        let mut e = EditorState::default();
+        e.set_toolbar(
+            [
+                "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+        );
+        assert_eq!(e.toolbar_pins, default_toolbar());
+        assert!(e.take_toolbar_change().is_some());
+        e.set_toolbar(vec!["Text".into(), "Magnify".into()]);
+        assert_eq!(e.toolbar_pins, vec!["Text", "Magnify"]);
     }
     #[test]
     fn cutouts_join_pixels_and_annotations_with_all_rotations_and_restore() {

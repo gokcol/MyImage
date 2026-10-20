@@ -705,7 +705,7 @@ impl EditorState {
                     painter.rect_stroke(
                         handle,
                         1,
-                        Stroke::new(1., crate::appearance::ACCENT),
+                        Stroke::new(1., crate::appearance::palette(painter.ctx()).accent),
                         StrokeKind::Inside,
                     );
                 }

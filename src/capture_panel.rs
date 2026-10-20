@@ -55,12 +55,12 @@ pub fn menu_summary(settings: &Settings, _shape: CaptureShape, displays: &[Displ
         settings.capture_destination.label(),
     )
 }
-fn card() -> egui::Frame {
+fn card(ctx: &egui::Context) -> egui::Frame {
     egui::Frame::new()
         .fill(Color32::WHITE)
         .corner_radius(8)
         .inner_margin(14)
-        .stroke(Stroke::new(1., appearance::BORDER))
+        .stroke(Stroke::new(1., appearance::palette(ctx).border))
 }
 
 pub fn ui(
@@ -85,13 +85,13 @@ pub fn ui(
                 ui.spacing_mut().item_spacing = Vec2::new(10., 10.);
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(38.), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 8, appearance::NAVY);
+                    ui.painter().rect_filled(rect, 8, appearance::palette(ui.ctx()).navy);
                     if let Some(cat) = cat {
                         ui.painter().image(cat, rect.shrink(2.), Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1., 1.)), Color32::WHITE);
-                    } else { appearance::icon(ui.painter(), rect.center(), appearance::Icon::Capture, appearance::GINGER, 23.); }
+                    } else { appearance::icon(ui.painter(), rect.center(), appearance::Icon::Capture, appearance::palette(ui.ctx()).ginger, 23.); }
                     ui.vertical(|ui| {
                         ui.label(egui::RichText::new("Capture your screen").size(20.).strong());
-                        ui.label(egui::RichText::new("Your screen, ready to explain.").color(appearance::MUTED));
+                        ui.label(egui::RichText::new("Your screen, ready to explain.").color(appearance::palette(ui.ctx()).muted));
                     });
                 });
                 ui.horizontal(|ui| {
@@ -106,7 +106,7 @@ pub fn ui(
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width(width - 264.);
-                        card().show(ui, |ui| {
+                        card(ui.ctx()).show(ui, |ui| {
                             ui.set_width(width - 292.);
                             ui.spacing_mut().item_spacing.y = 10.;
                             ui.horizontal(|ui| {
@@ -154,19 +154,19 @@ pub fn ui(
                                 if ui.small_button("Change…").clicked() { result.action = Some(Action::ChooseFolder); }
                                 if ui.small_button("Browse").clicked() { result.action = Some(Action::Library); }
                             });
-                            ui.add(egui::Label::new(egui::RichText::new(settings.output_dir.display().to_string()).small().color(appearance::MUTED)).truncate())
+                            ui.add(egui::Label::new(egui::RichText::new(settings.output_dir.display().to_string()).small().color(appearance::palette(ui.ctx()).muted)).truncate())
                                 .on_hover_text(settings.output_dir.display().to_string());
                             ui.small("PNG · Organized by year / month / day");
                         });
                     });
-                    egui::Frame::new().fill(appearance::NAVY).corner_radius(8).inner_margin(16).show(ui, |ui| {
+                    egui::Frame::new().fill(appearance::palette(ui.ctx()).navy).corner_radius(8).inner_margin(16).show(ui, |ui| {
                         ui.vertical(|ui| {
                         ui.set_width(222.);
                         ui.spacing_mut().item_spacing.y = 8.;
-                        ui.label(egui::RichText::new("CAPTURE NOW").size(11.).strong().color(appearance::GINGER));
+                        ui.label(egui::RichText::new("CAPTURE NOW").size(11.).strong().color(appearance::palette(ui.ctx()).ginger));
                         ui.label(egui::RichText::new(settings.capture_mode.label()).size(19.).strong().color(Color32::WHITE));
                         ui.add(egui::Label::new(egui::RichText::new(settings.capture_mode.hint()).size(13.).color(Color32::from_rgb(224, 213, 197))).wrap());
-                        if ui.add_enabled(available.capture, egui::Button::new(egui::RichText::new("Capture Now").strong().color(appearance::INK)).fill(appearance::GINGER).min_size(Vec2::new(222., 36.))).clicked() {
+                        if ui.add_enabled(available.capture, egui::Button::new(egui::RichText::new("Capture Now").strong().color(appearance::palette(ui.ctx()).ink)).fill(appearance::palette(ui.ctx()).ginger).min_size(Vec2::new(222., 36.))).clicked() {
                             result.action = Some(Action::Capture);
                         }
                         ui.label(egui::RichText::new("Ctrl + Shift + .").strong().color(Color32::WHITE));
@@ -177,7 +177,7 @@ pub fn ui(
                     });
                 });
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Built-in Capture Now is always in your menu bar." } else { "Built-in Capture Now is always in your system tray." }).size(12.).color(appearance::MUTED));
+                    ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Built-in Capture Now is always in your menu bar." } else { "Built-in Capture Now is always in your system tray." }).size(12.).color(appearance::palette(ui.ctx()).muted));
                     if appearance::action_button(ui, "Capture panel", appearance::Icon::Tray, true, false).clicked() { result.action = Some(Action::Panel); }
                     if ui.add_enabled(available.background, egui::Button::new("Keep ready in background").small().frame(false)).clicked() { result.action = Some(Action::Background); }
                 });
@@ -217,12 +217,21 @@ pub fn destination_picker(ui: &mut egui::Ui, destination: &mut CaptureDestinatio
 }
 
 pub(super) fn mode_icon(painter: &egui::Painter, mode: CaptureMode, rect: Rect, color: Color32) {
-    let stroke = Stroke::new(1.8, color);
+    let color = crate::icon_style::color(
+        painter.ctx(),
+        color,
+        match mode {
+            CaptureMode::MultiRegion => crate::icon_style::Family::Violet,
+            CaptureMode::Scrolling => crate::icon_style::Family::Teal,
+            _ => crate::icon_style::Family::Cobalt,
+        },
+    );
+    let stroke = Stroke::new(crate::icon_style::current(painter.ctx()).width(), color);
     match mode {
         CaptureMode::Region => appearance::icon(
             painter,
             rect.center(),
-            appearance::Icon::Capture,
+            appearance::Icon::Fit,
             color,
             rect.height(),
         ),
@@ -308,15 +317,15 @@ fn sized_mode_tile(
         )
     });
     let color = if selected {
-        appearance::CREAM
+        appearance::palette(ui.ctx()).cream
     } else {
-        appearance::INK
+        appearance::palette(ui.ctx()).ink
     };
     ui.painter().rect_filled(
         rect,
         10,
         if selected {
-            appearance::NAVY
+            appearance::palette(ui.ctx()).navy
         } else {
             Color32::WHITE
         },
@@ -331,13 +340,22 @@ fn sized_mode_tile(
                 1.
             },
             if selected || response.hovered() {
-                appearance::GINGER
+                appearance::palette(ui.ctx()).ginger
             } else {
-                appearance::BORDER
+                appearance::palette(ui.ctx()).border
             },
         ),
         egui::StrokeKind::Inside,
     );
+    if selected {
+        appearance::satin(
+            ui.painter(),
+            rect,
+            10.,
+            true,
+            response.is_pointer_button_down_on(),
+        );
+    }
     mode_icon(
         ui.painter(),
         mode,
@@ -354,7 +372,14 @@ fn sized_mode_tile(
         egui::FontId::proportional(if compact { 12. } else { 13. }),
         color,
     );
-    appearance::calico_tabs(ui.painter(), rect.min + Vec2::new(12., 0.));
+    if !selected && response.hovered() {
+        ui.painter().rect_stroke(
+            rect,
+            10,
+            Stroke::new(1.5, appearance::palette(ui.ctx()).accent),
+            egui::StrokeKind::Inside,
+        );
+    }
     response.on_hover_text(mode.hint())
 }
 

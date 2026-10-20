@@ -138,6 +138,7 @@ enum View {
 
 pub struct MyImageApp {
     about_open: bool,
+    appearance_open: bool,
     guide_open: bool,
     source_textures: crate::texture_cache::SourceTextures,
     recovery: recovery_ui::RecoveryState,
@@ -246,6 +247,8 @@ impl MyImageApp {
         };
         settings.recent_files.truncate(24);
         appearance::apply(ctx);
+        appearance::set_finish(ctx, settings.gui_finish);
+        crate::icon_style::set(ctx, settings.icon_style);
         ctx.set_zoom_factor(settings.ui_text_size.factor());
         ctx.options_mut(|options| options.zoom_with_keyboard = false);
         let app_icon = load_texture(
@@ -262,6 +265,7 @@ impl MyImageApp {
         editor.set_toolbar(settings.editor_toolbar.clone());
         Self {
             about_open: false,
+            appearance_open: false,
             guide_open: !background && settings.guide_version < crate::onboarding::VERSION,
             source_textures: Default::default(),
             recovery: Default::default(),
@@ -444,6 +448,7 @@ impl MyImageApp {
             || self.busy
             || self.recovery.prompt
             || self.about_open
+            || self.appearance_open
             || self.guide_open
             || self.pending_action.is_some()
             || self.export_panel.open
@@ -838,6 +843,7 @@ impl MyImageApp {
             || self.document.is_none()
             || self.recovery.prompt
             || self.about_open
+            || self.appearance_open
             || self.guide_open
             || self.pending_action.is_some()
             || self.editor.has_modal()
@@ -935,6 +941,7 @@ impl MyImageApp {
                     if !self.busy
                         && !self.guide_open
                         && !self.about_open
+                        && !self.appearance_open
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
@@ -1444,7 +1451,7 @@ impl MyImageApp {
             if ui
                 .add_enabled(
                     self.document.is_some(),
-                    appearance::primary("Edit & annotate"),
+                    appearance::primary(ui.ctx(), "Edit & annotate"),
                 )
                 .clicked()
             {
@@ -1563,7 +1570,11 @@ impl MyImageApp {
                                     rect,
                                 ),
                                 state => {
-                                    painter.rect_filled(rect, 0, appearance::PAPER);
+                                    painter.rect_filled(
+                                        rect,
+                                        0,
+                                        appearance::palette(ui.ctx()).paper,
+                                    );
                                     let message = match state {
                                         Err(error) => {
                                             format!("Privacy preview unavailable: {error}")
@@ -1575,7 +1586,7 @@ impl MyImageApp {
                                         egui::Align2::CENTER_CENTER,
                                         message,
                                         egui::FontId::proportional(14.0),
-                                        appearance::MUTED,
+                                        appearance::palette(ui.ctx()).muted,
                                     );
                                 }
                             }
@@ -1632,7 +1643,7 @@ impl MyImageApp {
                             "Open a recent image, capture your screen, or create from a template.",
                         )
                         .size(18.)
-                        .color(appearance::INK),
+                        .color(appearance::palette(ui.ctx()).ink),
                     );
                     ui.add_space(22.);
                     let columns = if ui.available_width() >= 600. { 2 } else { 1 };
@@ -1643,13 +1654,13 @@ impl MyImageApp {
                             "Open image",
                             "Browse your files",
                             Icon::Open,
-                            Color32::from_rgb(36, 34, 33),
+                            appearance::palette(ui.ctx()).navy,
                         ),
                         (
                             "Capture",
                             "Region, window or screen",
                             Icon::Capture,
-                            Color32::from_rgb(249, 177, 93),
+                            appearance::palette(ui.ctx()).ginger,
                         ),
                         (
                             "Paste image",
@@ -1661,7 +1672,7 @@ impl MyImageApp {
                             "Create",
                             "Start from a template",
                             Icon::Create,
-                            Color32::from_rgb(255, 240, 215),
+                            appearance::palette(ui.ctx()).cream,
                         ),
                     ];
                     ui.allocate_ui_with_layout(
@@ -1792,6 +1803,7 @@ impl eframe::App for MyImageApp {
                     && self.selection.is_none()
                     && !self.guide_open
                     && !self.about_open
+                    && !self.appearance_open
                     && !self.recovery.prompt
                     && self.pending_action.is_none()
                     && self.file_dialog.is_none()
@@ -1834,6 +1846,7 @@ impl eframe::App for MyImageApp {
         if !self.busy
             && !self.guide_open
             && !self.about_open
+            && !self.appearance_open
             && !self.recovery.prompt
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
@@ -1904,7 +1917,7 @@ impl eframe::App for MyImageApp {
                                 "Capture. Annotate. Make it clear."
                             })
                             .size(12.0)
-                            .color(appearance::MUTED),
+                            .color(appearance::palette(ui.ctx()).muted),
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1912,6 +1925,7 @@ impl eframe::App for MyImageApp {
                             !self.busy
                                 && !self.guide_open
                                 && !self.about_open
+                                && !self.appearance_open
                                 && !self.recovery.prompt
                                 && self.pending_action.is_none()
                                 && self.file_dialog.is_none()
@@ -2001,6 +2015,7 @@ impl eframe::App for MyImageApp {
                     !self.busy
                         && !self.guide_open
                         && !self.about_open
+                        && !self.appearance_open
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
@@ -2067,7 +2082,7 @@ impl eframe::App for MyImageApp {
                                 .min_size(egui::vec2(36., 34.))
                                 .corner_radius(9),
                             )
-                            .config(app_menu::config())
+                            .config(app_menu::config(ctx))
                             .ui(ui, |ui| self.app_menu_contents(ui, ctx))
                         })
                         .inner;
@@ -2080,7 +2095,7 @@ impl eframe::App for MyImageApp {
                     });
                     menu.0.on_hover_text("App menu");
                     if let Some(warning) = &self.recovery.warning {
-                        ui.colored_label(appearance::GINGER, "Autosave needs attention").on_hover_text(warning);
+                        ui.colored_label(appearance::palette(ui.ctx()).ginger, "Autosave needs attention").on_hover_text(warning);
                     } else if self.recovery.writing {
                         ui.weak("Autosaving…");
                     } else if let Some(time) = &self.recovery.saved_at {
@@ -2097,6 +2112,7 @@ impl eframe::App for MyImageApp {
                     let enabled = !self.busy
                         && !self.guide_open
                         && !self.about_open
+                        && !self.appearance_open
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
@@ -2174,6 +2190,7 @@ impl eframe::App for MyImageApp {
                 !self.busy
                     && !self.guide_open
                     && !self.about_open
+                    && !self.appearance_open
                     && !self.recovery.prompt
                     && self.pending_action.is_none()
                     && self.file_dialog.is_none()
@@ -2205,6 +2222,7 @@ impl eframe::App for MyImageApp {
         self.file_dialog_ui(ctx);
         self.recovery_ui(ctx);
         self.about_ui(ctx);
+        self.appearance_ui(ctx);
         if self.recovery.ready
             && !self.recovery.prompt
             && self.pending_action.is_none()

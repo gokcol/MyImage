@@ -207,7 +207,7 @@ impl EditorState {
                 ui.painter(),
                 r.center(),
                 Glyph::Stack,
-                crate::appearance::MUTED,
+                crate::appearance::palette(ui.ctx()).muted,
                 34.,
             );
             ui.label(egui::RichText::new("Your artwork will appear here").strong());
@@ -322,7 +322,6 @@ impl EditorState {
         document: &mut Document,
         history: &mut EditHistory,
     ) {
-        use crate::appearance::{BORDER, CREAM, INK, MUTED};
         use inspector_widgets::{Glyph, tile};
         let indices = target.indices(document);
         let selection = self.selected_indices(document);
@@ -336,16 +335,16 @@ impl EditorState {
         ui.push_id(target, |ui| {
             egui::Frame::new()
                 .fill(if selected {
-                    CREAM
+                    crate::appearance::palette(ui.ctx()).cream
                 } else {
-                    crate::appearance::PAPER
+                    crate::appearance::palette(ui.ctx()).paper
                 })
                 .stroke(Stroke::new(
                     1.,
                     if selected {
-                        crate::appearance::ACCENT
+                        crate::appearance::palette(ui.ctx()).accent
                     } else {
-                        BORDER
+                        crate::appearance::palette(ui.ctx()).border
                     },
                 ))
                 .corner_radius(5)
@@ -359,7 +358,7 @@ impl EditorState {
                                 ui.painter(),
                                 badge.center(),
                                 Glyph::Stack,
-                                INK,
+                                crate::appearance::palette(ui.ctx()).ink,
                                 19.,
                             ),
                             LayerTarget::Annotation(i) => {
@@ -367,7 +366,7 @@ impl EditorState {
                                 let color = if visible {
                                     Color32::from_rgb(a.color[0], a.color[1], a.color[2])
                                 } else {
-                                    MUTED
+                                    crate::appearance::palette(ui.ctx()).muted
                                 };
                                 if a.kind.is_shape() {
                                     ui.painter().add(egui::Shape::closed_line(
@@ -394,13 +393,13 @@ impl EditorState {
                         }
                         let response = ui.add_sized(
                             [(ui.available_width() - 56.).max(20.), 28.],
-                            egui::Button::new(
-                                egui::RichText::new(&label).size(12.).color(if visible {
-                                    INK
+                            egui::Button::new(egui::RichText::new(&label).size(12.).color(
+                                if visible {
+                                    crate::appearance::palette(ui.ctx()).ink
                                 } else {
-                                    MUTED
-                                }),
-                            )
+                                    crate::appearance::palette(ui.ctx()).muted
+                                },
+                            ))
                             .frame(false)
                             .truncate(),
                         );

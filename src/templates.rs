@@ -118,7 +118,7 @@ impl CreatePanel {
                             egui::Stroke::new(
                                 if kind == self.kind { 2. } else { 1. },
                                 if kind == self.kind {
-                                    crate::appearance::ACCENT
+                                    crate::appearance::palette(ui.ctx()).accent
                                 } else {
                                     Color32::from_gray(215)
                                 },
@@ -140,7 +140,7 @@ impl CreatePanel {
                                     Vec2::new(w as f32 * 0.55, 35.) * scale,
                                 ),
                                 1,
-                                crate::appearance::ACCENT,
+                                crate::appearance::palette(ui.ctx()).accent,
                             );
                         }
                         for [x, y, w, h] in kind.slots() {
@@ -163,7 +163,7 @@ impl CreatePanel {
                             egui::Align2::CENTER_CENTER,
                             kind.name(),
                             egui::FontId::proportional(12.),
-                            crate::appearance::INK,
+                            crate::appearance::palette(ui.ctx()).ink,
                         );
                         if response.clicked() {
                             self.kind = kind;
@@ -263,6 +263,7 @@ fn annotation(kind: AnnotationKind, rect: [f32; 4]) -> Annotation {
         stamp: None,
         fill_region: None,
         text_style: Default::default(),
+        callout_style: Default::default(),
         pixel_mask: None,
         arrow: Default::default(),
         studio: Default::default(),

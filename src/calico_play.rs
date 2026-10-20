@@ -92,7 +92,7 @@ impl CalicoPlay {
         // A rolling yarn ball and tiny sparkles turn a traversal into a game.
         if self.act != 3 {
             let ball = at + Vec2::new(facing * 72., 33. + (phase * 5.).sin() * 9.);
-            p.circle_filled(ball, 12., color(crate::appearance::GINGER));
+            p.circle_filled(ball, 12., color(crate::appearance::palette(p.ctx()).ginger));
             for i in 0..3 {
                 let shift = i as f32 * 4. - 4.;
                 p.line_segment(
@@ -100,7 +100,7 @@ impl CalicoPlay {
                         ball + Vec2::new(-7., shift - 3.),
                         ball + Vec2::new(7., shift + 3.),
                     ],
-                    Stroke::new(1.3, color(crate::appearance::ACCENT)),
+                    Stroke::new(1.3, color(crate::appearance::palette(p.ctx()).accent)),
                 );
             }
             for i in 0..3 {
@@ -109,11 +109,11 @@ impl CalicoPlay {
                 let r = 2. + (phase * 8. + i as f32).sin().abs() * 2.;
                 p.line_segment(
                     [sparkle - Vec2::X * r, sparkle + Vec2::X * r],
-                    Stroke::new(1.5, color(crate::appearance::ACCENT)),
+                    Stroke::new(1.5, color(crate::appearance::palette(p.ctx()).accent)),
                 );
                 p.line_segment(
                     [sparkle - Vec2::Y * r, sparkle + Vec2::Y * r],
-                    Stroke::new(1.5, color(crate::appearance::ACCENT)),
+                    Stroke::new(1.5, color(crate::appearance::palette(p.ctx()).accent)),
                 );
             }
         }

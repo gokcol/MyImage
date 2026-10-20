@@ -1,6 +1,6 @@
 //! Compact, accessible icon tiles shared by the editor side panels.
 use super::*;
-use crate::appearance::{self, ACCENT, BORDER, CREAM, INK};
+use crate::appearance::{self};
 
 #[derive(Clone, Copy)]
 pub(super) enum Glyph {
@@ -60,13 +60,17 @@ pub(super) fn tile(
     });
     let r = response.rect;
     let fill = if selected {
-        INK
+        crate::appearance::palette(ui.ctx()).ink
     } else if response.hovered() {
-        CREAM
+        crate::appearance::palette(ui.ctx()).cream
     } else {
-        appearance::PAPER
+        appearance::palette(ui.ctx()).paper
     };
-    let color = if selected { appearance::GINGER } else { INK };
+    let color = if selected {
+        Color32::WHITE
+    } else {
+        crate::appearance::palette(ui.ctx()).ink
+    };
     let p = ui.painter();
     p.rect(
         r,
@@ -75,13 +79,16 @@ pub(super) fn tile(
         Stroke::new(
             if response.has_focus() { 2. } else { 1. },
             if selected || response.has_focus() {
-                ACCENT
+                crate::appearance::palette(ui.ctx()).accent
             } else {
-                BORDER
+                crate::appearance::palette(ui.ctx()).border
             },
         ),
         StrokeKind::Inside,
     );
+    if selected {
+        appearance::satin(p, r, 6., true, response.is_pointer_button_down_on());
+    }
     let center = if caption {
         egui::pos2(r.center().x, r.top() + (r.height() - 16.) * 0.5)
     } else {
@@ -100,7 +107,11 @@ pub(super) fn tile(
             egui::Align2::CENTER_BOTTOM,
             label,
             egui::FontId::proportional(11.),
-            if selected { Color32::WHITE } else { INK },
+            if selected {
+                Color32::WHITE
+            } else {
+                crate::appearance::palette(ui.ctx()).ink
+            },
         );
     }
     response.on_hover_cursor(CursorIcon::PointingHand)

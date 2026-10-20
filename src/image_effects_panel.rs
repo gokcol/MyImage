@@ -126,7 +126,7 @@ impl EditorState {
             egui::RichText::new("Effect Styles")
                 .small()
                 .strong()
-                .color(appearance::MUTED),
+                .color(appearance::palette(ui.ctx()).muted),
         );
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::new(3., 3.);
@@ -517,16 +517,16 @@ fn effect_card(
         r,
         6.,
         if selected || response.hovered() {
-            appearance::CREAM
+            appearance::palette(ui.ctx()).cream
         } else {
-            appearance::PAPER
+            appearance::palette(ui.ctx()).paper
         },
         Stroke::new(
             if selected { 2. } else { 1. },
             if selected {
-                appearance::ACCENT
+                appearance::palette(ui.ctx()).accent
             } else {
-                appearance::BORDER
+                appearance::palette(ui.ctx()).border
             },
         ),
         StrokeKind::Inside,
@@ -551,9 +551,9 @@ fn effect_card(
             Stroke::new(
                 2.,
                 if index == 3 {
-                    appearance::INK
+                    appearance::palette(ui.ctx()).ink
                 } else {
-                    appearance::GINGER
+                    appearance::palette(ui.ctx()).ginger
                 },
             ),
             StrokeKind::Outside,
@@ -565,7 +565,7 @@ fn effect_card(
         if index == 5 {
             Color32::from_gray(90)
         } else {
-            appearance::GINGER
+            appearance::palette(ui.ctx()).ginger
         },
     );
     for y in [8., 14., 20.] {
@@ -589,7 +589,7 @@ fn effect_card(
         egui::Align2::CENTER_BOTTOM,
         label,
         egui::FontId::proportional(10.5),
-        appearance::INK,
+        appearance::palette(ui.ctx()).ink,
     );
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -656,16 +656,16 @@ fn edge_card(
         r,
         5.,
         if selected || response.hovered() {
-            appearance::CREAM
+            appearance::palette(ui.ctx()).cream
         } else {
-            appearance::PAPER
+            appearance::palette(ui.ctx()).paper
         },
         Stroke::new(
             if selected { 2. } else { 1. },
             if selected {
-                appearance::ACCENT
+                appearance::palette(ui.ctx()).accent
             } else {
-                appearance::BORDER
+                appearance::palette(ui.ctx()).border
             },
         ),
         StrokeKind::Inside,
@@ -683,7 +683,7 @@ fn edge_card(
         egui::Align2::CENTER_BOTTOM,
         label,
         egui::FontId::proportional(10.5),
-        appearance::INK,
+        appearance::palette(ui.ctx()).ink,
     );
     response.on_hover_cursor(CursorIcon::PointingHand)
 }
@@ -740,16 +740,16 @@ fn style_card(
         r,
         5.,
         if selected || response.hovered() {
-            appearance::CREAM
+            appearance::palette(ui.ctx()).cream
         } else {
-            appearance::PAPER
+            appearance::palette(ui.ctx()).paper
         },
         Stroke::new(
             if selected { 2. } else { 1. },
             if selected {
-                appearance::ACCENT
+                appearance::palette(ui.ctx()).accent
             } else {
-                appearance::BORDER
+                appearance::palette(ui.ctx()).border
             },
         ),
         StrokeKind::Inside,
@@ -766,7 +766,7 @@ fn style_card(
         egui::Align2::CENTER_BOTTOM,
         label,
         egui::FontId::proportional(10.5),
-        appearance::INK,
+        appearance::palette(ui.ctx()).ink,
     );
     response.on_hover_cursor(CursorIcon::PointingHand)
 }

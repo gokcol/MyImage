@@ -2,14 +2,15 @@
 use super::*;
 use egui::{Align2, FontId, RichText, Sense};
 
-pub(super) fn config() -> egui::containers::menu::MenuConfig {
+pub(super) fn config(ctx: &egui::Context) -> egui::containers::menu::MenuConfig {
+    let palette = appearance::palette(ctx);
     egui::containers::menu::MenuConfig::new()
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .style(|style: &mut egui::Style| {
+        .style(move |style: &mut egui::Style| {
             egui::containers::menu::menu_style(style);
             style.spacing.menu_margin = egui::Margin::ZERO;
-            style.visuals.window_fill = dialogs::SURFACE;
-            style.visuals.window_stroke = Stroke::new(1., dialogs::LINE);
+            style.visuals.window_fill = palette.paper;
+            style.visuals.window_stroke = Stroke::new(1., palette.border);
             style.visuals.menu_corner_radius = egui::CornerRadius::same(8);
             style.visuals.popup_shadow = egui::Shadow {
                 offset: [0, 8],
@@ -38,8 +39,8 @@ pub(super) fn row(
             ui.painter().rect(
                 rect,
                 5,
-                appearance::CREAM,
-                Stroke::new(1., appearance::BORDER),
+                appearance::palette(ui.ctx()).cream,
+                Stroke::new(1., appearance::palette(ui.ctx()).border),
                 egui::StrokeKind::Inside,
             );
         }
@@ -51,7 +52,7 @@ pub(super) fn row(
             if active {
                 Color32::WHITE
             } else {
-                Color32::from_rgb(237, 238, 239)
+                appearance::palette(ui.ctx()).base
             },
         );
         appearance::icon(
@@ -59,9 +60,9 @@ pub(super) fn row(
             badge.center(),
             icon,
             if active {
-                appearance::ACCENT
+                appearance::palette(ui.ctx()).accent
             } else {
-                dialogs::CHARCOAL
+                crate::appearance::palette(ui.ctx()).navy
             },
             14.,
         );
@@ -70,14 +71,14 @@ pub(super) fn row(
             Align2::LEFT_CENTER,
             label,
             FontId::proportional(12.),
-            dialogs::CHARCOAL,
+            crate::appearance::palette(ui.ctx()).navy,
         );
         ui.painter().text(
             rect.right_center() - Vec2::new(10., 0.),
             Align2::RIGHT_CENTER,
             trailing,
             FontId::proportional(11.),
-            dialogs::MUTED,
+            crate::appearance::palette(ui.ctx()).muted,
         );
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
     })
@@ -98,7 +99,7 @@ impl MyImageApp {
                 sw: 0,
                 se: 0,
             },
-            dialogs::CHARCOAL,
+            crate::appearance::palette(ui.ctx()).navy,
         );
         appearance::calico_tabs(ui.painter(), header.min + Vec2::new(16., 0.));
         ui.painter().image(
@@ -136,16 +137,16 @@ impl MyImageApp {
                 .show(ui, |ui| {
                 let (rect, play) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.), Sense::click());
                 play.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Play with Calico"));
-                ui.painter().rect(rect, 6, if play.hovered() { appearance::GINGER } else { appearance::CREAM }, Stroke::new(1., appearance::BORDER), egui::StrokeKind::Inside);
-                appearance::icon(ui.painter(), rect.left_center() + Vec2::new(18., 0.), Icon::Favorite, appearance::ACCENT, 18.);
-                ui.painter().text(rect.left_center() + Vec2::new(37., 0.), Align2::LEFT_CENTER, "Play with Calico", FontId::proportional(13.), appearance::INK);
-                ui.painter().text(rect.right_center() - Vec2::new(12., 0.), Align2::RIGHT_CENTER, "5s", FontId::proportional(11.), appearance::ACCENT);
+                ui.painter().rect(rect, 6, if play.hovered() { appearance::palette(ui.ctx()).ginger } else { appearance::palette(ui.ctx()).cream }, Stroke::new(1., appearance::palette(ui.ctx()).border), egui::StrokeKind::Inside);
+                appearance::icon(ui.painter(), rect.left_center() + Vec2::new(18., 0.), Icon::Favorite, appearance::palette(ui.ctx()).accent, 18.);
+                ui.painter().text(rect.left_center() + Vec2::new(37., 0.), Align2::LEFT_CENTER, "Play with Calico", FontId::proportional(13.), appearance::palette(ui.ctx()).ink);
+                ui.painter().text(rect.right_center() - Vec2::new(12., 0.), Align2::RIGHT_CENTER, "5s", FontId::proportional(11.), appearance::palette(ui.ctx()).accent);
                 if play.on_hover_text("A five-second surprise · Escape to stop").clicked() {
                     self.calico.start(ctx.input(|i| i.time));
                     ui.close();
                 }
                 ui.add_space(5.);
-                let can_open = !self.busy && !self.guide_open && !self.about_open && !self.recovery.prompt
+                let can_open = !self.busy && !self.guide_open && !self.about_open && !self.appearance_open && !self.recovery.prompt
                     && self.pending_action.is_none() && self.file_dialog.is_none()
                     && !self.editor.has_modal() && !self.export_panel.open;
                 if row(ui, if self.view == View::Viewer { "Return to Editor" } else { "View only" }, if self.view == View::Viewer { Icon::Edit } else { Icon::Eye }, can_open && self.document.is_some(), "›").clicked() {
@@ -171,11 +172,11 @@ impl MyImageApp {
                     ui.close();
                 }
                 ui.add_space(5.);
-                egui::Frame::new().fill(Color32::from_rgb(237,238,240)).corner_radius(6).inner_margin(8).show(ui, |ui| {
+                egui::Frame::new().fill(appearance::palette(ui.ctx()).base).corner_radius(6).inner_margin(8).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let (r, _) = ui.allocate_exact_size(Vec2::splat(14.), Sense::hover());
-                        appearance::icon(ui.painter(), r.center(), Icon::TextSize, dialogs::MUTED, 13.);
-                        ui.label(RichText::new("Interface size").size(11.).color(dialogs::MUTED));
+                        appearance::icon(ui.painter(), r.center(), Icon::TextSize, crate::appearance::palette(ui.ctx()).muted, 13.);
+                        ui.label(RichText::new("Interface size").size(11.).color(crate::appearance::palette(ui.ctx()).muted));
                     });
                     ui.add_space(4.);
                     ui.horizontal(|ui| {
@@ -183,7 +184,7 @@ impl MyImageApp {
                         let width = (ui.available_width() - 6.) / 4.;
                         for size in storage::UiTextSize::ALL {
                             let selected = self.settings.ui_text_size == size;
-                            let response = ui.add_sized([width, 27.], egui::Button::new(RichText::new(size.label()).size(10.5).color(if selected { Color32::WHITE } else { dialogs::CHARCOAL })).fill(if selected { dialogs::CHARCOAL } else { Color32::TRANSPARENT }).stroke(Stroke::NONE).corner_radius(4));
+                            let response = ui.add_sized([width, 27.], egui::Button::new(RichText::new(size.label()).size(10.5).color(if selected { Color32::WHITE } else { crate::appearance::palette(ui.ctx()).navy })).fill(if selected { crate::appearance::palette(ui.ctx()).navy } else { Color32::TRANSPARENT }).stroke(Stroke::NONE).corner_radius(4));
                             if response.clicked() {
                                 self.settings.ui_text_size = size;
                                 ctx.set_zoom_factor(size.factor());
@@ -208,6 +209,10 @@ impl MyImageApp {
                         }
                     });
                 });
+                if row(ui, "Settings · Appearance", Icon::Settings, can_open, "›").clicked() {
+                    self.appearance_open = true;
+                    ui.close();
+                }
             });
         });
     }
@@ -242,7 +247,7 @@ impl MyImageApp {
                     ui.label(
                         RichText::new("Created by Orhan Gökçöl")
                             .strong()
-                            .color(appearance::ACCENT),
+                            .color(appearance::palette(ui.ctx()).accent),
                     );
                 });
             });
@@ -262,6 +267,86 @@ impl MyImageApp {
         });
         if close || response.should_close() {
             self.about_open = false;
+        }
+    }
+}
+
+impl MyImageApp {
+    pub(super) fn appearance_ui(&mut self, ctx: &egui::Context) {
+        if !self.appearance_open {
+            return;
+        }
+        let mut finish = self.settings.gui_finish;
+        let mut icon_style = self.settings.icon_style;
+        let response = Dialog::new(
+            "Appearance",
+            "Choose your finish and icons. Your workspace stays in place.",
+            Icon::Settings,
+            350.,
+        )
+        .modal(ctx, egui::Id::new("appearance-settings"), |ui| {
+            for choice in appearance::GuiFinish::ALL {
+                let colors = choice.palette();
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(65., 30.), egui::Sense::hover());
+                    for (i, color) in [colors.navy, colors.accent, colors.cream]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        ui.painter().rect_filled(
+                            Rect::from_min_size(
+                                r.min + Vec2::new(i as f32 * 21., 5.),
+                                Vec2::splat(19.),
+                            ),
+                            4,
+                            color,
+                        );
+                    }
+                    ui.selectable_value(&mut finish, choice, choice.label());
+                });
+            }
+            ui.add_space(5.);
+            ui.separator();
+            ui.strong("Icon style");
+            for choice in crate::icon_style::IconStyle::ALL {
+                ui.horizontal(|ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::new(65., 30.), egui::Sense::hover());
+                    for (i, glyph) in [
+                        crate::icon_style::Glyph::Arrow,
+                        crate::icon_style::Glyph::Callout,
+                        crate::icon_style::Glyph::Magnify,
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        crate::icon_style::preview(
+                            ui.painter(),
+                            r.left_center() + Vec2::new(10. + i as f32 * 22., 0.),
+                            glyph,
+                            appearance::palette(ui.ctx()).ink,
+                            17.,
+                            choice,
+                        );
+                    }
+                    ui.selectable_value(&mut icon_style, choice, choice.label());
+                });
+            }
+            ui.add_space(5.);
+            ui.small("Applies to the interface only. Image and annotation colors are unchanged.");
+            dialogs::actions(ui, |ui| dialogs::primary(ui, "Done", Icon::Check).clicked())
+        });
+        if finish != self.settings.gui_finish {
+            self.settings.gui_finish = finish;
+            appearance::set_finish(ctx, finish);
+            self.persist_settings();
+        }
+        if icon_style != self.settings.icon_style {
+            self.settings.icon_style = icon_style;
+            crate::icon_style::set(ctx, icon_style);
+            self.persist_settings();
+        }
+        if response.inner || response.should_close() {
+            self.appearance_open = false;
         }
     }
 }

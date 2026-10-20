@@ -1,11 +1,16 @@
 //! Visual selection properties, using the same pixel/layer operations as the canvas.
 use super::*;
-use crate::appearance::{self, MUTED};
+use crate::appearance::{self};
 use inspector_widgets::{Glyph, tile};
 
 fn section(ui: &mut egui::Ui, label: &str) {
     ui.add_space(2.);
-    ui.label(egui::RichText::new(label).size(11.).strong().color(MUTED));
+    ui.label(
+        egui::RichText::new(label)
+            .size(11.)
+            .strong()
+            .color(crate::appearance::palette(ui.ctx()).muted),
+    );
 }
 
 impl EditorState {
@@ -132,7 +137,7 @@ impl EditorState {
             ui.label(
                 egui::RichText::new("Drag on your image to select an area.")
                     .size(11.)
-                    .color(MUTED),
+                    .color(crate::appearance::palette(ui.ctx()).muted),
             );
         }
         section(ui, "Clipboard & pixels");
