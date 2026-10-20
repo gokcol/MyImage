@@ -288,7 +288,13 @@ pub(super) fn mode_tile(
     selected: bool,
     width: f32,
 ) -> egui::Response {
-    sized_mode_tile(ui, mode, selected, Vec2::new(width, 64.))
+    sized_mode_tile(
+        ui,
+        mode,
+        selected,
+        Vec2::new(width, 64.),
+        appearance::palette(ui.ctx()),
+    )
 }
 
 pub(super) fn compact_mode_tile(
@@ -296,8 +302,9 @@ pub(super) fn compact_mode_tile(
     mode: CaptureMode,
     selected: bool,
     width: f32,
+    palette: appearance::Palette,
 ) -> egui::Response {
-    sized_mode_tile(ui, mode, selected, Vec2::new(width, 54.))
+    sized_mode_tile(ui, mode, selected, Vec2::new(width, 48.), palette)
 }
 
 fn sized_mode_tile(
@@ -305,6 +312,7 @@ fn sized_mode_tile(
     mode: CaptureMode,
     selected: bool,
     size: Vec2,
+    palette: appearance::Palette,
 ) -> egui::Response {
     let compact = size.y < 64.;
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -316,6 +324,39 @@ fn sized_mode_tile(
             mode.label(),
         )
     });
+    if compact {
+        let p = palette;
+        if selected {
+            ui.painter().rect_filled(rect, 8, p.base);
+        } else if response.hovered() {
+            ui.painter().rect_filled(rect, 8, p.cream);
+        }
+        let color = if selected { p.ginger } else { p.muted };
+        mode_icon(
+            ui.painter(),
+            mode,
+            Rect::from_center_size(rect.center_top() + Vec2::new(0., 15.), Vec2::new(21., 17.)),
+            color,
+        );
+        ui.painter().text(
+            rect.center_bottom() - Vec2::new(0., 10.),
+            egui::Align2::CENTER_CENTER,
+            mode.label(),
+            egui::FontId::proportional(12.),
+            color,
+        );
+        if response.has_focus() {
+            ui.painter().rect_stroke(
+                rect,
+                8,
+                Stroke::new(1.5, p.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        return response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(mode.hint());
+    }
     let color = if selected {
         appearance::palette(ui.ctx()).cream
     } else {

@@ -672,10 +672,11 @@ mod tests {
             ]
             .map(str::to_owned)
             .to_vec(),
+            true,
         );
         assert_eq!(e.toolbar_pins, default_toolbar());
         assert!(e.take_toolbar_change().is_some());
-        e.set_toolbar(vec!["Text".into(), "Magnify".into()]);
+        e.set_toolbar(vec!["Text".into(), "Magnify".into()], false);
         assert_eq!(e.toolbar_pins, vec!["Text", "Magnify"]);
     }
     #[test]
@@ -810,12 +811,15 @@ mod tests {
     #[test]
     fn toolbar_preferences_survive_document_reset_and_ignore_unknown_duplicates() {
         let mut e = EditorState::default();
-        e.set_toolbar(vec![
-            "Wand".into(),
-            "Magic Wand".into(),
-            "Text".into(),
-            "Text".into(),
-        ]);
+        e.set_toolbar(
+            vec![
+                "Wand".into(),
+                "Magic Wand".into(),
+                "Text".into(),
+                "Text".into(),
+            ],
+            false,
+        );
         e.reset();
         assert_eq!(e.toolbar_pins, vec!["Magic Wand", "Text"]);
         let s = crate::storage::Settings {

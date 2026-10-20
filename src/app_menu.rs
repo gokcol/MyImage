@@ -197,7 +197,7 @@ impl MyImageApp {
                 ui.horizontal(|ui| {
                     let width = (ui.available_width() - 5.) / 2.;
                     ui.allocate_ui_with_layout(Vec2::new(width, 33.), egui::Layout::top_down(egui::Align::Min), |ui| {
-                        if row(ui, "Background", Icon::Tray, self.desktop.is_some(), "").on_hover_text("Keep in menu bar / tray").clicked() {
+                        if row(ui, "Background", Icon::Tray, self.desktop.is_some(), "").on_hover_text("Keep running in the menu bar / tray. Reopen MyImage from its Dock icon or Open Editor in the tray menu.").clicked() {
                             self.hide(ctx);
                             ui.close();
                         }
@@ -209,7 +209,8 @@ impl MyImageApp {
                         }
                     });
                 });
-                if row(ui, "Settings · Appearance", Icon::Settings, can_open, "›").clicked() {
+                if row(ui, "Settings", Icon::Settings, can_open, "›").clicked() {
+                    self.startup.reset();
                     self.appearance_open = true;
                     ui.close();
                 }
@@ -278,63 +279,60 @@ impl MyImageApp {
         }
         let mut finish = self.settings.gui_finish;
         let mut icon_style = self.settings.icon_style;
-        let response = Dialog::new(
-            "Appearance",
-            "Choose your finish and icons. Your workspace stays in place.",
-            Icon::Settings,
-            350.,
-        )
-        .modal(ctx, egui::Id::new("appearance-settings"), |ui| {
-            for choice in appearance::GuiFinish::ALL {
-                let colors = choice.palette();
+        let mut pointer_style = self.settings.pointer_style;
+        let response = Dialog::new("Settings", "", Icon::Settings, 350.)
+            .modal(ctx, egui::Id::new("appearance-settings"), |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(6., 6.);
+                ui.strong("Interface").on_hover_text(
+                    "Changes the app’s appearance only. Your image and annotation colors stay the same.",
+                );
                 ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(65., 30.), egui::Sense::hover());
-                    for (i, color) in [colors.navy, colors.accent, colors.cream]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        ui.painter().rect_filled(
-                            Rect::from_min_size(
-                                r.min + Vec2::new(i as f32 * 21., 5.),
-                                Vec2::splat(19.),
-                            ),
-                            4,
-                            color,
-                        );
+                    let width = (ui.available_width() - 12.) / 3.;
+                    for choice in appearance::GuiFinish::ALL {
+                        let response = settings_choice(ui, choice.label(), finish == choice, width, |painter, center| {
+                            let colors = choice.palette();
+                            for (i, color) in [colors.navy, colors.accent, colors.cream].into_iter().enumerate() {
+                                painter.rect_filled(
+                                    Rect::from_center_size(center + Vec2::new((i as f32 - 1.) * 20., 0.), Vec2::splat(18.)),
+                                    4, color,
+                                );
+                            }
+                        });
+                        if response.clicked() { finish = choice; }
                     }
-                    ui.selectable_value(&mut finish, choice, choice.label());
                 });
-            }
-            ui.add_space(5.);
-            ui.separator();
-            ui.strong("Icon style");
-            for choice in crate::icon_style::IconStyle::ALL {
+                ui.strong("Icons");
                 ui.horizontal(|ui| {
-                    let (r, _) = ui.allocate_exact_size(Vec2::new(65., 30.), egui::Sense::hover());
-                    for (i, glyph) in [
-                        crate::icon_style::Glyph::Arrow,
-                        crate::icon_style::Glyph::Callout,
-                        crate::icon_style::Glyph::Magnify,
-                    ]
-                    .into_iter()
-                    .enumerate()
-                    {
-                        crate::icon_style::preview(
-                            ui.painter(),
-                            r.left_center() + Vec2::new(10. + i as f32 * 22., 0.),
-                            glyph,
-                            appearance::palette(ui.ctx()).ink,
-                            17.,
-                            choice,
-                        );
+                    let width = (ui.available_width() - 12.) / 3.;
+                    for choice in crate::icon_style::IconStyle::ALL {
+                        let response = settings_choice(ui, choice.label(), icon_style == choice, width, |painter, center| {
+                            for (i, glyph) in [
+                                crate::icon_style::Glyph::Arrow,
+                                crate::icon_style::Glyph::Callout,
+                                crate::icon_style::Glyph::Magnify,
+                            ].into_iter().enumerate() {
+                                crate::icon_style::preview(
+                                    painter, center + Vec2::new((i as f32 - 1.) * 22., 0.),
+                                    glyph, appearance::palette(painter.ctx()).ink, 17., choice,
+                                );
+                            }
+                        });
+                        if response.clicked() { icon_style = choice; }
                     }
-                    ui.selectable_value(&mut icon_style, choice, choice.label());
                 });
-            }
-            ui.add_space(5.);
-            ui.small("Applies to the interface only. Image and annotation colors are unchanged.");
-            dialogs::actions(ui, |ui| dialogs::primary(ui, "Done", Icon::Check).clicked())
-        });
+                ui.horizontal(|ui| {
+                    ui.strong("Pointer");
+                    let width = (ui.available_width() - 6.) / 2.;
+                    for choice in crate::pointer_style::PointerStyle::ALL {
+                        if pointer_choice(ui, choice, pointer_style == choice, width).clicked() {
+                            pointer_style = choice;
+                        }
+                    }
+                }).response.on_hover_text("Calico gives every pointer a subtle cat accent: drawing, text, links, resizing, moving and tool cursors. Hotspots stay precise.");
+                ui.separator();
+                self.startup.ui(ui);
+                dialogs::actions(ui, |ui| dialogs::primary(ui, "Done", Icon::Check).clicked())
+            });
         if finish != self.settings.gui_finish {
             self.settings.gui_finish = finish;
             appearance::set_finish(ctx, finish);
@@ -345,8 +343,109 @@ impl MyImageApp {
             crate::icon_style::set(ctx, icon_style);
             self.persist_settings();
         }
+        if pointer_style != self.settings.pointer_style {
+            self.settings.pointer_style = pointer_style;
+            self.persist_settings();
+        }
         if response.inner || response.should_close() {
             self.appearance_open = false;
         }
     }
+}
+
+fn pointer_choice(
+    ui: &mut egui::Ui,
+    choice: crate::pointer_style::PointerStyle,
+    selected: bool,
+    width: f32,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 32.), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::RadioButton,
+            ui.is_enabled(),
+            selected,
+            choice.label(),
+        )
+    });
+    let palette = appearance::palette(ui.ctx());
+    ui.painter().rect(
+        rect,
+        6,
+        if selected {
+            palette.cream
+        } else {
+            palette.base
+        },
+        Stroke::new(
+            if selected { 1.5 } else { 1. },
+            if selected || response.hovered() || response.has_focus() {
+                palette.accent
+            } else {
+                palette.border
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    crate::pointer_style::preview(
+        ui.painter(),
+        Rect::from_min_size(rect.min + Vec2::new(7., 3.), Vec2::splat(26.)),
+        choice,
+    );
+    ui.painter().text(
+        egui::pos2(rect.left() + 40., rect.center().y),
+        Align2::LEFT_CENTER,
+        choice.label(),
+        FontId::proportional(12.),
+        palette.ink,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Compact preview tile; the complete name and selected state remain accessible.
+fn settings_choice(
+    ui: &mut egui::Ui,
+    label: &str,
+    selected: bool,
+    width: f32,
+    preview: impl FnOnce(&egui::Painter, Pos2),
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 58.), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::RadioButton,
+            ui.is_enabled(),
+            selected,
+            label,
+        )
+    });
+    let palette = appearance::palette(ui.ctx());
+    let highlighted = selected || response.hovered() || response.has_focus();
+    ui.painter().rect(
+        rect,
+        6,
+        if selected {
+            palette.cream
+        } else {
+            palette.base
+        },
+        Stroke::new(
+            if selected { 1.5 } else { 1. },
+            if highlighted {
+                palette.accent
+            } else {
+                palette.border
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    preview(ui.painter(), egui::pos2(rect.center().x, rect.top() + 18.));
+    ui.painter().text(
+        egui::pos2(rect.center().x, rect.bottom() - 15.),
+        Align2::CENTER_CENTER,
+        label,
+        FontId::proportional(11.),
+        palette.ink,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

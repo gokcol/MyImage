@@ -104,9 +104,22 @@ pub fn set_finish(ctx: &egui::Context, finish: GuiFinish) {
 
 /// Paint a satin surface within the existing control rectangle; never changes layout.
 pub fn satin(painter: &egui::Painter, rect: Rect, radius: f32, selected: bool, pressed: bool) {
-    let p = palette(painter.ctx());
+    let mut p = palette(painter.ctx());
+    p.accent_top = p.accent.lerp_to_gamma(p.accent_top, 0.20);
+    satin_with_palette(painter, rect, radius, selected, pressed, p);
+}
+
+/// A local surface may have its own finish without changing the application theme.
+pub fn satin_with_palette(
+    painter: &egui::Painter,
+    rect: Rect,
+    radius: f32,
+    selected: bool,
+    pressed: bool,
+    p: Palette,
+) {
     let (mut top, mut bottom) = if selected {
-        (p.accent.lerp_to_gamma(p.accent_top, 0.20), p.accent)
+        (p.accent_top, p.accent)
     } else {
         (Color32::WHITE, p.paper)
     };

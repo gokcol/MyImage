@@ -143,6 +143,7 @@ pub struct MyImageApp {
     source_textures: crate::texture_cache::SourceTextures,
     recovery: recovery_ui::RecoveryState,
     settings: Settings,
+    startup: crate::startup::Preference,
     #[cfg(target_os = "macos")]
     _termination_guard: Option<crate::desktop::TerminationGuard>,
     desktop: Option<DesktopIntegration>,
@@ -262,7 +263,10 @@ impl MyImageApp {
         );
         let library = LibraryPanel::with_preferences(settings.library.clone());
         let mut editor = EditorState::with_presets(storage::preset_library_path(demo));
-        editor.set_toolbar(settings.editor_toolbar.clone());
+        editor.set_toolbar(
+            settings.editor_toolbar.clone(),
+            settings.toolbar_layout_version == 0,
+        );
         Self {
             about_open: false,
             appearance_open: false,
@@ -270,6 +274,7 @@ impl MyImageApp {
             source_textures: Default::default(),
             recovery: Default::default(),
             settings,
+            startup: Default::default(),
             #[cfg(target_os = "macos")]
             _termination_guard: None,
             desktop: None,
@@ -1758,6 +1763,11 @@ impl MyImageApp {
 }
 
 impl eframe::App for MyImageApp {
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        // The resident launcher's transparent viewport needs true alpha around
+        // its rounded shell. Other windows paint their opaque panel surfaces.
+        [0.; 4]
+    }
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         crate::image_clipboard::complete_paste_input(ctx, input);
     }
@@ -1837,10 +1847,12 @@ impl eframe::App for MyImageApp {
         }
         if self.scroll_session.is_some() {
             self.scroll_session_ui(ctx);
+            crate::pointer_style::paint(ctx, self.settings.pointer_style);
             return;
         }
         if self.selection.is_some() {
             self.selection_ui(ctx);
+            crate::pointer_style::paint(ctx, self.settings.pointer_style);
             return;
         }
         if !self.busy
@@ -2056,6 +2068,7 @@ impl eframe::App for MyImageApp {
             });
         if let Some(pins) = self.editor.take_toolbar_change() {
             self.settings.editor_toolbar = pins;
+            self.settings.toolbar_layout_version = self.settings.toolbar_layout_version.max(1);
             self.persist_settings();
         }
         if previous_view != self.view {
@@ -2271,6 +2284,7 @@ impl eframe::App for MyImageApp {
         }
         self.promote_edited_recent(ctx);
         self.autosave(ctx);
+        crate::pointer_style::paint(ctx, self.settings.pointer_style);
     }
 }
 

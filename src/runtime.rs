@@ -43,8 +43,7 @@ pub fn run(background: bool) -> eframe::Result {
     event_loop.run_app(&mut ResidentRuntime {
         inner,
         hidden,
-        window: None,
-        occluded: false,
+        root: RootWindow::default(),
         modifiers: winit::keyboard::ModifiersState::empty(),
     })?;
     Ok(())
@@ -53,8 +52,7 @@ pub fn run(background: bool) -> eframe::Result {
 struct ResidentRuntime<'a> {
     inner: eframe::EframeWinitApplication<'a>,
     hidden: Arc<AtomicBool>,
-    window: Option<WindowId>,
-    occluded: bool,
+    root: RootWindow,
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -66,7 +64,7 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
         self.inner.new_events(event_loop, cause);
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
-        self.window = Some(id);
+        self.root.observe(id, &event);
         if let WindowEvent::ModifiersChanged(modifiers) = &event {
             self.modifiers = modifiers.state();
         }
@@ -84,9 +82,6 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
         {
             crate::image_clipboard::request_paste();
         }
-        if let WindowEvent::Occluded(value) = &event {
-            self.occluded = *value;
-        }
         self.inner.window_event(event_loop, id, event);
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
@@ -96,8 +91,8 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
         // Process an explicit callback wakeup even then, so tray/hotkey/worker events
         // can show the window. This is event-driven and never runs an idle timer.
         if immediate
-            && (self.hidden.load(Ordering::Relaxed) || self.occluded)
-            && let Some(id) = self.window
+            && (self.hidden.load(Ordering::Relaxed) || self.root.occluded)
+            && let Some(id) = self.root.id
         {
             self.inner
                 .window_event(event_loop, id, WindowEvent::RedrawRequested);
@@ -108,7 +103,7 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.inner.about_to_wait(event_loop);
-        if (self.hidden.load(Ordering::Relaxed) || self.occluded)
+        if (self.hidden.load(Ordering::Relaxed) || self.root.occluded)
             && matches!(event_loop.control_flow(), ControlFlow::Poll)
         {
             event_loop.set_control_flow(ControlFlow::Wait);
@@ -122,5 +117,44 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
     }
     fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
         self.inner.memory_warning(event_loop);
+    }
+}
+
+// Eframe creates the root before immediate viewports. Keep its identity even
+// when Capture Now is focused, hidden, or destroyed; child repaints cannot run
+// the app's desktop-event queue while the root is invisible.
+#[derive(Default)]
+struct RootWindow {
+    id: Option<WindowId>,
+    occluded: bool,
+}
+impl RootWindow {
+    fn observe(&mut self, id: WindowId, event: &WindowEvent) {
+        self.id.get_or_insert(id);
+        if self.id == Some(id)
+            && let WindowEvent::Occluded(value) = event
+        {
+            self.occluded = *value;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn launcher_events_never_replace_the_hidden_editor_wakeup_target() {
+        let editor = WindowId::from(1);
+        let launcher = WindowId::from(2);
+        let mut root = RootWindow::default();
+        root.observe(editor, &WindowEvent::Focused(true));
+        root.observe(editor, &WindowEvent::Occluded(true));
+        root.observe(launcher, &WindowEvent::Focused(true));
+        root.observe(launcher, &WindowEvent::Occluded(false));
+        root.observe(launcher, &WindowEvent::Destroyed);
+        assert_eq!(root.id, Some(editor));
+        assert!(root.occluded);
+        root.observe(editor, &WindowEvent::Occluded(false));
+        assert!(!root.occluded);
     }
 }

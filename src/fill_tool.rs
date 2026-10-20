@@ -81,6 +81,7 @@ impl FillState {
 }
 impl EditorState {
     pub(super) fn paint_fill_cursor(&self, ctx: &egui::Context, tip: Pos2) {
+        crate::pointer_style::custom_tool(ctx, tip + Vec2::new(26., -10.));
         // Screen-space artwork stays legible at every image zoom. The droplet's
         // bottom tip is the actual fill seed, rather than the bucket's center.
         let painter = ctx.layer_painter(egui::LayerId::new(

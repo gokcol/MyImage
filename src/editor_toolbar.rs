@@ -50,7 +50,11 @@ impl EditorState {
                 "Cut Out",
                 "Remove a strip and join the remaining image",
             ),
-            (Tool::Pen, "Pen", "Draw editable strokes"),
+            (
+                Tool::Pen,
+                "Pen",
+                "Draw editable strokes with a mouse, pen or touchscreen",
+            ),
             (Tool::Highlighter, "Highlighter", "Highlight an area"),
             (Tool::Step, "Step", "Add numbered markers"),
             (Tool::Eraser, "Eraser", "Erase parts of pen strokes"),
@@ -66,7 +70,7 @@ impl EditorState {
             ),
         ]
     }
-    pub fn set_toolbar(&mut self, pins: Vec<String>) {
+    pub fn set_toolbar(&mut self, pins: Vec<String>, upgrade_layout: bool) {
         let valid = self.tools();
         let mut result = Vec::new();
         for pin in pins {
@@ -74,12 +78,22 @@ impl EditorState {
                 result.push(pin);
             }
         }
-        if result
-            == [
-                "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill",
-            ]
-        {
-            result.push("Magnify".into());
+        if upgrade_layout {
+            if result
+                == [
+                    "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill",
+                ]
+            {
+                result.push("Magnify".into());
+            }
+            // Run once on upgrade; subsequent customization (including unpinning
+            // Pen) must survive restart. Preserve the other tools' relative order.
+            result.retain(|label| label != "Pen");
+            let index = result
+                .iter()
+                .position(|label| label == "Shapes")
+                .map_or(result.len(), |i| i + 1);
+            result.insert(index, "Pen".into());
             self.toolbar_changed = true;
         }
         self.toolbar_pins = result;
@@ -137,8 +151,8 @@ impl EditorState {
         history: &mut EditHistory,
     ) {
         let tools = self.tools();
-        // Reserve More + Copy; overflowing pinned tools stay accessible in More.
-        let capacity = ((ui.available_width() - 210.).max(0.) / 51.).floor() as usize;
+        // Reserve the compact overflow button; hidden pins stay accessible there.
+        let capacity = ((ui.available_width() - 40.).max(0.) / 51.).floor() as usize;
         let visible: Vec<_> = self
             .toolbar_pins
             .iter()
@@ -161,82 +175,85 @@ impl EditorState {
         }
         let hidden_active =
             !visible.iter().any(|(t, _, _)| *t == self.tool) && self.tool != Tool::Select;
-        ui.menu_button(
-            egui::RichText::new("More ▾")
-                .size(12.)
-                .color(if hidden_active {
-                    crate::appearance::palette(ui.ctx()).accent
+        let (rect, overflow) = ui.allocate_exact_size(egui::vec2(30., 42.), Sense::click());
+        overflow.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "More tools")
+        });
+        let palette = crate::appearance::palette(ui.ctx());
+        if overflow.hovered()
+            || overflow.has_focus()
+            || egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&overflow))
+        {
+            ui.painter()
+                .rect_filled(rect.shrink2(egui::vec2(1., 5.)), 7, palette.cream);
+        }
+        let center = rect.center();
+        ui.painter().add(egui::Shape::line(
+            vec![
+                center + egui::vec2(-5., -2.5),
+                center + egui::vec2(0., 2.5),
+                center + egui::vec2(5., -2.5),
+            ],
+            Stroke::new(
+                2.,
+                if hidden_active {
+                    palette.accent
                 } else {
-                    crate::appearance::palette(ui.ctx()).ink
-                }),
-            |ui| {
-                ui.set_width(160.);
-                ui.spacing_mut().item_spacing.y = 1.;
-                for &(tool, label, hint) in &tools {
-                    if visible.iter().any(|(t, _, _)| *t == tool) {
-                        continue;
-                    }
-                    let (rect, response) =
-                        ui.allocate_exact_size(egui::vec2(160., 27.), Sense::click());
-                    response.widget_info(|| {
-                        egui::WidgetInfo::selected(
-                            egui::WidgetType::SelectableLabel,
-                            ui.is_enabled(),
-                            self.tool == tool,
-                            label,
-                        )
-                    });
-                    if response.hovered() || self.tool == tool {
-                        ui.painter().rect_filled(
-                            rect,
-                            4.,
-                            crate::appearance::palette(ui.ctx()).cream,
-                        );
-                    }
-                    paint_tool_icon(
-                        ui.painter(),
-                        rect.left_center() + egui::vec2(14., 0.),
-                        tool,
-                        crate::appearance::palette(ui.ctx()).ink,
-                    );
-                    ui.painter().text(
-                        rect.left_center() + egui::vec2(34., 0.),
-                        egui::Align2::LEFT_CENTER,
-                        label,
-                        egui::FontId::proportional(13.),
-                        crate::appearance::palette(ui.ctx()).ink,
-                    );
-                    if response.on_hover_text(hint).clicked() {
-                        self.choose_tool(tool, document, history);
-                        ui.close();
-                    }
+                    palette.ink
+                },
+            ),
+        ));
+        let overflow = overflow
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("More tools · Customize toolbar");
+        egui::Popup::menu(&overflow).show(|ui| {
+            ui.set_width(160.);
+            ui.spacing_mut().item_spacing.y = 1.;
+            for &(tool, label, hint) in &tools {
+                if visible.iter().any(|(t, _, _)| *t == tool) {
+                    continue;
                 }
-                ui.separator();
-                if ui
-                    .button(egui::RichText::new("Customize toolbar…").size(13.))
-                    .clicked()
-                {
-                    self.toolbar_customizer = true;
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(160., 27.), Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::SelectableLabel,
+                        ui.is_enabled(),
+                        self.tool == tool,
+                        label,
+                    )
+                });
+                if response.hovered() || self.tool == tool {
+                    ui.painter()
+                        .rect_filled(rect, 4., crate::appearance::palette(ui.ctx()).cream);
+                }
+                paint_tool_icon(
+                    ui.painter(),
+                    rect.left_center() + egui::vec2(14., 0.),
+                    tool,
+                    crate::appearance::palette(ui.ctx()).ink,
+                );
+                ui.painter().text(
+                    rect.left_center() + egui::vec2(34., 0.),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    egui::FontId::proportional(13.),
+                    crate::appearance::palette(ui.ctx()).ink,
+                );
+                if response.on_hover_text(hint).clicked() {
+                    self.choose_tool(tool, document, history);
                     ui.close();
                 }
-            },
-        );
-        ui.add_space(5.);
-        ui.separator();
-        ui.add_space(3.);
-        if crate::appearance::action_button(ui, "Copy", crate::appearance::Icon::Copy, true, false)
-            .on_hover_text(format!("{} (Command/Ctrl+C)", self.copy_scope(document)))
-            .clicked()
-        {
-            self.finish_annotation_gesture(document, history);
-            self.copy_image(ui.ctx(), document, false);
-            self.focus_canvas = true;
-        }
-        ui.menu_button("▾", |ui| {
-            self.pixel_selection_commands(ui, document, history);
-        })
-        .response
-        .on_hover_text("Select all or clear the selection");
+            }
+            ui.separator();
+            if ui
+                .button(egui::RichText::new("Customize toolbar…").size(13.))
+                .clicked()
+            {
+                self.toolbar_customizer = true;
+                ui.close();
+            }
+        });
         self.copy_feedback(ui);
     }
     pub(super) fn customize_toolbar(&mut self, ctx: &egui::Context) {
@@ -246,7 +263,7 @@ impl EditorState {
         let mut open = true;
         Dialog::new(
             "Customize toolbar",
-            "Pin everyday tools. Find the rest in More.",
+            "Pin everyday tools. Find the rest under the chevron.",
             DialogIcon::Settings,
             280.,
         )
@@ -317,5 +334,29 @@ impl EditorState {
             self.toolbar_changed |= before != self.toolbar_pins;
         });
         self.toolbar_customizer = open;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn pen_is_pinned_after_shapes_once_without_undoing_later_customization() {
+        let mut editor = EditorState::default();
+        let pins = ["Arrow", "Pen", "Shapes", "Fill"]
+            .map(str::to_owned)
+            .to_vec();
+        editor.set_toolbar(pins, true);
+        assert_eq!(editor.toolbar_pins, ["Arrow", "Shapes", "Pen", "Fill"]);
+        assert!(editor.take_toolbar_change().is_some());
+        let customized = ["Arrow", "Shapes", "Fill"].map(str::to_owned).to_vec();
+        editor.set_toolbar(customized.clone(), false);
+        assert_eq!(editor.toolbar_pins, customized);
+        assert!(editor.take_toolbar_change().is_none());
+        let defaults = default_toolbar();
+        assert_eq!(
+            defaults.iter().position(|s| s == "Pen"),
+            defaults.iter().position(|s| s == "Shapes").map(|i| i + 1)
+        );
     }
 }

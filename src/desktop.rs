@@ -66,7 +66,7 @@ impl EventSink {
     fn send(&self, event: DesktopEvent) {
         if self.sender.send(event).is_ok() {
             // This wakes eframe even when its editor window is hidden.
-            self.ctx.request_repaint();
+            self.ctx.request_repaint_of(egui::ViewportId::ROOT);
         }
     }
 }

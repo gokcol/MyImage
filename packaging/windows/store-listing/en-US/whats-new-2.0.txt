@@ -1,0 +1,9 @@
+MyImage 2.0 refreshes everyday capture and editing:
+
+- Pearl Compact Capture Now panel with a large red Capture button, lighter graphite background and neatly grouped capture options.
+- Compact Settings with independent GUI, icon and pointer choices, including the complete Calico pointer family.
+- Resizable editing sidebar with a compact default and a quick reset to fit.
+- Pen in the main toolbar, a compact tools dropdown and more room for editing.
+- Optional start at login, off by default, and improvements to background/reopen behavior.
+
+Captures, projects, settings, custom stamps and recovery data remain in their existing locations.

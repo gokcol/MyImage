@@ -101,6 +101,8 @@ try {
         $manifest.Package.Properties.PublisherDisplayName = $PublisherDisplayName
         $visual = $manifest.GetElementsByTagName('VisualElements', 'http://schemas.microsoft.com/appx/manifest/uap/windows10')[0]
         $visual.SetAttribute('DisplayName', $DisplayName)
+        $startupTask = $manifest.SelectSingleNode("//*[local-name()='StartupTask']")
+        $startupTask.SetAttribute('DisplayName', $DisplayName)
         $manifest.Save((Join-Path $layout 'AppxManifest.xml'))
         $config = Join-Path $work 'priconfig.xml'
         & $makepri createconfig /cf $config /dq en-US /o

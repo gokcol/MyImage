@@ -34,6 +34,8 @@ mod fill_tool;
 mod freehand;
 #[path = "image_effects_panel.rs"]
 mod image_effects_panel;
+#[path = "inspector_panel.rs"]
+mod inspector_panel;
 #[path = "inspector_widgets.rs"]
 mod inspector_widgets;
 #[path = "object_properties.rs"]
@@ -190,7 +192,7 @@ impl ResizeDraft {
 
 pub fn default_toolbar() -> Vec<String> {
     [
-        "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill", "Magnify",
+        "Select", "Arrow", "Text", "Callout", "Shapes", "Pen", "Stamps", "Fill", "Magnify",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -607,143 +609,135 @@ impl EditorState {
         {
             self.clear_selection();
         }
-        egui::SidePanel::right("annotation-inspector")
-            .resizable(false)
-            .exact_width(280.)
-            .frame(
-                egui::Frame::side_top_panel(ui.style())
-                    .fill(Color32::WHITE)
-                    .inner_margin(10),
-            )
-            .show_inside(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6., 5.);
-                ui.spacing_mut().button_padding = Vec2::new(7., 4.);
-                ui.spacing_mut().interact_size.y = 24.;
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().button_padding = Vec2::new(6., 6.);
-                    ui.spacing_mut().item_spacing.x = 4.;
-                    if ui
-                        .selectable_label(
-                            !self.layers_open && !self.presets_open && !self.effects_open,
-                            "Styles",
-                        )
-                        .clicked()
-                    {
-                        self.layers_open = false;
-                        self.presets_open = false;
-                        self.effects_open = false;
-                    }
-                    if ui
-                        .selectable_label(self.layers_open && !self.presets_open, "Layers")
-                        .clicked()
-                    {
-                        self.layers_open = true;
-                        self.presets_open = false;
-                        self.effects_open = false;
-                    }
-                    if ui.selectable_label(self.presets_open, "Presets").clicked() {
-                        self.cancel_image_tools();
-                        self.presets_open = true;
-                        self.effects_open = false;
-                    }
-                    if ui.selectable_label(self.effects_open, "Effects").clicked() {
-                        self.open_image_effects(document, history);
-                    }
-                });
-                ui.separator();
-                if self.effects_open {
-                    egui::ScrollArea::vertical()
-                        .id_salt("image-effects-panel")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| self.image_effects_panel(ui, document, history));
-                    return;
-                }
-                if !(self.extra_panel_active(document)
-                    || self.tool == Tool::Crop
-                    || self.presets_open
-                    || self.layers_open
-                    || (self.tool == Tool::Area && self.selected.is_none()))
+        inspector_panel::show(ui, |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6., 5.);
+            ui.spacing_mut().button_padding = Vec2::new(7., 4.);
+            ui.spacing_mut().interact_size.y = 24.;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().button_padding = Vec2::new(6., 6.);
+                ui.spacing_mut().item_spacing.x = 4.;
+                if ui
+                    .selectable_label(
+                        !self.layers_open && !self.presets_open && !self.effects_open,
+                        "Styles",
+                    )
+                    .clicked()
                 {
-                    self.shape_picker(ui, document, history);
-                    self.quick_styles(ui, document, history);
+                    self.layers_open = false;
+                    self.presets_open = false;
+                    self.effects_open = false;
                 }
-                if !self.layers_open
-                    && !self.presets_open
-                    && self.tool != Tool::Crop
-                    && self.style_kind(document) == Some(AnnotationKind::Stamp)
+                if ui
+                    .selectable_label(self.layers_open && !self.presets_open, "Layers")
+                    .clicked()
                 {
-                    self.stamp_panel(ui, document, history);
-                    return;
+                    self.layers_open = true;
+                    self.presets_open = false;
+                    self.effects_open = false;
                 }
-                let footer = !self.layers_open
-                    && !self.presets_open
-                    && self.tool != Tool::Crop
-                    && (self.selected.is_some() || self.tool.kind().is_some())
-                    && !self
-                        .style_kind(document)
-                        .is_some_and(|k| k.is_area_edit() || k == AnnotationKind::Fill);
-                // Let the footer claim its real height before laying out the
-                // scroll area. A guessed reserve lets selection controls enlarge
-                // the whole workspace, refitting the canvas under a held pointer.
-                ui.allocate_ui_with_layout(
-                    ui.available_size(),
-                    egui::Layout::bottom_up(egui::Align::Min),
-                    |ui| {
-                        if footer {
-                            self.selection_footer(ui, document, history);
-                            ui.separator();
-                        }
-                        ui.allocate_ui_with_layout(
-                            ui.available_size(),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                egui::ScrollArea::vertical()
-                                    .id_salt("annotation-inspector-scroll")
-                                    .max_height(ui.available_height().max(0.))
-                                    .min_scrolled_height(0.)
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| {
-                                        if !self.layers_open
-                                            && !self.presets_open
-                                            && self.extra_panel_active(document)
-                                        {
-                                            self.extra_tools_panel(ui, document, history);
-                                        } else if !self.layers_open
-                                            && !self.presets_open
-                                            && (self.tool == Tool::Fill
-                                                || self.style_kind(document)
-                                                    == Some(AnnotationKind::Fill))
-                                        {
-                                            self.fill_panel(ui, document, history);
-                                        } else if self.tool == Tool::Area
-                                            && self.additional.is_empty()
-                                            && (self.selected.is_none()
-                                                || self.selected.is_some_and(|i| {
-                                                    document.annotations[i].kind.is_area_edit()
-                                                }))
-                                            && !self.layers_open
-                                            && !self.presets_open
-                                        {
-                                            self.area_inspector(ui, document, history);
-                                        } else if self.tool == Tool::Crop {
-                                            self.crop_inspector(ui, document, history);
-                                        } else if self.presets_open {
-                                            self.presets_panel(ui, document, history);
-                                        } else if self.layers_open {
-                                            self.layers_panel(ui, document, history);
-                                        } else if self.style_kind(document)
-                                            == Some(AnnotationKind::Stamp)
-                                        {
-                                            self.stamp_panel(ui, document, history);
-                                        } else {
-                                            self.inspector(ui, document, history);
-                                        }
-                                    });
-                            },
-                        );
-                    },
-                );
+                if ui.selectable_label(self.presets_open, "Presets").clicked() {
+                    self.cancel_image_tools();
+                    self.presets_open = true;
+                    self.effects_open = false;
+                }
+                if ui.selectable_label(self.effects_open, "Effects").clicked() {
+                    self.open_image_effects(document, history);
+                }
             });
+            ui.separator();
+            if self.effects_open {
+                egui::ScrollArea::vertical()
+                    .id_salt("image-effects-panel")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.image_effects_panel(ui, document, history));
+                return;
+            }
+            if !(self.extra_panel_active(document)
+                || self.tool == Tool::Crop
+                || self.presets_open
+                || self.layers_open
+                || (self.tool == Tool::Area && self.selected.is_none()))
+            {
+                self.shape_picker(ui, document, history);
+                self.quick_styles(ui, document, history);
+            }
+            if !self.layers_open
+                && !self.presets_open
+                && self.tool != Tool::Crop
+                && self.style_kind(document) == Some(AnnotationKind::Stamp)
+            {
+                self.stamp_panel(ui, document, history);
+                return;
+            }
+            let footer = !self.layers_open
+                && !self.presets_open
+                && self.tool != Tool::Crop
+                && (self.selected.is_some() || self.tool.kind().is_some())
+                && !self
+                    .style_kind(document)
+                    .is_some_and(|k| k.is_area_edit() || k == AnnotationKind::Fill);
+            // Let the footer claim its real height before laying out the
+            // scroll area. A guessed reserve lets selection controls enlarge
+            // the whole workspace, refitting the canvas under a held pointer.
+            ui.allocate_ui_with_layout(
+                ui.available_size(),
+                egui::Layout::bottom_up(egui::Align::Min),
+                |ui| {
+                    if footer {
+                        self.selection_footer(ui, document, history);
+                        ui.separator();
+                    }
+                    ui.allocate_ui_with_layout(
+                        ui.available_size(),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            egui::ScrollArea::vertical()
+                                .id_salt("annotation-inspector-scroll")
+                                .max_height(ui.available_height().max(0.))
+                                .min_scrolled_height(0.)
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    if !self.layers_open
+                                        && !self.presets_open
+                                        && self.extra_panel_active(document)
+                                    {
+                                        self.extra_tools_panel(ui, document, history);
+                                    } else if !self.layers_open
+                                        && !self.presets_open
+                                        && (self.tool == Tool::Fill
+                                            || self.style_kind(document)
+                                                == Some(AnnotationKind::Fill))
+                                    {
+                                        self.fill_panel(ui, document, history);
+                                    } else if self.tool == Tool::Area
+                                        && self.additional.is_empty()
+                                        && (self.selected.is_none()
+                                            || self.selected.is_some_and(|i| {
+                                                document.annotations[i].kind.is_area_edit()
+                                            }))
+                                        && !self.layers_open
+                                        && !self.presets_open
+                                    {
+                                        self.area_inspector(ui, document, history);
+                                    } else if self.tool == Tool::Crop {
+                                        self.crop_inspector(ui, document, history);
+                                    } else if self.presets_open {
+                                        self.presets_panel(ui, document, history);
+                                    } else if self.layers_open {
+                                        self.layers_panel(ui, document, history);
+                                    } else if self.style_kind(document)
+                                        == Some(AnnotationKind::Stamp)
+                                    {
+                                        self.stamp_panel(ui, document, history);
+                                    } else {
+                                        self.inspector(ui, document, history);
+                                    }
+                                });
+                        },
+                    );
+                },
+            );
+        });
         // Inline typing owns pointer input, but the image must retain its real
         // colors instead of inheriting the disabled workspace's fade.
         let workspace_opacity = ui.opacity();
@@ -5939,6 +5933,80 @@ mod tests {
         assert!(!history.can_undo());
         assert!(history.redo(&mut document));
         assert_eq!(document.edit_state(), after);
+    }
+
+    #[test]
+    fn pen_accepts_finger_and_stylus_contacts_as_one_editable_stroke() {
+        // egui-winit translates both Windows pen and touch contacts into Touch
+        // events plus a primary-pointer stream. Exercise that paired stream,
+        // including PointerGone at lift-off; it must not duplicate a stroke.
+        for force in [None, Some(0.65)] {
+            let context = egui::Context::default();
+            let texture = context.load_texture(
+                "touch stroke",
+                egui::ColorImage::new([1, 1], vec![Color32::WHITE]),
+                Default::default(),
+            );
+            let mut document = Document {
+                image: std::sync::Arc::new(image::RgbaImage::new(200, 200)),
+                annotations: vec![],
+                geometry: ImageGeometry::default(),
+            };
+            let mut editor = EditorState {
+                fit: false,
+                ..Default::default()
+            };
+            editor.activate_tool(Tool::Pen);
+            let mut history = EditHistory::new(document.edit_state());
+            canvas_frame(
+                &mut editor,
+                &mut document,
+                &mut history,
+                &context,
+                &texture,
+                vec![],
+            );
+            for (phase, pos) in [
+                (egui::TouchPhase::Start, egui::pos2(40., 40.)),
+                (egui::TouchPhase::Move, egui::pos2(100., 70.)),
+                (egui::TouchPhase::End, egui::pos2(140., 130.)),
+            ] {
+                let mut events = vec![
+                    egui::Event::Touch {
+                        device_id: egui::TouchDeviceId(1),
+                        id: egui::TouchId(1),
+                        phase,
+                        pos,
+                        force,
+                    },
+                    egui::Event::PointerMoved(pos),
+                ];
+                match phase {
+                    egui::TouchPhase::Start => events.push(button_event(pos, true)),
+                    egui::TouchPhase::End => {
+                        events.push(button_event(pos, false));
+                        events.push(egui::Event::PointerGone);
+                    }
+                    _ => {}
+                }
+                canvas_frame(
+                    &mut editor,
+                    &mut document,
+                    &mut history,
+                    &context,
+                    &texture,
+                    events,
+                );
+            }
+            assert_eq!(document.annotations.len(), 1);
+            assert_eq!(document.annotations[0].kind, AnnotationKind::Freehand);
+            assert_eq!(document.annotations[0].points.len(), 3);
+            assert_eq!(document.annotations[0].stroke_width, 8.);
+            assert!(editor.gesture.is_none());
+            assert!(history.undo(&mut document));
+            assert!(document.annotations.is_empty());
+            assert!(!history.can_undo());
+        }
     }
 
     #[test]

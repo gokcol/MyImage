@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 1.3](https://github.com/gokcol/MyImage/releases/tag/v1.3) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
+[Download MyImage 2.0](https://github.com/gokcol/MyImage/releases/tag/v2.0) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -12,7 +12,11 @@ Real capture, rounded PNG saving/viewing, and both physical capture shortcuts we
 
 ## New in 1.3
 
-Choose Cobalt Satin, Amber Enamel or Jade Graphite in **App menu → Settings · Appearance**, then independently select Studio Color, Cobalt Duotone or Precision Outline icons. Preferences apply immediately and persist; tool positions stay familiar. Capture Now keeps its compact layout with refreshed icons, switches and buttons.
+Choose Cobalt Satin, Amber Enamel or Jade Graphite in **App menu → Settings**, then independently select Studio Color, Cobalt Duotone or Precision Outline icons. Preferences apply immediately and persist; tool positions stay familiar. Capture Now uses its own Pearl Compact finish: lighter graphite surfaces, violet accents, a quiet mode selector, aligned switches and a prominent red circular Capture button.
+
+**Settings → Pointer** offers Standard (default) and Calico. Calico includes a cat-accented arrow, open/closed grab paws, and matching crosshair, text, link, move, resize, status and zoom pointers. Precision hotspots stay exact; Fill keeps its bucket and selected color with a small cat accent. The same preference applies in the editor and capture controls. This UI artwork is excluded from image exports.
+
+Drag the left divider of the right properties panel to resize it. Double-click the divider to restore its compact fitted width. With the divider focused, arrow keys resize it and Home resets it. Styles, Layers, Presets and Effects share the width during the session; the app starts with the compact fit.
 
 Text and twelve callout styles edit directly on the canvas. The main-toolbar Magnify tool offers twenty visual presets with adjustable lenses and linked source areas. The Library sidebar and More/customization menus are more compact, and Fill has a dedicated pointer.
 
@@ -25,8 +29,8 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 1.3 uses internal MSIX version 1.13.0.0 to
-preserve upgrade ordering after earlier public 1.11.x releases.
+[privacy policy](PRIVACY.md). MyImage 2.0 uses MSIX version 2.0.0.0, which preserves upgrade ordering
+after earlier 1.x Store packages.
 
 ## Run
 
@@ -38,6 +42,12 @@ cargo run -- --background
 ```
 
 `--background` starts with the window hidden after the menu-bar/system-tray icon is available. It does not install a login item or startup service.
+
+**App menu → Settings → Start MyImage at login** is opt-in and off by default. It uses the macOS login-item service, the Microsoft Store startup task, or the current-user Windows startup entry. The displayed status comes from the operating system; opening Settings or installing an update never enables it.
+
+Startup status refreshes automatically when Settings opens, when you return from system settings and after changing the checkbox.
+
+**Background** keeps MyImage running for capture. On macOS, click its Dock icon or open the app again from Finder to restore the editor. **Open Editor** in the menu-bar/system-tray menu also restores it, including after using Capture Now.
 
 For a local macOS app bundle:
 
@@ -83,7 +93,7 @@ Failed builds/signing/packaging do not trigger cleanup. A failed backup stops cl
 
 Capture home has visual **Region**, **Multi-region**, **Window**, **Full screen**, and **Scrolling** cards, a display selector, **Off / 3s / 5s / 10s** timer chips, an **Include pointer** toggle, and a prominent **Capture Now** panel. Rounded and elliptical region choices are no longer shown. Settings persist between launches.
 
-The built-in **Capture Now** is also available from the menu bar/system tray, **Ctrl + Shift + .**, and on macOS **Command + Shift + .**. Click the menu-bar/tray icon to open a compact native **Capture Now** panel with mode tiles, display, Editor/Clipboard destination, pointer and capture-on-release switches, delay chips, and a round Capture button. Escape or clicking outside dismisses the panel. **Open Editor**, **Library**, and **More settings** provide direct navigation. Right-click retains the native menu; keyboard capture shortcuts still start capture directly. **Keep ready in background** hides the app while these entry points remain available. The header retains **Open…** and **Open project…**; Editor provides **Save as…**, **Export…**, and **Save project**.
+The built-in **Capture Now** is also available from the menu bar/system tray, **Ctrl + Shift + .**, and on macOS **Command + Shift + .**. Click the menu-bar/tray icon to open the 560 × 292 Pearl Compact panel: a shared mode selector above display, Editor/Clipboard destination, pointer, capture-on-release and delay controls grouped on the left, with a large red circular Capture button on the right. Its lighter graphite shell and violet controls match the Pearl Compact design independently of the editor theme. Escape or clicking outside dismisses the panel. **Open Editor**, **Library**, and the **More settings** icon provide direct navigation. Right-click retains the native menu; keyboard capture shortcuts still start capture directly. **Keep ready in background** hides the app while these entry points remain available. The header retains **Open…** and **Open project…**; Editor provides **Save as…**, **Export…**, and **Save project**.
 
 Choose **After capture → Editor / Clipboard** in Capture settings, or change **To: Editor / Clipboard** in the Capture Now controls. **Clipboard** copies full-resolution pixels for pasting into another app, saves a PNG in Library, and closes the capture overlay without opening or replacing the Editor. Your existing document, unsaved edits and undo history stay intact. This also works for full-screen, window and scrolling captures; scrolling finishes with **Finish & copy**. The destination is remembered for later captures and hotkeys. Completion appears in MyImage's status bar and tray tooltip; clipboard failure retains the image and offers **Retry copy** or **Open capture in Editor**. The Editor destination asks about unsaved work before replacing it with the completed capture.
 
@@ -135,7 +145,7 @@ Dialogs and prompts share the **Studio Contrast** design: charcoal headers, cont
 
 Selected editable objects show a compact floating properties bar near their boundary and matching controls in the right inspector. Use swatches, visual style menus, presets and sliders. Arrows support solid/dashed/dotted lines and independent endpoint shapes/sizes. A slider drag creates one undo step; exact numeric entry remains optional. Arrangement stays in the inspector footer.
 
-Home, Editor, Library, Capture and Create share one compact top toolbar; the annotation tools follow after a gap in Editor. The vertical sidebar is removed. Annotation buttons are 48 × 42 points. Everyday tools stay visible; **More** contains Blur, Pixelate, Simplify, Magic Wand, Crop, Cut Out, Pen, Highlighter, Step, Eraser, Magnify and Spotlight. **More → Customize toolbar…** pins, unpins and reorders tools; your choices persist and overflow stays in More. The bottom **App** menu contains View only, background/hide and Quit actions. The right inspector shows the current tool’s shape choices, quick styles, and properties; selection controls appear only when artwork is selected. Right-click the image (or use **Image actions** below it) for crop, resize, rotation, undo/redo, clipboard, and zoom controls.
+Home, Editor, Library, Capture and Create share one compact top toolbar; the annotation tools follow after a gap in Editor. The vertical sidebar is removed. Annotation buttons are 48 × 42 points. Pen sits directly after Shapes and draws editable strokes with a mouse, stylus or finger on supported hardware, using the selected fixed width. Everyday tools stay visible; The borderless **⌄** (More tools) menu contains additional tools. **⌄ → Customize toolbar…** pins, unpins and reorders tools; your choices persist and overflow stays in that menu. The bottom **App** menu contains View only, background/hide and Quit actions. The right inspector shows the current tool’s shape choices, quick styles, and properties; selection controls appear only when artwork is selected. Right-click the image (or use **Image actions** below it) for crop, resize, rotation, undo/redo, clipboard, and zoom controls.
 
 1. Capture an image or choose **Open…** to start in Editor. **Open project…** filters the picker to editable `.myimage` files.
 2. Choose **Text** and click the image. A floating **Edit text** window opens with a large writing area, font family (Sans serif/Monospace), size, color, italic, underline and alignment. Changes preview on the canvas; **Apply** saves one undoable edit and **Cancel** restores the previous text. Enter makes a new line; Command/Ctrl+Enter applies. Double-click existing text or choose **Edit text & formatting…** to reopen it. Choose **Arrow** or **Shapes**, then drag on the image. **Shapes** opens a compact picker in the right inspector. **2D** contains rectangle, rounded rectangle, ellipse, triangle, diamond, pentagon, hexagon, star, cross, and parallelogram. **3D** contains cylinder, prism, cone, sphere, hexagonal prism, torus and tetrahedron, drawn as editable projected diagrams with internal edges. The torus keeps its center transparent. Quick styles preview the chosen shape; color, stroke, and fill remain adjustable. Selecting an existing shape lets you change its type without losing its bounds or style, with undo support.
@@ -231,7 +241,7 @@ A fully selected group counts as one object, preserving its internal layout. Alt
 ## Copy image pixels
 
 - **Select all** (Command+A / Ctrl+A) selects the entire visible image. Find it beside Copy in the small dropdown, in the Selection panel, or in the image's right-click menu. A contrasting dashed boundary shows the selected rectangle or lasso; the footer reports the exact copy dimensions after image transforms. Escape or **Deselect** clears the selection. These boundaries never appear in copied, exported or saved pixels.
-- **Copy** in the toolbar or **Command+C / Ctrl+C** copies the selected pixel area, or the whole visible image when no area is selected. Selecting an annotation alone still copies the whole image. All visible edits, including image geometry, are included. The duplicate Copy whole image action has been removed.
+- **Copy** in the image’s right-click menu or **Command+C / Ctrl+C** copies the selected pixel area, or the whole visible image when no area is selected. Selecting an annotation alone still copies the whole image. All visible edits, including image geometry, are included. The duplicate Copy whole image action has been removed.
 - Copy keeps the editor steady while composing the image. A quiet **Copied to clipboard** confirmation and pixel dimensions appear beside Copy for four seconds after success; the footer keeps the details. Slow copies show **Copying to clipboard…**. There is no full-editor dimming for Copy.
 - **Cut** in the Selection panel or image menu (**Command+X / Ctrl+X**) copies the selected area first, then clears it to transparency as one undoable, editable layer. Use edges/corners or **Adjust boundary** to change the selection before cutting. Cut requires a pixel selection; use Select All for the entire canvas. Rectangular, lasso and color masks are retained, and the original image stays in the project. A failed clipboard write leaves pixels untouched; editing the document while a cut is pending cancels only its removal step. On Mac, both Command and Control work for image Copy/Cut/Paste; focused text fields retain their normal text shortcuts.
 - **Select all annotations** remains a separate image-menu command (also **All annotations** in object selection controls). Text fields keep their normal Select All behavior.

@@ -1,6 +1,6 @@
 [package]
 name = "myimage"
-version = "1.3.0"
+version = "2.0.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Native desktop screen capture for macOS and Windows"
@@ -45,7 +45,7 @@ objc2-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com"] }
+windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "ApplicationModel", "Win32_Storage_Packaging_Appx", "Win32_System_Registry"] }
 
 # Keep local builds compact. Tests inherit these development settings.
 # Retain file/line backtraces for workspace code without full debug metadata.

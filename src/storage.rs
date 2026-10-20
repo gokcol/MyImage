@@ -47,6 +47,7 @@ pub struct Settings {
     pub ui_text_size: UiTextSize,
     pub gui_finish: crate::appearance::GuiFinish,
     pub icon_style: crate::icon_style::IconStyle,
+    pub pointer_style: crate::pointer_style::PointerStyle,
     pub output_dir: PathBuf,
     pub display_id: Option<u32>,
     pub shape: String,
@@ -60,6 +61,8 @@ pub struct Settings {
     pub recents_open: bool,
     pub library: crate::library::BrowserPreferences,
     pub editor_toolbar: Vec<String>,
+    #[serde(default)]
+    pub toolbar_layout_version: u8,
 }
 
 impl Default for Settings {
@@ -72,6 +75,7 @@ impl Default for Settings {
             ui_text_size: UiTextSize::Normal,
             gui_finish: Default::default(),
             icon_style: Default::default(),
+            pointer_style: Default::default(),
             output_dir: base.join("MyImage"),
             display_id: None,
             shape: "rectangle".into(),
@@ -85,6 +89,7 @@ impl Default for Settings {
             recents_open: true,
             library: Default::default(),
             editor_toolbar: crate::editor::default_toolbar(),
+            toolbar_layout_version: 1,
         }
     }
 }
@@ -290,6 +295,25 @@ mod tests {
                 assert_eq!(restored.ui_text_size, legacy.ui_text_size);
                 assert!(restored.include_pointer);
             }
+        }
+    }
+
+    #[test]
+    fn pointer_style_defaults_to_standard_and_survives_restart() {
+        use crate::pointer_style::PointerStyle;
+        let legacy: Settings = serde_json::from_str(r#"{"include_pointer":true}"#).unwrap();
+        assert_eq!(legacy.pointer_style, PointerStyle::Standard);
+        assert_eq!(legacy.toolbar_layout_version, 0);
+        assert_eq!(Settings::default().toolbar_layout_version, 1);
+        for pointer_style in PointerStyle::ALL {
+            let settings = Settings {
+                pointer_style,
+                ..legacy.clone()
+            };
+            let restored: Settings =
+                serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+            assert_eq!(restored.pointer_style, pointer_style);
+            assert!(restored.include_pointer);
         }
     }
 

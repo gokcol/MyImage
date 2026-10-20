@@ -1,5 +1,51 @@
 # Release validation — MyImage
 
+## Version 2.0 — build 66
+
+Version 2.0 packages the build 62–65 improvements below, including Pearl Compact Capture Now, compact Settings, opt-in start at login, native background/reopen handling, the complete Calico pointer family, the resizable inspector, and compact toolbar with Pen after Shapes. Public app version is 2.0.0 and the Store package version is 2.0.0.0, retaining MyImage's existing Partner Center identity and increasing from the previous 1.13.0.0 package. The Store startup task remains disabled by default. No document-format migration is introduced by these changes.
+
+## Pearl Compact Capture Now — build 65 (local update)
+
+Capture Now now uses the selected Pearl Compact design with the user's refinements: lighter graphite surfaces, a rounded shell with a top pointer, a shared recessed five-mode selector, options grouped on the left, and a 108-point red circular Capture button on the right. Its native panel is 560 × 292 logical points, reduced from 560 × 300. The dark palette, including display dropdowns, is local to the launcher, independent of the editor's GUI finish. The viewport uses transparency around its rounded shell; the other app windows continue painting opaque panels. Defaults, capture destinations, immediate-release behavior, delay handling, tray/hotkey entry points, footer navigation and dismissal behavior are preserved. A capture shortcut is visible below the button; both available Mac shortcuts are described in its tooltip. This build also includes the inspector and Calico changes documented under build 64.
+
+Validation: 477 app tests passed (15 explicitly ignored diagnostics/integration tests); strict app/all-targets Clippy, formatting and whitespace checks passed. The two launcher tests passed again after the final circular-button layout changes. The launcher input test verifies visible controls and bounds, settings/close icon actions, disabled capture protection, destination, pointer, immediate release and timer updates. Native macOS review verified the final red circle, lighter background, dark display dropdown, selected states and Escape dismissal; earlier checks covered clipboard/pointer/delay changes. The isolated review was closed. Windows interactive validation was not performed.
+
+Build 65 was signed with the existing Developer ID identity, notarized (Apple submission `769fed45-6da3-4590-a10b-58eb56ae10b6`, Accepted), stapled and accepted by Gatekeeper. Installed after the user confirmed saving and quitting build 63; the installer verified the signer, retained the previous app for rollback, and preserved captures, projects, settings and permission records. Reopened the installed app and visually verified the final Capture Now panel at the user's existing UI scale.
+
+## Resizable inspector and complete Calico pointer family — build 64 (local update)
+
+The right inspector has a slim draggable left divider. Its default is the compact width required by its tabs and controls. Dragging widens it; double-clicking the divider resets the fitted width. Arrow keys resize a focused divider (Shift increases the step), and Home resets it. The width is shared by Styles, Layers, Presets and Effects for the session. Window resizing constrains it to leave room for the canvas without forgetting the user's chosen width. Restarting returns to the compact fit.
+
+Calico now supplies equivalents for all 34 visible native cursor types, including crosshair, text, links, status, move, resize directions and zoom. Precision glyphs use high-contrast outlines, a warm center stroke and a small cat accent away from the hotspot. Fill retains its bucket, selected color and exact seed with a Calico badge. Hidden cursors remain hidden unless a custom tool explicitly requests its accent for the current frame. Editor, Settings, Capture Now and screen-selection overlays share the preference; Standard remains available. Artwork stays outside the document/export pipeline.
+
+Validation: 477 app tests passed (15 explicitly ignored diagnostics/integration tests). Divider regression coverage includes drag and coalesced press/release input, double-click reset, window constraints, keyboard steps/focus and unchanged document state. All 34 visible Calico cursor types were rasterized and checked for valid hotspots; focus loss and the frame-limited custom-tool badge are covered. Strict app/all-targets Clippy, formatting and whitespace checks passed. Native macOS review confirmed the fitted Styles/Layers panel, keyboard widening and the Calico crosshair. Automated native dragging did not produce a visible resize; drag behavior is covered by editor input tests. The disposable review app was closed without changing its saved fixture. Windows interactive validation was not performed.
+
+Build 64 was signed, notarized (Apple submission `f5df00bd-283a-4a68-a204-4facdb11d3c4`, Accepted), stapled and accepted by Gatekeeper. It was not installed before the user selected Pearl Compact; build 65 supersedes it with that launcher design.
+
+## Compact Settings and Calico pointers — build 63 (local update)
+
+Settings uses two compact rows of preview tiles for the three GUI finishes and three icon styles, followed by a Standard/Calico pointer selector and the opt-in login checkbox. The manual startup refresh button is removed. OS startup registration is queried when Settings opens, when the app regains focus with Settings open, and after changing the checkbox; ordinary repaints do not poll it. Login startup remains off by default.
+
+The opt-in Calico pointer uses small static cursor artwork: a cat-accented arrow, an open paw over movable objects and a closed paw while dragging. Pointer hotspots and object hit testing are unchanged. Text, resize, busy, capture and precision-tool cursors are preserved. The input-transparent artwork is rendered only in the app UI, outside capture mode, and never in document exports. Standard remains the default for existing and new settings.
+
+The top annotation toolbar removes its redundant Copy group and uses a compact borderless chevron for the overflow menu. Keyboard/context-menu copying and the menu’s tools/customization remain available; pinned tools retain their order.
+
+Pen is pinned directly after Shapes. A one-time layout migration applies this to existing preferences while preserving the other tools’ order; later customization remains persistent. The existing native pen/touch input path supports fixed-width freehand strokes, including finger contact. Pressure-varying stroke width and palm rejection are not added. Native pen/touch hardware was unavailable; paired touch/pointer event tests cover stroke creation, lift-off and one-step Undo.
+
+Validation: 475 app tests passed (15 explicitly ignored diagnostics/integration tests), including pointer fallback/focus, saved preferences, the one-time toolbar migration, startup default/manifest and paired pen/touch input. Strict app/all-targets Clippy, formatting and whitespace checks passed. Native macOS review verified compact Settings at Very Large UI size, complete labels, Calico selection and the open paw over an arrow, the borderless overflow menu and tool selection, Pen placement, drawing and Undo. The final disposable pointer review was closed after Undo restored the saved fixture. The earlier compact Settings review received manual edits and was left open to preserve that work. Pen/touch hardware and Windows interactive validation were not performed.
+
+Build 63 was signed, notarized (Apple submission `5c29f032-7b8e-4611-a8b9-d044d5df0663`, Accepted), stapled and installed with the normal verified rollback. The installed app was opened successfully. The user closed the earlier Settings review before installation.
+
+## Background recovery and login startup — build 62 (local update)
+
+Dock/Finder reopen requests now enter the existing Show handler through an optional AppKit delegate method. The callback is queued and wakes the root viewport; native quit protection is preserved. The resident runtime retains the editor window identity and its occlusion state, rather than replacing them with Capture Now child-window events.
+
+Settings has an opt-in **Start MyImage at login** control, off by default. It reads OS registration state instead of persisting an optimistic boolean. macOS uses SMAppService.mainAppService; packaged Windows uses a manifest startup task with Enabled=false; unpackaged Windows uses the current-user Run entry. System disable/policy states are respected. No startup registration is performed automatically during initialization, settings migration or installation.
+
+Validation: 469 app tests passed, followed by the new root-window regression test and startup default/manifest checks. Strict Clippy passed on macOS and for all Windows targets via cross-compilation. Native macOS review verified Background → reopen, native quit, and reopening again after opening/dismissing Capture Now. The signed disposable review app successfully registered and unregistered login startup; refreshing confirmed Off afterward. Real restart/login and Windows interactive testing were not performed.
+
+Build 62 was signed with the existing Developer ID identity, notarized (Apple submission `6e7b2410-9dbb-4efc-8c38-0dede81bd70e`, Accepted), stapled and accepted by Gatekeeper. After the user confirmed saving and quitting, the normal installer retained rollback and installed version 1.3.0 build 62. The installed app opened successfully; captures, projects, settings and permission records were preserved. The user resumed interaction in Library, so further UI actions stopped. No GitHub release or Store submission was changed.
+
 ## Version 1.3.0 — build 61
 
 This release combines the inline text/callout editor, twelve callout shapes, visual Magnify, compact Library and toolbar refinements, dedicated Fill pointer, three GUI finishes and three independent icon styles. Capture Now retains its 560 × 300 layout with refreshed controls. Project format remains 22. The Store package advances to 1.13.0.0 with the existing Partner Center identity. Windows distribution remains through Microsoft Store; direct Windows downloads are manual-only and still require a trusted production signature.

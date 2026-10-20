@@ -1,4 +1,4 @@
-//! Send native macOS termination requests through the app's unsaved-work prompt.
+//! Route native macOS quit and Dock/Finder reopen requests through the app.
 //!
 //! Winit 0.30 supplies applicationWillTerminate:, but not the cancellable
 //! applicationShouldTerminate:. Adding only that missing optional method keeps
@@ -54,6 +54,7 @@ impl TerminationGuard {
             );
         }
         add_missing_hook(delegate_class)?;
+        add_reopen_hook(delegate_class)?;
         let guard = Self::bind(ctx, sender)?;
         // Reassign the same delegate so AppKit can refresh any cached optional
         // selector checks. Winit retains the identical object and all its state.
@@ -130,6 +131,75 @@ fn add_missing_hook(delegate_class: &AnyClass) -> Result<(), String> {
     Ok(())
 }
 
+// Dock/Finder relaunches an already-running app through this optional method.
+// Merely ordering its hidden NSWindow front does not clear our hidden UI state.
+fn reopen_implementation() -> Imp {
+    // SAFETY: Matches AppKit's BOOL, id, SEL, NSApplication*, BOOL signature.
+    unsafe {
+        std::mem::transmute::<
+            extern "C-unwind" fn(
+                *mut AnyObject,
+                Sel,
+                *mut AnyObject,
+                objc2::runtime::Bool,
+            ) -> objc2::runtime::Bool,
+            Imp,
+        >(application_should_handle_reopen)
+    }
+}
+
+fn add_reopen_hook(delegate_class: &AnyClass) -> Result<(), String> {
+    let selector = sel!(applicationShouldHandleReopen:hasVisibleWindows:);
+    if let Some(existing) = delegate_class.instance_method(selector) {
+        return if std::ptr::fn_addr_eq(existing.implementation(), reopen_implementation()) {
+            Ok(())
+        } else {
+            Err("The application already has a different native reopen handler.".into())
+        };
+    }
+    let encoding = std::ffi::CString::new(format!(
+        "{}@:@{}",
+        <objc2::runtime::Bool as objc2::Encode>::ENCODING,
+        <objc2::runtime::Bool as objc2::Encode>::ENCODING,
+    ))
+    .expect("Objective-C encoding has no NUL");
+    // SAFETY: Add an absent method only, on the main thread, with the
+    // architecture-specific BOOL encoding. No delegate ownership is changed.
+    let added = unsafe {
+        ffi::class_addMethod(
+            (delegate_class as *const AnyClass).cast_mut(),
+            selector,
+            reopen_implementation(),
+            encoding.as_ptr(),
+        )
+    };
+    if added.as_bool() {
+        Ok(())
+    } else {
+        Err("Could not install native reopen handling.".into())
+    }
+}
+
+extern "C-unwind" fn application_should_handle_reopen(
+    _delegate: *mut AnyObject,
+    _selector: Sel,
+    _application: *mut AnyObject,
+    _has_visible_windows: objc2::runtime::Bool,
+) -> objc2::runtime::Bool {
+    let sink = QUIT_TARGET
+        .lock()
+        .ok()
+        .and_then(|target| target.as_ref().and_then(Weak::upgrade));
+    if let Some(sink) = sink
+        && sink.sender.send(DesktopEvent::Show).is_ok()
+    {
+        sink.ctx.request_repaint_of(egui::ViewportId::ROOT);
+        objc2::runtime::Bool::NO
+    } else {
+        objc2::runtime::Bool::YES
+    }
+}
+
 extern "C-unwind" fn application_should_terminate(
     _delegate: *mut AnyObject,
     _selector: Sel,
@@ -144,7 +214,7 @@ extern "C-unwind" fn application_should_terminate(
     {
         // Only enqueue work. AppKit is still inside terminate: and must return
         // before the app opens its save/discard prompt or a native file dialog.
-        sink.ctx.request_repaint();
+        sink.ctx.request_repaint_of(egui::ViewportId::ROOT);
         TERMINATE_CANCEL
     } else {
         TERMINATE_NOW
@@ -163,6 +233,8 @@ mod tests {
             .unwrap()
             .register();
         add_missing_hook(class).unwrap();
+        add_reopen_hook(class).unwrap();
+        add_reopen_hook(class).unwrap();
         // Reinitialization must recognize its own hook without replacing it.
         add_missing_hook(class).unwrap();
         // SAFETY: This test subclass has no ivars and inherits NSObject's new.
@@ -177,6 +249,14 @@ mod tests {
         assert_eq!(reply, TERMINATE_CANCEL);
         assert_eq!(receiver.try_recv().unwrap(), DesktopEvent::Quit);
         assert!(receiver.try_recv().is_err());
+        for visible in [objc2::runtime::Bool::YES, objc2::runtime::Bool::NO] {
+            // SAFETY: Test class implements the exact callback signature.
+            let reopen: objc2::runtime::Bool = unsafe {
+                msg_send![&delegate, applicationShouldHandleReopen: ptr::null_mut::<AnyObject>(), hasVisibleWindows: visible]
+            };
+            assert!(!reopen.as_bool());
+            assert_eq!(receiver.try_recv().unwrap(), DesktopEvent::Show);
+        }
 
         drop(guard);
         // SAFETY: Same registered receiver and signature as above; the hook has

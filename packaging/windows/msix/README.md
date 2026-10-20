@@ -44,8 +44,8 @@ These public values are configured as GitHub Actions variables. The product's
 reserved display name is configured separately in `MSIX_DISPLAY_NAME`; it must
 match Partner Center exactly, including punctuation.
 
-Public app version is **1.3.0**; the independent MSIX version is **1.13.0.0**.
-This preserves increasing package order after the public 1.11.x numbering.
+Public app version is **2.0.0**; the independent MSIX version is **2.0.0.0**.
+This preserves increasing package order after the earlier 1.x packages.
 Increase `version.txt` for subsequent Store releases. Revision (fourth field)
 must remain zero; each component must fit 16 bits.
 
@@ -69,8 +69,10 @@ These are automated packaging checks, not interactive app certification.
   `RoamingAppData\MyImage\MyImage`; Windows 10 needs the broader file-system opt-out.
   Registry virtualization remains enabled.
 
-Captures/projects stay in Pictures/MyImage or the user-chosen folder. No startup
-task, default-app change, background service or file association is registered.
+Captures/projects stay in Pictures/MyImage or the user-chosen folder. The Store
+startup task is declared disabled; users can opt in through Settings to start
+MyImage at login. No default-app change, background service or file association
+is registered.
 The Store package opens files using MyImage's Open controls. Microsoft must
 review the restricted capability explanations.
 
