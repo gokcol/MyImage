@@ -96,6 +96,43 @@ pub fn crop_selection(
     Ok(cropped)
 }
 
+/// Preserve selected screen positions in one tight image. Gaps are zero RGBA:
+/// pixels outside the selected regions are never copied into the output.
+pub fn crop_regions(image: &RgbaImage, regions: &[PixelRect]) -> Result<RgbaImage, String> {
+    if regions.is_empty() || regions.len() > 32 {
+        return Err("Choose between 1 and 32 capture regions.".into());
+    }
+    let (mut left, mut top, mut right, mut bottom) = (image.width(), image.height(), 0, 0);
+    for r in regions {
+        let end_x = r.x.checked_add(r.width);
+        let end_y = r.y.checked_add(r.height);
+        if r.width == 0
+            || r.height == 0
+            || !matches!(end_x, Some(v) if v <= image.width())
+            || !matches!(end_y, Some(v) if v <= image.height())
+        {
+            return Err("A capture region is empty or outside the screenshot.".into());
+        }
+        left = left.min(r.x);
+        top = top.min(r.y);
+        right = right.max(end_x.unwrap());
+        bottom = bottom.max(end_y.unwrap());
+    }
+    let mut output = RgbaImage::new(right - left, bottom - top);
+    for r in regions {
+        for y in r.y..r.y + r.height {
+            // Copy rather than alpha-blend: overlaps must retain source alpha.
+            let source = ((y as usize * image.width() as usize) + r.x as usize) * 4;
+            let target =
+                (((y - top) as usize * output.width() as usize) + (r.x - left) as usize) * 4;
+            let len = r.width as usize * 4;
+            output.as_mut()[target..target + len]
+                .copy_from_slice(&image.as_raw()[source..source + len]);
+        }
+    }
+    Ok(output)
+}
+
 fn mask_rounded(image: &mut RgbaImage, requested_radius: u32) {
     let radius = requested_radius.min(image.width().min(image.height()) / 2);
     if radius == 0 {
@@ -193,6 +230,74 @@ fn multiply_alpha(image: &mut RgbaImage, x: u32, y: u32, coverage: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn multiple_regions_keep_positions_alpha_and_zero_all_gap_pixels() {
+        let image = RgbaImage::from_fn(20, 12, |x, y| image::Rgba([x as u8, y as u8, 55, 123]));
+        let regions = [
+            PixelRect {
+                x: 2,
+                y: 1,
+                width: 4,
+                height: 3,
+            },
+            PixelRect {
+                x: 10,
+                y: 6,
+                width: 5,
+                height: 4,
+            },
+            PixelRect {
+                x: 4,
+                y: 2,
+                width: 4,
+                height: 3,
+            },
+        ];
+        let output = crop_regions(&image, &regions).unwrap();
+        assert_eq!(output.dimensions(), (13, 9));
+        for (x, y, pixel) in output.enumerate_pixels() {
+            let (sx, sy) = (x + 2, y + 1);
+            let inside = regions
+                .iter()
+                .any(|r| sx >= r.x && sx < r.x + r.width && sy >= r.y && sy < r.y + r.height);
+            assert_eq!(
+                *pixel,
+                if inside {
+                    *image.get_pixel(sx, sy)
+                } else {
+                    image::Rgba([0; 4])
+                }
+            );
+        }
+        assert_eq!(image.get_pixel(5, 3)[3], 123);
+    }
+    #[test]
+    fn multiple_region_crop_rejects_invalid_or_unbounded_inputs() {
+        let image = RgbaImage::new(10, 10);
+        let valid = PixelRect {
+            x: 1,
+            y: 1,
+            width: 3,
+            height: 3,
+        };
+        assert!(crop_regions(&image, &[]).is_err());
+        assert!(crop_regions(&image, &[valid; 33]).is_err());
+        for invalid in [
+            PixelRect {
+                x: u32::MAX,
+                ..valid
+            },
+            PixelRect { width: 0, ..valid },
+            PixelRect {
+                height: 10,
+                ..valid
+            },
+        ] {
+            assert!(crop_regions(&image, &[valid, invalid]).is_err());
+        }
+        assert_eq!(crop_regions(&image, &[valid]).unwrap().dimensions(), (3, 3));
+    }
+
     use image::Rgba;
 
     fn full_rect(width: u32, height: u32) -> PixelRect {

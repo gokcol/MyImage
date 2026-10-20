@@ -33,6 +33,13 @@ impl LibraryPanel {
             action = Some(LibraryAction::Open(path.to_owned()));
             ui.close();
         }
+        if item(ui, "Copy", Icon::Copy, single)
+            .on_hover_text("Copy this saved image, including project annotations, to the clipboard")
+            .clicked()
+        {
+            action = Some(LibraryAction::Copy(path.to_owned()));
+            ui.close();
+        }
         if recent && item(ui, "Reveal in Library", Icon::Library, single).clicked() {
             action = Some(LibraryAction::RevealLibrary(path.to_owned()));
             ui.close();
@@ -320,6 +327,7 @@ mod tests {
             find(&out, "2 selected");
             find(&out, "Move to Trash…");
             find(&out, "Duplicate");
+            find(&out, "Copy");
             if recent {
                 find(&out, "Remove from Recents");
             }

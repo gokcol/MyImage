@@ -65,6 +65,63 @@ impl LibraryPanel {
 mod tests {
     use super::*;
     #[test]
+    fn opening_a_scanned_recent_keeps_the_whole_strip_in_order_across_restart() {
+        let paths: Vec<PathBuf> = [
+            "first.png",
+            "second.png",
+            "third.myimage",
+            "hidden.png",
+            "missing.png",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+        let mut p = LibraryPanel::default();
+        p.entries = paths[..4]
+            .iter()
+            .map(|path| LibraryEntry {
+                path: path.clone(),
+                name: path.display().to_string(),
+                date: chrono::Local::now().date_naive(),
+                kind: EntryKind::Image,
+                modified: None,
+                created: None,
+                bytes: 0,
+            })
+            .collect();
+        p.preferences.hidden_recents.insert(paths[3].clone());
+        p.missing_paths.insert(paths[4].clone());
+        let mut settings = crate::storage::Settings {
+            recent_files: vec![paths[0].clone(), paths[4].clone()],
+            library: p.preferences.clone(),
+            ..Default::default()
+        };
+        let visible = p.recent_paths(&settings.recent_files);
+        assert_eq!(visible, paths[..3]);
+        crate::storage::remember_opened_recent(&mut settings, paths[2].clone(), &visible);
+        assert_eq!(p.recent_paths(&settings.recent_files), visible);
+        crate::storage::remember_opened_recent(&mut settings, paths[1].clone(), &visible);
+        assert_eq!(p.recent_paths(&settings.recent_files), visible);
+        let round: crate::storage::Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(round.recent_files[..3], paths[..3]);
+        crate::storage::remember_recent(&mut settings, paths[2].clone());
+        assert_eq!(
+            p.recent_paths(&settings.recent_files),
+            vec![paths[2].clone(), paths[0].clone(), paths[1].clone()]
+        );
+        let fresh = PathBuf::from("new.png");
+        let visible = p.recent_paths(&settings.recent_files);
+        crate::storage::remember_opened_recent(&mut settings, fresh.clone(), &visible);
+        assert_eq!(p.recent_paths(&settings.recent_files)[0], fresh);
+        let visible = p.recent_paths(&settings.recent_files);
+        p.unhide_recent(&paths[3]);
+        crate::storage::remember_opened_recent(&mut settings, paths[3].clone(), &visible);
+        assert_eq!(p.recent_paths(&settings.recent_files)[0], paths[3]);
+        assert!(!settings.library.hidden_recents.contains(&paths[3]));
+    }
+
+    #[test]
     fn externally_deleted_recents_drop_cached_thumbnails_and_both_selections() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("removed.png");

@@ -492,6 +492,7 @@ mod tests {
         texture: &egui::TextureHandle,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
+        ctx.enable_accesskit();
         ctx.run(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1060., 690.))),
@@ -501,6 +502,9 @@ mod tests {
             |ctx| {
                 egui::TopBottomPanel::top("test-toolbar").show(ctx, |ui| {
                     ui.horizontal(|ui| e.toolbar(ui, d, h));
+                });
+                egui::TopBottomPanel::bottom("test-image-controls").show(ctx, |ui| {
+                    ui.horizontal(|ui| e.image_controls(ui, d, h));
                 });
                 egui::CentralPanel::default()
                     .show(ctx, |ui| e.ui(ui, d, h, texture, &mut Default::default()));
@@ -525,6 +529,18 @@ mod tests {
                     Some(t.pos + t.galley.size() * 0.5)
                 }
                 _ => None,
+            })
+            .or_else(|| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .and_then(|update| {
+                        update.nodes.iter().find_map(|(_, n)| {
+                            (n.label() == Some(label)).then(|| n.bounds()).flatten()
+                        })
+                    })
+                    .map(|r| Pos2::new(((r.x0 + r.x1) * 0.5) as f32, ((r.y0 + r.y1) * 0.5) as f32))
             })
             .unwrap_or_else(|| panic!("Missing button {label}"));
         frame(
@@ -612,10 +628,24 @@ mod tests {
         assert_eq!(d.edit_state(), before);
         click("Rotate left", &mut e, &mut d, &mut h, &ctx, &texture);
         assert_eq!(d.output_size(), [600, 800]);
-        click("Image actions", &mut e, &mut d, &mut h, &ctx, &texture);
+        click(
+            "Image tools · crop, resize, rotate",
+            &mut e,
+            &mut d,
+            &mut h,
+            &ctx,
+            &texture,
+        );
         click("Undo", &mut e, &mut d, &mut h, &ctx, &texture);
         assert_eq!(d.edit_state(), before);
-        click("Image actions", &mut e, &mut d, &mut h, &ctx, &texture);
+        click(
+            "Image tools · crop, resize, rotate",
+            &mut e,
+            &mut d,
+            &mut h,
+            &ctx,
+            &texture,
+        );
         click("Crop", &mut e, &mut d, &mut h, &ctx, &texture);
         assert!(e.tool == Tool::Crop && e.crop.is_some());
         click("Cancel", &mut e, &mut d, &mut h, &ctx, &texture);

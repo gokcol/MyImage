@@ -266,7 +266,7 @@ impl MyImageApp {
     pub(super) fn recovery_menu(&mut self, ui: &mut egui::Ui) {
         let count = self.recovery.entries.len();
         if count > 0
-            && appearance::action_button(
+            && super::app_menu::row(
                 ui,
                 &format!("Recover unfinished work… ({count})"),
                 Icon::Refresh,
@@ -274,7 +274,7 @@ impl MyImageApp {
                     && self.pending_action.is_none()
                     && self.file_dialog.is_none()
                     && !self.editor.has_modal(),
-                false,
+                "›",
             )
             .clicked()
         {

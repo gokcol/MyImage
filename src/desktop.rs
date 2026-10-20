@@ -15,11 +15,12 @@ use std::sync::{
 use eframe::egui;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState, hotkey::HotKey};
 use tray_icon::{
-    Icon, TrayIcon, TrayIconBuilder,
+    Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent,
     menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
 };
 
 const CAPTURE_ID: &str = "myimage.capture";
+const PANEL_ID: &str = "myimage.capture-panel";
 const SHOW_ID: &str = "myimage.show";
 const CAPTURE_SETTINGS_ID: &str = "myimage.capture-settings";
 const LIBRARY_ID: &str = "myimage.library";
@@ -28,6 +29,7 @@ const QUIT_ID: &str = "myimage.quit";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopEvent {
     Capture,
+    CapturePanel,
     Show,
     CaptureSettings,
     Library,
@@ -88,6 +90,7 @@ fn with_event_sink(action: impl FnOnce(&EventSink)) {
 fn menu_action(id: &str) -> Option<DesktopEvent> {
     match id {
         CAPTURE_ID => Some(DesktopEvent::Capture),
+        PANEL_ID => Some(DesktopEvent::CapturePanel),
         SHOW_ID => Some(DesktopEvent::Show),
         CAPTURE_SETTINGS_ID => Some(DesktopEvent::CaptureSettings),
         LIBRARY_ID => Some(DesktopEvent::Library),
@@ -98,6 +101,14 @@ fn menu_action(id: &str) -> Option<DesktopEvent> {
 
 fn install_callbacks() {
     CALLBACKS.call_once(|| {
+        TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
+            if matches!(event, TrayIconEvent::Click {
+                ref id, button: MouseButton::Left, button_state: MouseButtonState::Up, ..
+            } if id.as_ref() == "myimage.tray")
+            {
+                with_event_sink(|sink| sink.send(DesktopEvent::CapturePanel));
+            }
+        }));
         MenuEvent::set_event_handler(Some(|event: MenuEvent| {
             let Some(action) = menu_action(event.id.as_ref()) else {
                 return;
@@ -171,13 +182,15 @@ impl DesktopIntegration {
             "Capture now    Ctrl+Shift+."
         };
         let capture = MenuItem::with_id(CAPTURE_ID, capture_label, true, None);
+        let panel = MenuItem::with_id(PANEL_ID, "Capture panel…", true, None);
         let summary = MenuItem::new("Loading capture setup…", false, None);
         let settings = MenuItem::with_id(CAPTURE_SETTINGS_ID, "Capture settings…", true, None);
         let library = MenuItem::with_id(LIBRARY_ID, "Image library", true, None);
-        let show = MenuItem::with_id(SHOW_ID, "Open MyImage", true, None);
+        let show = MenuItem::with_id(SHOW_ID, "Open Editor", true, None);
         let separator = PredefinedMenuItem::separator();
         let quit = MenuItem::with_id(QUIT_ID, "Quit MyImage", true, None);
         menu.append_items(&[
+            &panel,
             &capture,
             &summary,
             &settings,
@@ -200,7 +213,7 @@ impl DesktopIntegration {
             .with_icon(camera_icon()?)
             .with_icon_as_template(cfg!(target_os = "macos"))
             .with_menu(Box::new(menu))
-            .with_menu_on_left_click(true)
+            .with_menu_on_left_click(false)
             .build()
             .map_err(|error| format!("Could not create the MyImage tray icon: {error}"))?;
 
@@ -241,8 +254,48 @@ impl DesktopIntegration {
         }
     }
 
+    /// Tray library returns desktop physical pixels on both supported platforms.
+    pub fn tray_bounds(&self) -> Option<egui::Rect> {
+        self._tray.rect().map(|r| {
+            egui::Rect::from_min_size(
+                egui::pos2(r.position.x as f32, r.position.y as f32),
+                egui::vec2(r.size.width as f32, r.size.height as f32),
+            )
+        })
+    }
+
     pub fn hotkey_error(&self) -> Option<&str> {
         self.hotkey_error.as_deref()
+    }
+
+    pub fn capture_feedback(&self, message: &str) {
+        let _ = self._tray.set_tooltip(Some(message));
+        #[cfg(target_os = "macos")]
+        if objc2::MainThreadMarker::new().is_some() {
+            // Merely ordering out the capture window leaves MyImage as the
+            // active Mac application. Hide it to return keyboard input to the
+            // previous app, so Command+V reaches the intended destination.
+            // SAFETY: AppKit is initialized and this is its main thread.
+            unsafe {
+                let app: *mut objc2::runtime::AnyObject =
+                    objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+                let _: () =
+                    objc2::msg_send![app, hide: std::ptr::null::<objc2::runtime::AnyObject>()];
+            }
+        }
+    }
+
+    pub fn reveal_application(&self) {
+        #[cfg(target_os = "macos")]
+        if objc2::MainThreadMarker::new().is_some() {
+            // SAFETY: AppKit is initialized and accessed on its main thread.
+            // Window activation remains controlled by the caller's Focus command.
+            unsafe {
+                let app: *mut objc2::runtime::AnyObject =
+                    objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+                let _: () = objc2::msg_send![app, unhideWithoutActivation];
+            }
+        }
     }
 
     /// Retry unavailable shortcuts without disturbing working registrations.
@@ -374,6 +427,7 @@ mod tests {
     fn menu_routes_quick_capture_and_workspace_links_separately() {
         use super::*;
         assert_eq!(menu_action(CAPTURE_ID), Some(DesktopEvent::Capture));
+        assert_eq!(menu_action(PANEL_ID), Some(DesktopEvent::CapturePanel));
         assert_eq!(
             menu_action(CAPTURE_SETTINGS_ID),
             Some(DesktopEvent::CaptureSettings)

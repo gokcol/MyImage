@@ -148,29 +148,44 @@ impl EditorState {
         document: &mut Document,
         history: &mut EditHistory,
     ) {
+        use inspector_widgets::{Glyph, tile};
         if !self.presets.loaded {
             self.presets.reload();
         }
         ui.spacing_mut().item_spacing = Vec2::new(6., 6.);
-        ui.spacing_mut().button_padding = Vec2::new(8., 6.);
         ui.horizontal(|ui| {
-            ui.strong("Annotation presets");
+            ui.label(egui::RichText::new("Presets").size(16.).strong());
             ui.weak(self.presets.library.entries.len().to_string());
-            if ui.small_button("Refresh").clicked() {
-                self.presets.reload();
-            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
+                if tile(ui,"Refresh presets",Glyph::App(DialogIcon::Refresh),Vec2::splat(26.),false,false)
+                    .on_hover_text("Refresh the saved preset library").clicked() { self.presets.reload(); }
+                let help=tile(ui,"Preset help",Glyph::Help,Vec2::splat(26.),false,false);
+                egui::Popup::menu(&help).show(|ui| {
+                    ui.set_max_width(240.);
+                    ui.label("Save selected annotations or groups, then reuse editable copies in another image.");
+                    ui.label("Double-click a card to insert it, or select it and choose Insert preset.");
+                    ui.small("Inserted copies keep their styles and layer settings. Editing a copy does not change the preset.");
+                    if let Ok(path)=&self.presets.path { ui.small("Saved on this computer").on_hover_text(path.display().to_string()); }
+                });
+            });
         });
-        ui.weak("Save artwork once. Reuse editable copies in any image.");
-        if ui
-            .add_enabled(
-                self.presets.ready && !self.selected_indices(document).is_empty(),
-                egui::Button::new("Save selection as preset…"),
-            )
-            .on_hover_text("Save selected annotations, groups, styles and layer settings")
-            .clicked()
-        {
-            self.save_selection_preset(document, history);
-        }
+        ui.add_enabled_ui(
+            self.presets.ready && !self.selected_indices(document).is_empty(),
+            |ui| {
+                if crate::appearance::action_button(
+                    ui,
+                    "Save selection as preset…",
+                    DialogIcon::Create,
+                    true,
+                    true,
+                )
+                .on_hover_text("Save selected annotations, groups, styles and layer settings")
+                .clicked()
+                {
+                    self.save_selection_preset(document, history);
+                }
+            },
+        );
         if let Some(notice) = &self.presets.notice {
             ui.weak(notice);
         }
@@ -187,106 +202,115 @@ impl EditorState {
             .selected
             .and_then(|id| self.presets.library.entries.iter().find(|p| p.id == id))
             .map(|p| (p.id, p.name.clone()));
-        ui.horizontal_wrapped(|ui| {
-            if ui
-                .add_enabled(
-                    self.presets.ready && selected.is_some(),
-                    egui::Button::new("Insert preset"),
-                )
-                .clicked()
-            {
-                self.insert_preset(selected.as_ref().unwrap().0, document, history);
-            }
-            if ui
-                .add_enabled(
-                    self.presets.ready && selected.is_some(),
-                    egui::Button::new("Rename…"),
-                )
-                .clicked()
-            {
-                let p = selected.as_ref().unwrap();
-                self.presets.error = None;
-                self.presets.dialog = Some(PresetDialog::Rename {
-                    id: p.0,
-                    name: p.1.clone(),
-                    focus: true,
-                });
-            }
-            if ui
-                .add_enabled(
-                    self.presets.ready && selected.is_some(),
-                    egui::Button::new("Delete…"),
-                )
-                .clicked()
-            {
-                let p = selected.as_ref().unwrap();
-                self.presets.error = None;
-                self.presets.dialog = Some(PresetDialog::Delete {
-                    id: p.0,
-                    name: p.1.clone(),
-                });
-            }
-        });
-        ui.separator();
-        let query = self.presets.search.trim().to_lowercase();
-        let mut found = false;
-        for preset in &self.presets.library.entries {
-            if !preset.name.to_lowercase().contains(&query) {
-                continue;
-            }
-            found = true;
-            ui.push_id(("preset", preset.id), |ui| {
-                if ui
-                    .add_sized(
-                        [ui.available_width(), 30.],
-                        egui::Button::selectable(
-                            self.presets.selected == Some(preset.id),
-                            &preset.name,
-                        )
-                        .truncate(),
+        if !self.presets.library.entries.is_empty() {
+            ui.add_enabled_ui(self.presets.ready && selected.is_some(), |ui| {
+                let (id, name) = selected.clone().unwrap_or_default();
+                ui.horizontal(|ui| {
+                    let size = Vec2::new((ui.available_width() - 12.) / 3., 46.);
+                    if tile(
+                        ui,
+                        "Insert preset",
+                        Glyph::App(DialogIcon::Create),
+                        size,
+                        false,
+                        true,
                     )
-                    .on_hover_text(&preset.name)
+                    .on_hover_text("Add an editable copy to this image")
                     .clicked()
-                {
-                    self.presets.selected = Some(preset.id);
-                }
-                let groups: std::collections::BTreeSet<_> = preset
-                    .annotations
-                    .iter()
-                    .filter_map(|a| a.group_id)
-                    .collect();
-                ui.small(format!(
-                    "{} annotation{} · {} group{}",
-                    preset.annotations.len(),
-                    if preset.annotations.len() == 1 {
-                        ""
-                    } else {
-                        "s"
-                    },
-                    groups.len(),
-                    if groups.len() == 1 { "" } else { "s" }
-                ));
-                let hidden = preset.annotations.iter().filter(|a| !a.visible()).count();
-                let locked = preset.annotations.iter().filter(|a| a.locked()).count();
-                if hidden + locked > 0 {
-                    ui.weak(format!("{hidden} hidden · {locked} locked"));
-                }
-                preset_preview(ui, preset);
-                ui.add_space(6.);
+                    {
+                        self.insert_preset(id, document, history);
+                    }
+                    if tile(
+                        ui,
+                        "Rename…",
+                        Glyph::App(DialogIcon::Edit),
+                        size,
+                        false,
+                        true,
+                    )
+                    .on_hover_text("Rename this preset")
+                    .clicked()
+                    {
+                        self.presets.error = None;
+                        self.presets.dialog = Some(PresetDialog::Rename {
+                            id,
+                            name: name.clone(),
+                            focus: true,
+                        });
+                    }
+                    if tile(
+                        ui,
+                        "Delete…",
+                        Glyph::App(DialogIcon::Trash),
+                        size,
+                        false,
+                        true,
+                    )
+                    .on_hover_text("Delete this saved preset")
+                    .clicked()
+                    {
+                        self.presets.error = None;
+                        self.presets.dialog = Some(PresetDialog::Delete {
+                            id,
+                            name: name.clone(),
+                        });
+                    }
+                });
             });
         }
-        if !found {
-            ui.weak(if self.presets.library.entries.is_empty() {
-                "Select artwork in the image or Layers, then save your first preset."
-            } else {
-                "No matching presets."
+        ui.add_space(3.);
+        let query = self.presets.search.trim().to_lowercase();
+        let entries: Vec<_> = self
+            .presets
+            .library
+            .entries
+            .iter()
+            .filter(|p| p.name.to_lowercase().contains(&query))
+            .collect();
+        let mut insert = None;
+        for row in entries.chunks(2) {
+            ui.horizontal(|ui| {
+                let width = (ui.available_width() - 6.) / 2.;
+                for preset in row {
+                    let was_selected = self.presets.selected == Some(preset.id);
+                    let response = ui
+                        .push_id(("preset", preset.id), |ui| {
+                            preset_card(ui, preset, width, self.presets.selected == Some(preset.id))
+                        })
+                        .inner;
+                    if response.clicked() {
+                        self.presets.selected = Some(preset.id);
+                    }
+                    if self.presets.ready && was_selected && response.double_clicked() {
+                        insert = Some(preset.id);
+                    }
+                }
             });
         }
-        ui.separator();
-        ui.weak("Inserted copies keep their sizes and styles. Changes to an image never change the preset.");
-        if let Ok(path) = &self.presets.path {
-            ui.small("Saved on this computer")
-                .on_hover_text(path.display().to_string());
+        if entries.is_empty() {
+            let (r, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 68.), Sense::hover());
+            crate::appearance::icon(
+                ui.painter(),
+                r.center(),
+                DialogIcon::Favorite,
+                crate::appearance::GINGER,
+                34.,
+            );
+            ui.label(
+                egui::RichText::new(if self.presets.library.entries.is_empty() {
+                    "Keep your favorites here"
+                } else {
+                    "No matching presets"
+                })
+                .strong(),
+            );
+            if self.presets.library.entries.is_empty() {
+                ui.small("Select artwork, then save it as a preset.");
+            }
+        }
+        if let Some(id) = insert {
+            self.insert_preset(id, document, history);
         }
     }
 
@@ -373,24 +397,110 @@ impl EditorState {
     }
 }
 
-fn preset_preview(ui: &mut egui::Ui, preset: &Preset) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 72.), Sense::hover());
-    if !ui.is_rect_visible(rect) {
-        return;
+fn preset_card(ui: &mut egui::Ui, preset: &Preset, width: f32, selected: bool) -> egui::Response {
+    use crate::appearance::{ACCENT, BORDER, CREAM, INK, MUTED};
+    let response = ui.add_sized([width, 108.], egui::Button::new("").frame(false));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::SelectableLabel,
+            ui.is_enabled(),
+            selected,
+            &preset.name,
+        )
+    });
+    if ui.is_rect_visible(response.rect) {
+        let r = response.rect;
+        let painter = ui.painter();
+        painter.rect(
+            r,
+            6.,
+            if selected || response.hovered() {
+                CREAM
+            } else {
+                crate::appearance::PAPER
+            },
+            Stroke::new(
+                if selected || response.has_focus() {
+                    2.
+                } else {
+                    1.
+                },
+                if selected || response.has_focus() {
+                    ACCENT
+                } else {
+                    BORDER
+                },
+            ),
+            StrokeKind::Inside,
+        );
+        let preview = Rect::from_min_max(
+            r.min + Vec2::splat(6.),
+            egui::pos2(r.right() - 6., r.top() + 70.),
+        );
+        preset_preview(ui, preset, preview);
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            preset.name.clone(),
+            egui::FontId::proportional(12.),
+            INK,
+        );
+        job.wrap.max_width = (width - 14.).max(1.);
+        job.wrap.max_rows = 1;
+        let galley = painter.layout_job(job);
+        painter.galley(egui::pos2(r.left() + 7., r.top() + 74.), galley, INK);
+        painter.text(
+            egui::pos2(r.left() + 7., r.top() + 91.),
+            egui::Align2::LEFT_TOP,
+            format!(
+                "{} object{}",
+                preset.annotations.len(),
+                if preset.annotations.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+            egui::FontId::proportional(10.),
+            MUTED,
+        );
+        if selected {
+            let at = egui::pos2(r.right() - 12., r.top() + 12.);
+            painter.circle_filled(at, 8., INK);
+            crate::appearance::icon(painter, at, DialogIcon::Check, Color32::WHITE, 8.);
+        }
     }
+    let groups: std::collections::BTreeSet<_> = preset
+        .annotations
+        .iter()
+        .filter_map(|a| a.group_id)
+        .collect();
+    let hidden = preset.annotations.iter().filter(|a| !a.visible()).count();
+    let locked = preset.annotations.iter().filter(|a| a.locked()).count();
+    response.on_hover_text(format!("{}\n{} objects · {} groups · {hidden} hidden · {locked} locked\nDouble-click to insert an editable copy",preset.name,preset.annotations.len(),groups.len()))
+        .on_hover_cursor(CursorIcon::PointingHand)
+}
+
+fn preset_preview(ui: &egui::Ui, preset: &Preset, rect: Rect) {
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    painter.rect_filled(rect, 4., Color32::from_rgb(235, 239, 244));
+    painter.rect_filled(rect, 4., Color32::WHITE);
     if preset
         .annotations
         .iter()
         .any(|a| a.visible() && a.kind.is_effect())
     {
-        painter.text(
+        let pixelate = preset
+            .annotations
+            .iter()
+            .any(|a| a.kind == AnnotationKind::Pixelate);
+        inspector_widgets::paint_glyph(
+            &painter,
             rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "Blur / pixelate preset",
-            egui::FontId::proportional(13.),
-            Color32::from_rgb(65, 78, 92),
+            if pixelate {
+                inspector_widgets::Glyph::Pixelate
+            } else {
+                inspector_widgets::Glyph::Blur
+            },
+            crate::appearance::ACCENT,
+            32.,
         );
         return;
     }
@@ -555,6 +665,7 @@ mod tests {
         texture: &egui::TextureHandle,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
+        ctx.enable_accesskit();
         ctx.run(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 1000.))),
@@ -562,6 +673,9 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
+                egui::TopBottomPanel::bottom("test-image-controls").show(ctx, |ui| {
+                    ui.horizontal(|ui| e.image_controls(ui, d, h));
+                });
                 egui::CentralPanel::default()
                     .show(ctx, |ui| e.ui(ui, d, h, texture, &mut Default::default()));
             },
@@ -577,7 +691,7 @@ mod tests {
         texture: &egui::TextureHandle,
     ) -> egui::FullOutput {
         if matches!(label, "Copy" | "Paste" | "Undo" | "Redo") {
-            click("Image actions", e, d, h, ctx, texture);
+            click("Image tools · crop, resize, rotate", e, d, h, ctx, texture);
         }
         let output = frame(e, d, h, ctx, texture, vec![]);
         let at = output
@@ -588,6 +702,18 @@ mod tests {
                     Some(t.pos + t.galley.size() * 0.5)
                 }
                 _ => None,
+            })
+            .or_else(|| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .and_then(|update| {
+                        update.nodes.iter().find_map(|(_, n)| {
+                            (n.label() == Some(label)).then(|| n.bounds()).flatten()
+                        })
+                    })
+                    .map(|r| Pos2::new(((r.x0 + r.x1) * 0.5) as f32, ((r.y0 + r.y1) * 0.5) as f32))
             })
             .unwrap_or_else(|| panic!("Missing button {label}"));
         frame(
@@ -692,7 +818,7 @@ mod tests {
         assert_eq!(presets::load(&path).unwrap().entries[0].name, "Renamed kit");
         e.presets.search = "nothing-matches".into();
         let out = frame(&mut e, &mut d, &mut h, &ctx, &texture, vec![]);
-        assert!(out.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.job.text == "No matching presets.")));
+        assert!(out.shapes.iter().any(|s| matches!(&s.shape,egui::Shape::Text(t) if t.galley.job.text == "No matching presets")));
         e.presets.search.clear();
         click("Delete…", &mut e, &mut d, &mut h, &ctx, &texture);
         click("Cancel", &mut e, &mut d, &mut h, &ctx, &texture);

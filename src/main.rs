@@ -25,6 +25,7 @@ mod export_panel;
 mod fill;
 mod geometry;
 mod image_clipboard;
+mod image_effects;
 mod image_loading;
 mod library;
 mod library_files;

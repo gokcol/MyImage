@@ -1,0 +1,11 @@
+MyImage is a native screen-capture and annotation studio with a playful calico companion.
+
+Capture a region, several regions, a window or a full display. Use guided scrolling capture for longer content. Copy a capture directly to the clipboard or open it in the editor.
+
+Annotate with arrows, text, shapes, callouts, stamps and freehand drawing. Use blur or pixelation for selected content. Adjust the canvas with resize handles, zoom in to work precisely, and keep annotations editable in .myimage projects.
+
+Style images with borders, shadows, edges, reflection, perspective, color adjustments and fade. Browse captures and projects in Library and Recents. Autosave offers recovery of unfinished projects after an unexpected exit.
+
+Images are processed on your computer. No MyImage account, subscription or AI service is required. The SVG stamp designer lets you copy a prompt and paste SVG from an AI service of your choice.
+
+Export flattened PNG, JPEG, WebP, TIFF or PDF copies for sharing. Animated images open as a still frame. Scrolling capture is guided and vertical; video recording is not included.

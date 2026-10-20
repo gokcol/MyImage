@@ -80,6 +80,7 @@ impl EditorState {
         std::mem::take(&mut self.toolbar_changed).then(|| self.toolbar_pins.clone())
     }
     fn choose_tool(&mut self, tool: Tool, document: &mut Document, history: &mut EditHistory) {
+        self.effects_open = false;
         self.move_pixels = true;
         self.area_aspect_ratio = None;
         if tool == Tool::Fill {

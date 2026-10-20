@@ -43,6 +43,25 @@ pub fn read_image() -> Result<RgbaImage, String> {
         .ok_or("Invalid clipboard image pixels.".into())
 }
 
+/// Decode the saved file at full resolution without opening it in the Editor.
+/// Projects use the same composition as exports, including annotations and effects.
+pub fn file_pixels(path: &std::path::Path) -> Result<RgbaImage, String> {
+    if path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("myimage"))
+    {
+        crate::render::flatten(&crate::document::load_project(path)?)
+    } else {
+        image::ImageReader::open(path)
+            .map_err(|error| error.to_string())?
+            .with_guessed_format()
+            .map_err(|error| error.to_string())?
+            .decode()
+            .map(|image| image.into_rgba8())
+            .map_err(|error| error.to_string())
+    }
+}
+
 #[cfg(test)]
 pub fn copy_pixels(
     document: &Document,
@@ -199,6 +218,56 @@ mod tests {
         }
     }
     #[test]
+    fn file_copy_preserves_raster_alpha_and_composes_saved_project_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("transparent.png");
+        let pixels = RgbaImage::from_fn(32, 24, |x, y| {
+            image::Rgba([x as u8, y as u8, 80, if x < 8 { 0 } else { 200 }])
+        });
+        pixels.save(&png).unwrap();
+        assert_eq!(file_pixels(&png).unwrap(), pixels);
+
+        let mut doc = Document {
+            image: Arc::new(pixels),
+            annotations: vec![crate::markup_tests::object(
+                AnnotationKind::Rectangle,
+                [10., 5.],
+                [25., 18.],
+            )],
+            geometry: Default::default(),
+        };
+        doc.annotations[0].fill = true;
+        doc.annotations[0].color = [255, 0, 0, 255];
+        doc.geometry.quarter_turns = 1;
+        doc.geometry.effects.grayscale = true;
+        let project = dir.path().join("annotated.MYIMAGE");
+        crate::document::save_project(&doc, &project).unwrap();
+        let before = std::fs::read(&project).unwrap();
+        let copied = file_pixels(&project).unwrap();
+        assert_eq!(copied, crate::render::flatten(&doc).unwrap());
+        assert_eq!(copied.dimensions(), (24, 32));
+        assert_eq!(std::fs::read(&project).unwrap(), before);
+        assert_eq!(
+            crate::document::load_project(&project)
+                .unwrap()
+                .edit_state(),
+            doc.edit_state()
+        );
+    }
+
+    #[test]
+    fn file_copy_reports_missing_or_corrupt_sources_without_fallback_pixels() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.png");
+        assert!(file_pixels(&path).is_err());
+        std::fs::write(&path, b"not an image").unwrap();
+        assert!(file_pixels(&path).is_err());
+        let project = dir.path().join("broken.myimage");
+        std::fs::write(&project, b"not a project").unwrap();
+        assert!(file_pixels(&project).is_err());
+    }
+
+    #[test]
     fn copied_pixels_include_visible_edits_and_display_geometry() {
         let mut d = document();
         let mut a = crate::markup_tests::object(AnnotationKind::Rectangle, [1., 1.], [8., 8.]);
@@ -206,6 +275,7 @@ mod tests {
         a.color = [255, 0, 0, 255];
         d.annotations.push(a);
         d.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,

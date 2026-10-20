@@ -1,5 +1,11 @@
 use crate::appearance::Icon as DialogIcon;
 use crate::dialogs::{self, Dialog};
+#[path = "app_menu.rs"]
+mod app_menu;
+#[path = "capture_launcher.rs"]
+mod capture_launcher;
+#[path = "capture_output.rs"]
+mod capture_output;
 #[path = "capture_session.rs"]
 mod capture_session;
 use crate::{
@@ -16,6 +22,7 @@ use crate::{
     selection::{self, CaptureShape},
     storage::{self, Settings},
 };
+use capture_output::CaptureOutput;
 use capture_session::{CapturedFrame, ScrollSession};
 use chrono::{DateTime, Local};
 use eframe::egui::{
@@ -54,6 +61,8 @@ enum WorkEvent {
         bool,
     ),
     Saved(Arc<image::RgbaImage>, Result<PathBuf, String>, bool),
+    CaptureFinished(Result<CaptureOutput, String>),
+    #[cfg(test)]
     Opened(PathBuf, bool, Result<Document, String>),
     MissingOpen(PathBuf),
     Prepared(
@@ -63,6 +72,7 @@ enum WorkEvent {
     ProjectSaved(PathBuf, document::EditState, Result<(), String>),
     Exported(PathBuf, ExportFormat, Result<(), String>),
     ClipboardImage(Result<image::RgbaImage, String>),
+    FileCopied(PathBuf, Result<[u32; 2], String>),
     Files(crate::library_files::Outcome),
     StoragePrepared(Result<crate::storage_move::PreparedMove, String>),
     StorageProgress(usize, usize),
@@ -71,6 +81,8 @@ enum WorkEvent {
 
 #[path = "file_browser.rs"]
 mod file_browser;
+#[path = "recent_history.rs"]
+mod recent_history;
 #[path = "recovery_ui.rs"]
 mod recovery_ui;
 use file_browser::FileDialog;
@@ -78,7 +90,7 @@ use file_browser::FileDialog;
 #[derive(Clone)]
 enum PendingAction {
     Recover(PathBuf),
-    Capture,
+    OpenCapture(CaptureOutput),
     Open,
     OpenProject,
     Create(crate::templates::Spec),
@@ -93,6 +105,8 @@ struct Selection {
     texture: egui::TextureHandle,
     captured_at: DateTime<Local>,
     drag: capture_session::RegionDrag,
+    multi: capture_session::MultiRegions,
+    mode: capture::CaptureMode,
     return_hidden: bool,
     placement_frames: u8,
     windows: Vec<capture::WindowInfo>,
@@ -123,6 +137,7 @@ enum View {
 }
 
 pub struct MyImageApp {
+    about_open: bool,
     guide_open: bool,
     source_textures: crate::texture_cache::SourceTextures,
     recovery: recovery_ui::RecoveryState,
@@ -130,6 +145,7 @@ pub struct MyImageApp {
     #[cfg(target_os = "macos")]
     _termination_guard: Option<crate::desktop::TerminationGuard>,
     desktop: Option<DesktopIntegration>,
+    capture_launcher: Option<capture_launcher::Launcher>,
     desktop_rx: mpsc::Receiver<DesktopEvent>,
     desktop_tx: mpsc::Sender<DesktopEvent>,
     work_rx: mpsc::Receiver<WorkEvent>,
@@ -149,6 +165,7 @@ pub struct MyImageApp {
     generation: u64,
     pending_capture: Option<bool>,
     capture_cancel: Option<Arc<AtomicBool>>,
+    capture_copy_retry: Option<CaptureOutput>,
     selection: Option<Selection>,
     scroll_session: Option<ScrollSession>,
     busy: bool,
@@ -162,6 +179,7 @@ pub struct MyImageApp {
     document: Option<Document>,
     project_path: Option<PathBuf>,
     history: EditHistory,
+    recent_revision: u64,
     editor: EditorState,
     library: LibraryPanel,
     image_loader: Option<crate::image_loading::Loader>,
@@ -243,6 +261,7 @@ impl MyImageApp {
         let mut editor = EditorState::with_presets(storage::preset_library_path(demo));
         editor.set_toolbar(settings.editor_toolbar.clone());
         Self {
+            about_open: false,
             guide_open: !background && settings.guide_version < crate::onboarding::VERSION,
             source_textures: Default::default(),
             recovery: Default::default(),
@@ -250,6 +269,7 @@ impl MyImageApp {
             #[cfg(target_os = "macos")]
             _termination_guard: None,
             desktop: None,
+            capture_launcher: None,
             desktop_rx,
             desktop_tx,
             work_rx,
@@ -269,6 +289,7 @@ impl MyImageApp {
             generation: 0,
             pending_capture: None,
             capture_cancel: None,
+            capture_copy_retry: None,
             selection: None,
             scroll_session: None,
             busy: false,
@@ -282,6 +303,7 @@ impl MyImageApp {
             document: None,
             project_path: None,
             history: EditHistory::new(document::EditState::default()),
+            recent_revision: 0,
             editor,
             library,
             image_loader: None,
@@ -401,6 +423,9 @@ impl MyImageApp {
     }
 
     fn show(&mut self, ctx: &egui::Context) {
+        if let Some(desktop) = &self.desktop {
+            desktop.reveal_application();
+        }
         self.hidden.store(false, Ordering::Relaxed);
         ctx.send_viewport_cmd(ViewportCommand::Visible(true));
         ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
@@ -408,6 +433,7 @@ impl MyImageApp {
     }
 
     fn begin_capture(&mut self, ctx: &egui::Context) {
+        self.close_capture_launcher(ctx);
         self.calico.stop();
         if self.scroll_session.is_some() {
             self.capture_scroll_section(ctx);
@@ -417,6 +443,7 @@ impl MyImageApp {
             || self.selection.is_some()
             || self.busy
             || self.recovery.prompt
+            || self.about_open
             || self.guide_open
             || self.pending_action.is_some()
             || self.export_panel.open
@@ -424,9 +451,9 @@ impl MyImageApp {
         {
             return;
         }
-        if !self.can_replace_image(ctx, PendingAction::Capture) {
-            return;
-        }
+        // Capture itself does not replace the open project. Ask about unsaved
+        // edits only if the completed capture is actually sent to Editor.
+        self.finish_edit();
         let Some(display) = self
             .displays
             .iter()
@@ -480,6 +507,7 @@ impl MyImageApp {
                     windows: if matches!(
                         mode,
                         capture::CaptureMode::Region
+                            | capture::CaptureMode::MultiRegion
                             | capture::CaptureMode::Window
                             | capture::CaptureMode::Scrolling
                     ) {
@@ -500,12 +528,21 @@ impl MyImageApp {
                     let windows = if matches!(
                         mode,
                         capture::CaptureMode::Region
+                            | capture::CaptureMode::MultiRegion
                             | capture::CaptureMode::Window
                             | capture::CaptureMode::Scrolling
                     ) {
                         match capture::windows() {
                             Ok(w) => w,
-                            Err(_) if mode == capture::CaptureMode::Region => Vec::new(),
+                            Err(_)
+                                if matches!(
+                                    mode,
+                                    capture::CaptureMode::Region
+                                        | capture::CaptureMode::MultiRegion
+                                ) =>
+                            {
+                                Vec::new()
+                            }
                             Err(e) => return Err(e),
                         }
                     } else {
@@ -641,26 +678,10 @@ impl MyImageApp {
             self.start_scroll_session(ctx, selection, rect);
             return;
         }
-        self.restore_window(ctx, false);
-        self.busy = true;
-        self.view = View::Editor;
-        self.status = "Saving capture…".into();
-        let tx = self.work_tx.clone();
-        let ctx = ctx.clone();
         let shape = self.shape;
         let radius = self.settings.corner_radius;
-        let folder = self.settings.output_dir.clone();
-        std::thread::spawn(move || {
-            match selection::crop_selection(&selection.image, rect, shape, radius) {
-                Ok(image) => {
-                    let path = storage::save_capture(&image, &folder, selection.captured_at);
-                    let _ = tx.send(WorkEvent::Saved(Arc::new(image), path, true));
-                }
-                Err(error) => {
-                    let _ = tx.send(WorkEvent::Opened(PathBuf::new(), false, Err(error)));
-                }
-            }
-            ctx.request_repaint();
+        self.queue_capture_output(ctx, selection.captured_at, move || {
+            selection::crop_selection(&selection.image, rect, shape, radius)
         });
     }
 
@@ -753,6 +774,7 @@ impl MyImageApp {
         self.last_texture = None;
         self.privacy_preview.clear();
         self.history = EditHistory::new(document.edit_state());
+        self.recent_revision = self.history.revision();
         self.document = Some(document);
         self.project_path = project_path;
         self.editor.reset();
@@ -815,6 +837,7 @@ impl MyImageApp {
         if self.busy
             || self.document.is_none()
             || self.recovery.prompt
+            || self.about_open
             || self.guide_open
             || self.pending_action.is_some()
             || self.editor.has_modal()
@@ -875,7 +898,7 @@ impl MyImageApp {
         self.allow_discard = discard;
         match action {
             PendingAction::Recover(id) => self.recover_entry(ctx, id),
-            PendingAction::Capture => self.begin_capture(ctx),
+            PendingAction::OpenCapture(output) => self.open_captured_image(ctx, output),
             PendingAction::Open => self.open_image(ctx),
             PendingAction::OpenProject => self.open_project(ctx),
             PendingAction::Create(spec) => self.create_image(ctx, spec),
@@ -890,7 +913,9 @@ impl MyImageApp {
         while let Ok(event) = self.desktop_rx.try_recv() {
             match event {
                 DesktopEvent::Capture => self.begin_capture(ctx),
+                DesktopEvent::CapturePanel => self.toggle_capture_launcher(ctx),
                 DesktopEvent::Show | DesktopEvent::CaptureSettings | DesktopEvent::Library => {
+                    self.close_capture_launcher(ctx);
                     if self.scroll_session.is_some() {
                         if !self.busy {
                             self.show(ctx);
@@ -909,6 +934,7 @@ impl MyImageApp {
                     }
                     if !self.busy
                         && !self.guide_open
+                        && !self.about_open
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
@@ -916,6 +942,10 @@ impl MyImageApp {
                         && !self.editor.has_modal()
                     {
                         match event {
+                            DesktopEvent::Show => {
+                                self.finish_edit();
+                                self.view = View::Editor;
+                            }
                             DesktopEvent::CaptureSettings => {
                                 self.finish_edit();
                                 self.view = View::Capture;
@@ -993,6 +1023,24 @@ impl MyImageApp {
                         Err(error) => self.error = Some(error),
                     }
                 }
+                WorkEvent::FileCopied(path, result) => {
+                    self.busy = false;
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                    match result {
+                        Ok([width, height]) => {
+                            self.error = None;
+                            self.status =
+                                format!("Copied to clipboard · {name} · {width} × {height} px");
+                        }
+                        Err(error) => {
+                            self.status = "Copy failed".into();
+                            self.error = Some(format!("Could not copy {name}: {error}"));
+                        }
+                    }
+                    if std::mem::take(&mut self.quit_after_work) {
+                        self.request_quit(ctx);
+                    }
+                }
                 WorkEvent::Displays(result) => match result {
                     Ok(displays) => {
                         self.displays = displays;
@@ -1023,7 +1071,6 @@ impl MyImageApp {
                         Ok(frame) => {
                             let image = frame.image;
                             if self.settings.capture_mode == capture::CaptureMode::FullScreen {
-                                self.restore_window(ctx, false);
                                 self.save_captured_image(ctx, image, captured_at);
                                 continue;
                             }
@@ -1034,6 +1081,8 @@ impl MyImageApp {
                                 texture,
                                 captured_at,
                                 drag: Default::default(),
+                                multi: Default::default(),
+                                mode: self.settings.capture_mode,
                                 return_hidden,
                                 placement_frames: 0,
                                 windows: frame.windows,
@@ -1057,7 +1106,6 @@ impl MyImageApp {
                         continue;
                     }
                     self.capture_cancel = None;
-                    self.restore_window(ctx, false);
                     match result {
                         Ok(image)
                             if self.settings.capture_mode == capture::CaptureMode::Scrolling =>
@@ -1066,6 +1114,7 @@ impl MyImageApp {
                         }
                         Ok(image) => self.save_captured_image(ctx, image, at),
                         Err(error) => {
+                            self.restore_window(ctx, false);
                             self.error = Some(error);
                             self.view = View::Capture;
                         }
@@ -1085,7 +1134,7 @@ impl MyImageApp {
                         match result {
                             Ok(true) => {
                                 session.message =
-                                    "Section added. Keep scrolling down, or Finish & edit.".into();
+                                    "Section added. Keep scrolling down, or choose Finish.".into();
                                 session.texture = None;
                             }
                             Ok(false) => {
@@ -1119,6 +1168,7 @@ impl MyImageApp {
                         self.show(ctx);
                     }
                 }
+                WorkEvent::CaptureFinished(output) => self.finish_capture_output(ctx, output),
                 WorkEvent::Saved(image, path, replace_document) => {
                     self.busy = false;
                     if replace_document {
@@ -1180,7 +1230,7 @@ impl MyImageApp {
                                     composition,
                                 );
                             }
-                            self.remember_recent(path.clone());
+                            self.remember_opened_recent(path.clone());
                             self.last_path = Some(path);
                             self.view = View::Editor;
                             self.status = "Image opened".into();
@@ -1195,13 +1245,14 @@ impl MyImageApp {
                         self.request_quit(ctx);
                     }
                 }
+                #[cfg(test)]
                 WorkEvent::Opened(path, _edit, result) => {
                     self.busy = false;
                     match result {
                         Ok(document) => {
                             let project_path = is_project_path(&path).then(|| path.clone());
                             self.install_document(document, project_path);
-                            self.remember_recent(path.clone());
+                            self.remember_opened_recent(path.clone());
                             self.last_path = Some(path);
                             self.view = View::Editor;
                             self.fit = true;
@@ -1300,6 +1351,7 @@ impl MyImageApp {
     }
 
     fn request_quit(&mut self, ctx: &egui::Context) {
+        self.close_capture_launcher(ctx);
         if let Some(session) = &mut self.scroll_session {
             session.message = "Finish or cancel the scrolling capture before quitting.".into();
             if !self.busy {
@@ -1346,8 +1398,30 @@ impl MyImageApp {
         if response.changed {
             self.persist_settings();
         }
+        if self.capture_copy_retry.is_some() {
+            ui.horizontal(|ui| {
+                if appearance::action_button(ui, "Retry copy", Icon::Copy, !self.busy, true)
+                    .clicked()
+                {
+                    self.retry_capture_copy(ctx);
+                }
+                if appearance::action_button(
+                    ui,
+                    "Open capture in Editor",
+                    Icon::Edit,
+                    !self.busy,
+                    false,
+                )
+                .clicked()
+                    && let Some(output) = self.capture_copy_retry.clone()
+                {
+                    self.open_captured_image(ctx, output);
+                }
+            });
+        }
         match response.action {
             Some(Action::Capture) => self.begin_capture(ctx),
+            Some(Action::Panel) => self.toggle_capture_launcher(ctx),
             Some(Action::RefreshDisplays) => self.refresh_displays(ctx),
             Some(Action::ChooseFolder) => self.choose_library_folder(),
             Some(Action::Library) => {
@@ -1474,7 +1548,8 @@ impl MyImageApp {
                     if let Some(document) = &self.document {
                         let painter = painter.with_clip_rect(rect.intersect(ui.clip_rect()));
                         if document.geometry.canvas.is_some()
-                            || document.geometry.has_cutouts()
+                            || (document.geometry.has_cutouts()
+                                || document.geometry.effects.active())
                             || document
                                 .annotations
                                 .iter()
@@ -1706,6 +1781,7 @@ impl eframe::App for MyImageApp {
             }
         }
         self.handle_events(ctx);
+        self.promote_edited_recent(ctx);
         self.autosave(ctx);
         if let Some(desktop) = &mut self.desktop {
             desktop.update_capture_menu(
@@ -1715,6 +1791,7 @@ impl eframe::App for MyImageApp {
                     && self.pending_capture.is_none()
                     && self.selection.is_none()
                     && !self.guide_open
+                    && !self.about_open
                     && !self.recovery.prompt
                     && self.pending_action.is_none()
                     && self.file_dialog.is_none()
@@ -1740,6 +1817,9 @@ impl eframe::App for MyImageApp {
                 }
             }
         }
+        if !self.quitting {
+            self.capture_launcher_ui(ctx);
+        }
         if self.quitting || self.hidden.load(Ordering::Relaxed) {
             return;
         }
@@ -1753,6 +1833,7 @@ impl eframe::App for MyImageApp {
         }
         if !self.busy
             && !self.guide_open
+            && !self.about_open
             && !self.recovery.prompt
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
@@ -1830,6 +1911,7 @@ impl eframe::App for MyImageApp {
                         ui.add_enabled_ui(
                             !self.busy
                                 && !self.guide_open
+                                && !self.about_open
                                 && !self.recovery.prompt
                                 && self.pending_action.is_none()
                                 && self.file_dialog.is_none()
@@ -1918,6 +2000,7 @@ impl eframe::App for MyImageApp {
                 ui.add_enabled_ui(
                     !self.busy
                         && !self.guide_open
+                        && !self.about_open
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
@@ -1984,112 +2067,8 @@ impl eframe::App for MyImageApp {
                                 .min_size(egui::vec2(36., 34.))
                                 .corner_radius(9),
                             )
-                            .ui(ui, |ui| {
-                                ui.spacing_mut().button_padding = egui::vec2(10., 6.);
-                                ui.set_min_width(210.);
-                                ui.horizontal(|ui| {
-                                    ui.strong("MyImage");
-                                    ui.weak(concat!(env!("CARGO_PKG_VERSION"), " · build 48"));
-                                });
-                                ui.separator();
-                                let enabled = self.document.is_some()
-                                    && !self.busy
-                                    && !self.guide_open && !self.recovery.prompt && self.pending_action.is_none()
-                                    && self.file_dialog.is_none()
-                                    && !self.editor.has_modal()
-                                    && !self.export_panel.open;
-                                if appearance::action_button(
-                                    ui,
-                                    if self.view == View::Viewer {
-                                        "Return to Editor"
-                                    } else {
-                                        "View only"
-                                    },
-                                    if self.view == View::Viewer {
-                                        appearance::Icon::Edit
-                                    } else {
-                                        appearance::Icon::Eye
-                                    },
-                                    enabled,
-                                    false,
-                                )
-                                .clicked()
-                                {
-                                    self.finish_edit();
-                                    self.view = if self.view == View::Viewer {
-                                        View::Editor
-                                    } else {
-                                        View::Viewer
-                                    };
-                                    ui.close();
-                                }
-                                ui.separator();
-                                if ui
-                                    .add(egui::Button::image_and_text(
-                                        egui::Image::new((
-                                            self.app_icon.id(),
-                                            egui::vec2(16., 16.),
-                                        )),
-                                        egui::RichText::new("Play with Calico").size(12.),
-                                    ))
-                                    .on_hover_text("A five-second surprise • Escape to stop")
-                                    .clicked()
-                                {
-                                    self.calico.start(ctx.input(|i| i.time));
-                                    ui.close();
-                                }
-                                ui.separator();
-                                self.recovery_menu(ui);
-                                if appearance::action_button(ui, "Quick start & shortcuts…", Icon::Info, !self.busy && self.pending_action.is_none() && self.file_dialog.is_none() && !self.editor.has_modal(), false).clicked() {
-                                    self.guide_open = true;
-                                    ui.close();
-                                }
-                                if ui.hyperlink_to("Releases & updates…", "https://github.com/gokcol/MyImage/releases").clicked() { ui.close(); }
-                                if appearance::action_button(ui, "Storage folder…", Icon::Open, !self.busy && !self.guide_open && !self.recovery.prompt && self.pending_action.is_none() && self.file_dialog.is_none(), false).clicked() {
-                                    self.file_dialog = Some(file_browser::FileDialog::Storage);
-                                    ui.close();
-                                }
-                                ui.separator();
-                                ui.horizontal(|ui| {
-                                    let (rect, _) = ui.allocate_exact_size(egui::vec2(16., 18.), egui::Sense::hover());
-                                    appearance::icon(ui.painter(), rect.center(), Icon::TextSize, appearance::INK, 15.);
-                                    ui.label("UI text size");
-                                });
-                                ui.horizontal(|ui| {
-                                    for size in storage::UiTextSize::ALL {
-                                        if ui.selectable_label(self.settings.ui_text_size == size, size.label()).clicked() {
-                                            self.settings.ui_text_size = size;
-                                            ctx.set_zoom_factor(size.factor());
-                                            self.persist_settings();
-                                        }
-                                    }
-                                }).response.on_hover_text("Scales interface text and controls together. Image pixels and annotation text are unchanged.");
-                                ui.separator();
-                                if appearance::action_button(
-                                    ui,
-                                    "Keep in menu bar / tray",
-                                    appearance::Icon::Tray,
-                                    self.desktop.is_some(),
-                                    false,
-                                )
-                                .clicked()
-                                {
-                                    self.hide(ctx);
-                                    ui.close();
-                                }
-                                if appearance::action_button(
-                                    ui,
-                                    "Quit MyImage",
-                                    appearance::Icon::Power,
-                                    true,
-                                    false,
-                                )
-                                .clicked()
-                                {
-                                    self.request_quit(ctx);
-                                    ui.close();
-                                }
-                            })
+                            .config(app_menu::config())
+                            .ui(ui, |ui| self.app_menu_contents(ui, ctx))
                         })
                         .inner;
                     menu.0.widget_info(|| {
@@ -2112,37 +2091,39 @@ impl eframe::App for MyImageApp {
         });
         if matches!(self.view, View::Home | View::Editor | View::Viewer) {
             egui::TopBottomPanel::bottom("recents")
-                .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(6))
+                .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(4))
                 .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing.y = 4.;
-                    ui.horizontal(|ui| {
-                        if ui
-                            .small_button(if self.settings.recents_open {
-                                "▾ Recents"
-                            } else {
-                                "▸ Recents"
-                            })
-                            .clicked()
-                        {
-                            self.settings.recents_open = !self.settings.recents_open;
-                            self.persist_settings();
-                        }
-                        ui.weak("Captures & projects");
-                        if ui.small_button("Refresh").clicked() {
-                            self.library.refresh();
-                        }
-                    });
+                    ui.spacing_mut().item_spacing.y = 3.;
+                    let enabled = !self.busy
+                        && !self.guide_open
+                        && !self.about_open
+                        && !self.recovery.prompt
+                        && self.pending_action.is_none()
+                        && self.file_dialog.is_none()
+                        && !self.export_panel.open
+                        && !self.editor.has_modal();
+                    let was_open = self.settings.recents_open;
+                    let mut chosen = self.library.recents_header(
+                        ui,
+                        &mut self.settings.recents_open,
+                        enabled,
+                        |ui| {
+                            if self.view == View::Editor
+                                && let Some(document) = &mut self.document
+                            {
+                                ui.add_enabled_ui(enabled, |ui| {
+                                    self.editor.image_controls(ui, document, &mut self.history);
+                                });
+                            }
+                        },
+                    );
+                    if was_open != self.settings.recents_open {
+                        self.persist_settings();
+                    }
                     if self.settings.recents_open {
-                        let enabled = !self.busy
-                            && !self.guide_open
-                            && !self.recovery.prompt
-                            && self.pending_action.is_none()
-                            && self.file_dialog.is_none()
-                            && !self.export_panel.open
-                            && !self.editor.has_modal();
                         let dirty = self.has_unsaved_edits();
                         let active = self.project_path.as_deref().or(self.last_path.as_deref());
-                        let chosen = ui
+                        chosen = ui
                             .add_enabled_ui(enabled, |ui| {
                                 self.library.recents_ui(
                                     ui,
@@ -2152,14 +2133,16 @@ impl eframe::App for MyImageApp {
                                     dirty,
                                 )
                             })
-                            .inner;
-                        if let Some(action) = chosen {
-                            self.library_action(ctx, action);
-                        }
+                            .inner
+                            .or(chosen);
                         self.sync_library_references();
+                    }
+                    if let Some(action) = chosen {
+                        self.library_action(ctx, action);
                     }
                 });
         }
+
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(error) = &self.error {
                 dialogs::notice(ui, DialogIcon::Info, "MyImage needs attention", error, true);
@@ -2190,6 +2173,7 @@ impl eframe::App for MyImageApp {
             ui.add_enabled_ui(
                 !self.busy
                     && !self.guide_open
+                    && !self.about_open
                     && !self.recovery.prompt
                     && self.pending_action.is_none()
                     && self.file_dialog.is_none()
@@ -2220,6 +2204,7 @@ impl eframe::App for MyImageApp {
         }
         self.file_dialog_ui(ctx);
         self.recovery_ui(ctx);
+        self.about_ui(ctx);
         if self.recovery.ready
             && !self.recovery.prompt
             && self.pending_action.is_none()
@@ -2266,6 +2251,7 @@ impl eframe::App for MyImageApp {
                 self.pending_action = None;
             }
         }
+        self.promote_edited_recent(ctx);
         self.autosave(ctx);
     }
 }

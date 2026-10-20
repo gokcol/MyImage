@@ -115,68 +115,103 @@ impl LibraryPanel {
         self.check_paths(ui.ctx(), &cached);
         let mut action = None;
         ui.scope(|ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(8., 6.);
-            ui.spacing_mut().button_padding = Vec2::new(9., 5.);
+            ui.spacing_mut().item_spacing = Vec2::new(10., 6.);
+            ui.spacing_mut().button_padding = Vec2::new(7., 4.);
             ui.spacing_mut().interact_size.y = 28.;
-            ui.horizontal(|ui| {
-                if icon_button(
-                    ui,
-                    "Back",
-                    appearance::Icon::Back,
-                    !self.back.is_empty(),
-                    false,
-                )
-                .clicked()
-                {
-                    self.go_back();
-                }
-                if icon_button(
-                    ui,
-                    "Forward",
-                    appearance::Icon::Forward,
-                    !self.forward.is_empty(),
-                    false,
-                )
-                .clicked()
-                {
-                    self.go_forward();
-                }
-                self.breadcrumbs(ui);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if icon_button(
-                        ui,
-                        "Refresh library",
-                        appearance::Icon::Refresh,
-                        true,
-                        false,
-                    )
-                    .clicked()
-                    {
-                        self.refresh();
-                        ui.ctx().request_repaint();
-                    }
-                    if appearance::action_button(ui, "Storage", appearance::Icon::Open, true, false)
-                        .on_hover_text(format!(
-                            "{}\nBrowse or change capture and project storage",
-                            root.display()
-                        ))
+            egui::Frame::new()
+                .fill(Color32::WHITE)
+                .corner_radius(6)
+                .inner_margin(6)
+                .stroke(Stroke::new(1., crate::dialogs::LINE))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if icon_button(
+                            ui,
+                            "Back",
+                            appearance::Icon::Back,
+                            !self.back.is_empty(),
+                            false,
+                        )
                         .clicked()
-                    {
-                        action = Some(LibraryAction::Storage);
-                    }
+                        {
+                            self.go_back();
+                        }
+                        if icon_button(
+                            ui,
+                            "Forward",
+                            appearance::Icon::Forward,
+                            !self.forward.is_empty(),
+                            false,
+                        )
+                        .clicked()
+                        {
+                            self.go_forward();
+                        }
+                        self.breadcrumbs(ui);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if icon_button(
+                                ui,
+                                "Refresh library",
+                                appearance::Icon::Refresh,
+                                true,
+                                false,
+                            )
+                            .clicked()
+                            {
+                                self.refresh();
+                                ui.ctx().request_repaint();
+                            }
+                            if icon_button(
+                                ui,
+                                "Storage folder",
+                                appearance::Icon::Open,
+                                true,
+                                false,
+                            )
+                            .on_hover_text(format!(
+                                "{}\nBrowse or change capture and project storage",
+                                root.display()
+                            ))
+                            .clicked()
+                            {
+                                action = Some(LibraryAction::Storage);
+                            }
+                            let width = (ui.available_width() - 12.).clamp(130., 230.);
+                            let search = egui::TextEdit::singleline(&mut self.search)
+                                .hint_text("Search your library…")
+                                .desired_width(width)
+                                .margin(egui::vec2(9., 6.));
+                            if ui.add(search).changed() {
+                                self.filter_dirty = true;
+                                self.update_filter();
+                            }
+                            let (search_icon, _) =
+                                ui.allocate_exact_size(Vec2::splat(18.), egui::Sense::hover());
+                            appearance::icon(
+                                ui.painter(),
+                                search_icon.center(),
+                                appearance::Icon::Search,
+                                appearance::MUTED,
+                                14.,
+                            );
+                        });
+                    });
                 });
-            });
             ui.add_space(3.);
-            let height = (ui.available_height() - 50.).max(140.);
+            let height = (ui.available_height() - 43.).max(140.);
             ui.horizontal_top(|ui| {
                 egui::Frame::new()
-                    .fill(appearance::PAPER)
-                    .corner_radius(7)
+                    .fill(crate::dialogs::CHARCOAL)
+                    .corner_radius(6)
                     .inner_margin(10)
-                    .stroke(Stroke::new(1., appearance::BORDER))
+                    .stroke(Stroke::new(1., crate::dialogs::CHARCOAL))
                     .show(ui, |ui| {
-                        ui.set_width(174.);
+                        ui.set_width(168.);
+                        ui.visuals_mut().widgets.inactive.fg_stroke.color = Color32::from_gray(195);
+                        ui.visuals_mut().widgets.hovered.fg_stroke.color = appearance::GINGER;
                         ui.set_height(height - 20.);
+                        ui.visuals_mut().override_text_color = Some(Color32::from_gray(225));
+                        ui.visuals_mut().weak_text_color = Some(Color32::from_gray(165));
                         ui.vertical(|ui| self.sidebar(ui, height - 20.));
                     });
                 ui.allocate_ui_with_layout(
@@ -251,20 +286,16 @@ impl LibraryPanel {
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui, height: f32) {
-        if ui
-            .add_sized(
-                [174., 30.],
-                egui::TextEdit::singleline(&mut self.search).hint_text("Search filenames…"),
-            )
-            .changed()
-        {
-            self.filter_dirty = true;
-            self.update_filter();
-        }
-        ui.add_space(6.);
+        ui.label(
+            RichText::new("COLLECTIONS")
+                .size(10.)
+                .strong()
+                .color(appearance::GINGER),
+        );
+        ui.add_space(5.);
         egui::ScrollArea::vertical()
             .id_salt("library-navigation")
-            .max_height((height - 48.).max(50.))
+            .max_height((height - 26.).max(50.))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 for (collection, icon) in [
@@ -294,12 +325,12 @@ impl LibraryPanel {
                     }
                 }
                 ui.add_space(7.);
-                ui.separator();
+                ui.add_space(4.);
                 ui.label(
                     RichText::new("CAPTURE DATE")
                         .size(10.)
                         .strong()
-                        .color(appearance::MUTED),
+                        .color(appearance::GINGER),
                 );
                 self.calendar_ui(ui);
             });
@@ -307,7 +338,7 @@ impl LibraryPanel {
 
     fn gallery_ui(&mut self, ui: &mut egui::Ui) -> Option<LibraryAction> {
         let mut changed = false;
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 3.;
             for sort in SortBy::ALL {
                 if sort_tab(ui, sort.label(), self.preferences.sort == sort).clicked() {
@@ -433,9 +464,9 @@ impl LibraryPanel {
         }
         let list = self.preferences.view == GalleryView::List;
         let (minimum, card_height) = match self.preferences.tile_size {
-            TileSize::Small => (152., 170.),
-            TileSize::Medium => (210., 218.),
-            TileSize::Large => (290., 276.),
+            TileSize::Small => (148., 150.),
+            TileSize::Medium => (200., 194.),
+            TileSize::Large => (270., 248.),
         };
         let gap = ui.spacing().item_spacing.x;
         let available = ui.available_width() - 14.;
@@ -515,13 +546,20 @@ impl LibraryPanel {
             )
         });
         let border = if selected {
-            Stroke::new(2., appearance::GINGER)
+            Stroke::new(2., appearance::ACCENT)
+        } else if response.hovered() {
+            Stroke::new(1., appearance::ACCENT)
         } else {
-            Stroke::new(1., appearance::BORDER)
+            Stroke::new(1., crate::dialogs::LINE)
         };
+        ui.painter().rect_filled(
+            rect.shrink(2.).translate(Vec2::new(0., 2.)),
+            6.,
+            Color32::from_black_alpha(9),
+        );
         ui.painter().rect(
             rect.shrink(1.),
-            9.,
+            6.,
             if selected {
                 appearance::CREAM
             } else {
@@ -533,10 +571,10 @@ impl LibraryPanel {
         let preview = if list {
             Rect::from_min_size(rect.min + Vec2::splat(7.), Vec2::new(78., 58.))
         } else {
-            Rect::from_min_max(rect.min + Vec2::splat(8.), rect.max - Vec2::new(8., 57.))
+            Rect::from_min_max(rect.min + Vec2::splat(5.), rect.max - Vec2::new(5., 50.))
         };
         ui.painter()
-            .rect_filled(preview, 5., Color32::from_rgb(241, 244, 248));
+            .rect_filled(preview, 3., Color32::from_rgb(242, 241, 238));
         let mut tooltip = format!(
             "{}\nModified: {}\nCreated: {}\n{}",
             entry.path.display(),
@@ -639,7 +677,7 @@ impl LibraryPanel {
         let text_pos = if list {
             rect.min + Vec2::new(96., 12.)
         } else {
-            rect.min + Vec2::new(12., height - 46.)
+            rect.min + Vec2::new(11., height - 40.)
         };
         clipped_label(
             ui,
@@ -669,7 +707,7 @@ impl LibraryPanel {
         };
         clipped_label(
             ui,
-            text_pos + Vec2::new(0., 23.),
+            text_pos + Vec2::new(0., 20.),
             if list { width - 112. } else { width - 24. },
             &details,
             11.,
@@ -765,18 +803,18 @@ pub(super) fn navigation_row(
         )
     });
     let color = if selected {
-        appearance::CREAM
-    } else {
         appearance::INK
+    } else {
+        Color32::from_gray(221)
     };
     if selected || response.hovered() {
         ui.painter().rect_filled(
             rect,
-            6.,
+            4.,
             if selected {
-                appearance::NAVY
+                appearance::CREAM
             } else {
-                appearance::PAPER
+                Color32::from_rgb(58, 60, 64)
             },
         );
     }
@@ -804,7 +842,7 @@ pub(super) fn navigation_row(
         if selected {
             appearance::GINGER
         } else {
-            appearance::PAPER
+            Color32::from_rgb(58, 60, 64)
         },
     );
     ui.painter().text(
@@ -812,7 +850,11 @@ pub(super) fn navigation_row(
         egui::Align2::CENTER_CENTER,
         count,
         FontId::proportional(10.),
-        appearance::INK,
+        if selected {
+            appearance::INK
+        } else {
+            Color32::from_gray(211)
+        },
     );
     clipped_label(
         ui,

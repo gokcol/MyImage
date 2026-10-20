@@ -9,6 +9,99 @@ pub enum Pattern {
     Solid,
     Dashed,
     Dotted,
+    DashDot,
+    LongDash,
+}
+
+impl Pattern {
+    pub const ALL: [Self; 5] = [
+        Self::Solid,
+        Self::Dashed,
+        Self::Dotted,
+        Self::DashDot,
+        Self::LongDash,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Solid => "Solid",
+            Self::Dashed => "Dashed",
+            Self::Dotted => "Dotted",
+            Self::DashDot => "Dash-dot",
+            Self::LongDash => "Long dash",
+        }
+    }
+    /// Painted distances along a path. Gaps stay continuous across corners and curves.
+    pub fn spans(self, length: f32, width: f32) -> Vec<(f32, f32)> {
+        if length <= 0. {
+            return Vec::new();
+        }
+        if self == Self::Solid {
+            return vec![(0., length)];
+        }
+        let unit = width.max(1.);
+        let mut result = Vec::new();
+        let mut offset = 0.;
+        let mut index = 0;
+        while offset < length && result.len() < 4096 {
+            let dot = self == Self::Dotted || (self == Self::DashDot && index % 2 == 1);
+            let dash = if dot {
+                0.01
+            } else if self == Self::LongDash {
+                unit * 8.
+            } else {
+                unit * 4.
+            };
+            result.push((offset, (offset + dash).min(length)));
+            offset += (dash + unit * 3.).max(length / 4096.);
+            index += 1;
+        }
+        result
+    }
+}
+
+/// Shared outline strokes for the native canvas and raster/PDF export.
+pub fn patterned_paths(
+    points: &[Pos2],
+    closed: bool,
+    pattern: Pattern,
+    width: f32,
+) -> Vec<Vec<Pos2>> {
+    if points.len() < 2 {
+        return Vec::new();
+    }
+    let mut points = points.to_vec();
+    if closed {
+        points.push(points[0]);
+    }
+    if pattern == Pattern::Solid {
+        return vec![points];
+    }
+    let mut distances = vec![0.];
+    for pair in points.windows(2) {
+        distances.push(distances.last().unwrap() + pair[0].distance(pair[1]));
+    }
+    let at = |d: f32| {
+        let i = distances
+            .partition_point(|v| *v < d)
+            .clamp(1, points.len() - 1);
+        points[i - 1].lerp(
+            points[i],
+            ((d - distances[i - 1]) / (distances[i] - distances[i - 1]).max(f32::EPSILON))
+                .clamp(0., 1.),
+        )
+    };
+    pattern
+        .spans(*distances.last().unwrap(), width)
+        .into_iter()
+        .map(|(lo, hi)| {
+            let mut path = vec![at(lo)];
+            let first = distances.partition_point(|d| *d <= lo);
+            let last = distances.partition_point(|d| *d < hi);
+            path.extend_from_slice(&points[first..last]);
+            path.push(at(hi));
+            path
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -175,22 +268,11 @@ pub fn parts(a: &Annotation) -> Vec<Part> {
             filled: false,
         });
     } else {
-        let unit = a.stroke_width.max(1.);
-        let dash = if a.arrow.pattern == Pattern::Dotted {
-            0.01
-        } else {
-            unit * 4.
-        };
-        let gap = unit * 3.;
-        let step = (dash + gap).max(shaft_length / 4096.);
-        let mut offset = 0.;
-        while offset <= shaft_length {
-            let p = shaft_start + dir * offset;
+        for (from, to) in a.arrow.pattern.spans(shaft_length, a.stroke_width) {
             parts.push(Part {
-                points: vec![p, shaft_start + dir * (offset + dash).min(shaft_length)],
+                points: vec![shaft_start + dir * from, shaft_start + dir * to],
                 filled: false,
             });
-            offset += step;
         }
     }
     if let Some(part) = endpoint(start, -dir, start_length, a.arrow.start) {
@@ -290,17 +372,8 @@ fn curved_parts(a: &Annotation) -> Vec<Part> {
     if a.arrow.pattern == Pattern::Solid {
         result.push(slice(from, to));
     } else {
-        let unit = a.stroke_width.max(1.);
-        let dash = if a.arrow.pattern == Pattern::Dotted {
-            0.01
-        } else {
-            unit * 4.
-        };
-        let step = (dash + unit * 3.).max(length / 4096.);
-        let mut d = from;
-        while d < to {
-            result.push(slice(d, (d + dash).min(to)));
-            d += step;
+        for (lo, hi) in a.arrow.pattern.spans(to - from, a.stroke_width) {
+            result.push(slice(from + lo, from + hi));
         }
     }
     let tangent = |v: Vec2, fallback: Vec2| {
@@ -338,6 +411,73 @@ mod tests {
         render,
     };
     use std::sync::Arc;
+
+    #[test]
+    fn expanded_patterns_keep_gaps_across_corners_and_bound_large_paths() {
+        let path = [Pos2::new(0., 0.), Pos2::new(12., 0.), Pos2::new(12., 100.)];
+        let dashed = patterned_paths(&path, false, Pattern::Dashed, 4.);
+        assert_eq!(dashed[0].len(), 3);
+        for (actual, expected) in dashed[0].iter().zip([path[0], path[1], Pos2::new(12., 4.)]) {
+            assert!(actual.distance(expected) < 0.001);
+        }
+        assert!(dashed[1][0].distance(Pos2::new(12., 16.)) < 0.001);
+        let spans = Pattern::DashDot.spans(100., 2.);
+        assert!((spans[0].1 - spans[0].0 - 8.).abs() < 0.01);
+        assert!(spans[1].1 - spans[1].0 < 0.02);
+        assert!((spans[2].1 - spans[2].0 - 8.).abs() < 0.01);
+        assert_eq!(Pattern::LongDash.spans(100., 2.)[0], (0., 16.));
+        for p in Pattern::ALL {
+            assert!(p.spans(2_000_000., 0.1).len() <= 4096);
+        }
+    }
+
+    #[test]
+    fn patterned_shapes_and_curves_survive_projects_and_undo() {
+        use crate::document::EditHistory;
+        let dir = tempfile::tempdir().unwrap();
+        for pattern in [Pattern::DashDot, Pattern::LongDash] {
+            for kind in crate::shapes::CHOICES
+                .iter()
+                .chain(crate::shapes::THREE_D.iter())
+                .map(|(kind, _)| *kind)
+                .chain([AnnotationKind::Arrow])
+            {
+                let mut a = object(kind, [20., 30.], [270., 170.]);
+                a.arrow.pattern = pattern;
+                a.fill = false;
+                if kind == AnnotationKind::Arrow {
+                    a.arrow.curve = Some([Point { x: 40., y: 170. }, Point { x: 240., y: 20. }]);
+                }
+                let mut d = Document {
+                    image: Arc::new(image::RgbaImage::new(300, 200)),
+                    annotations: vec![a.clone()],
+                    geometry: Default::default(),
+                };
+                let flat = render::flatten(&d).unwrap();
+                assert!(flat.pixels().any(|p| p[3] > 0), "{kind:?}");
+                let path = dir.path().join("pattern.myimage");
+                document::save_project(&d, &path).unwrap();
+                let restored = document::load_project(&path).unwrap();
+                assert_eq!(restored.edit_state(), d.edit_state());
+                assert_eq!(render::flatten(&restored).unwrap(), flat);
+                let mut h = EditHistory::new(d.edit_state());
+                let before = d.edit_state();
+                d.annotations[0].arrow.pattern = Pattern::Solid;
+                assert_ne!(render::flatten(&d).unwrap(), flat);
+                h.commit(before, &d);
+                assert!(h.undo(&mut d));
+                assert_eq!(render::flatten(&d).unwrap(), flat);
+                let mut bytes = std::fs::read(&path).unwrap();
+                bytes[8..12].copy_from_slice(&20u32.to_le_bytes());
+                std::fs::write(&path, bytes).unwrap();
+                assert!(
+                    document::load_project(&path)
+                        .unwrap_err()
+                        .contains("version 21")
+                );
+            }
+        }
+    }
 
     #[test]
     fn cubic_curve_round_trips_and_export_follows_bend_and_tangent() {
@@ -447,6 +587,8 @@ mod tests {
         bad.arrow.end_size = 3.;
         bad.kind = AnnotationKind::Rectangle;
         bad.arrow.pattern = Pattern::Dotted;
+        assert!(document::validate_annotation(&bad).is_ok());
+        bad.arrow.start = Endpoint::Circle;
         assert!(document::validate_annotation(&bad).is_err());
     }
 

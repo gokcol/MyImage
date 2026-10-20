@@ -105,6 +105,7 @@ impl EditorState {
         self.tool = Tool::Fill;
         self.fill_tool.error = None;
         self.layers_open = false;
+        self.effects_open = false;
         self.presets_open = false;
     }
     pub(super) fn sync_fill_selection(&mut self, annotation: &Annotation) {

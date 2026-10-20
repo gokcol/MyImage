@@ -26,6 +26,16 @@ jobs:
         run: rustup toolchain install 1.93.1 --profile minimal --target x86_64-pc-windows-msvc
       - name: Build native Windows executable
         run: cargo build --locked --release --target x86_64-pc-windows-msvc
+      # A production signing step must run here once the maintainer's provider
+      # is configured. Never substitute a self-signed test certificate.
+      - name: Require a trusted production signature before publishing
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature target/x86_64-pc-windows-msvc/release/myimage.exe
+          if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate) {
+            throw 'Windows release signing is not configured or did not produce a valid timestamped signature. No Windows release download will be published.'
+          }
       - name: Package untested build
         id: package
         shell: pwsh
@@ -46,7 +56,14 @@ jobs:
           MyImage $version — Windows x64 — UNTESTED
           This package was compiled on GitHub Actions. It has NOT been tested interactively on Windows.
           Screen capture, shortcuts, clipboard, scaling and installation require real-device validation.
-          The executable is unsigned; Windows may display a publisher/SmartScreen warning.
+          $(
+            $signature = Get-AuthenticodeSignature dist/MyImage/MyImage.exe
+            if ($signature.Status -eq 'Valid') {
+              "Windows Authenticode signature verified. Signing does not replace interactive testing or guarantee SmartScreen reputation."
+            } else {
+              "Unsigned QA build only. Not a signed public release."
+            }
+          )
           Extract the complete folder and run MyImage.exe. No administrator rights or service installation are required.
           To update, save your work and quit MyImage from its tray menu before replacing the extracted folder.
           To uninstall, quit and delete only this application folder. Pictures/MyImage, projects, settings and recovery copies are preserved.

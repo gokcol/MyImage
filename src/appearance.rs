@@ -216,6 +216,9 @@ fn slider_track<N: egui::emath::Numeric>(
 
 #[derive(Clone, Copy)]
 pub enum Icon {
+    Search,
+    Effects,
+    Fit,
     Close,
     Check,
     Resize,
@@ -252,6 +255,38 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
     let s = Stroke::new(1.8, color);
     let r = Rect::from_center_size(center, Vec2::splat(size));
     match kind {
+        Icon::Search => {
+            p.circle_stroke(center - Vec2::splat(size * 0.12), size * 0.28, s);
+            p.line_segment([center + Vec2::splat(size * 0.1), r.right_bottom()], s);
+        }
+        Icon::Effects => {
+            p.line_segment([r.left_bottom(), r.right_top()], s);
+            for (at, radius) in [
+                (r.left_top() + Vec2::splat(size * 0.12), size * 0.12),
+                (r.right_bottom() - Vec2::splat(size * 0.08), size * 0.1),
+            ] {
+                p.line_segment([at - Vec2::new(radius, 0.), at + Vec2::new(radius, 0.)], s);
+                p.line_segment([at - Vec2::new(0., radius), at + Vec2::new(0., radius)], s);
+            }
+        }
+        Icon::Fit => {
+            let d = size * 0.24;
+            for (point, delta) in [
+                (r.left_top(), Vec2::splat(d)),
+                (r.right_top(), Vec2::new(-d, d)),
+                (r.left_bottom(), Vec2::new(d, -d)),
+                (r.right_bottom(), Vec2::splat(-d)),
+            ] {
+                p.line_segment([point + Vec2::new(delta.x, 0.), point], s);
+                p.line_segment([point, point + Vec2::new(0., delta.y)], s);
+            }
+            p.rect_stroke(
+                r.shrink(size * 0.25),
+                1,
+                Stroke::new(1., color),
+                egui::StrokeKind::Inside,
+            );
+        }
         Icon::Close => {
             p.line_segment(
                 [
@@ -795,6 +830,16 @@ pub fn start_chip(
 
 pub fn primary(label: &str) -> egui::Button<'_> {
     egui::Button::new(egui::RichText::new(label).color(Color32::WHITE).strong()).fill(ACCENT)
+}
+
+/// A compact toolbar action with an accessible name and a hover label.
+pub fn icon_button(ui: &mut egui::Ui, label: &str, kind: Icon) -> egui::Response {
+    let response = ui.add_sized([24., 22.], egui::Button::new(""));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    icon(ui.painter(), response.rect.center(), kind, INK, 14.);
+    response.on_hover_text(label)
 }
 
 pub fn action_button(

@@ -6,6 +6,7 @@ pub(super) struct RegionDrag {
     start: Option<Pos2>,
     end: Option<Pos2>,
     active: bool,
+    completed: bool,
     adjustment: Option<(Pos2, Rect, [bool; 4])>,
 }
 impl RegionDrag {
@@ -42,6 +43,7 @@ impl RegionDrag {
             if let Some(rect) = snap {
                 self.start = Some(rect.min);
                 self.end = Some(rect.max);
+                self.completed = true;
             }
         }
     }
@@ -102,6 +104,7 @@ impl RegionDrag {
                         self.end = None;
                     }
                     self.active = true;
+                    self.completed = false;
                 }
                 egui::Event::PointerMoved(pos) if self.active => self.move_to(pos, bounds),
                 egui::Event::PointerButton {
@@ -113,6 +116,7 @@ impl RegionDrag {
                     self.move_to(pos, bounds);
                     self.active = false;
                     self.adjustment = None;
+                    self.completed = self.bounds().is_some();
                 }
                 egui::Event::PointerGone => self.active = false,
                 _ => {}
@@ -198,6 +202,96 @@ impl RegionDrag {
     }
 }
 
+#[derive(Default)]
+pub(super) struct MultiRegions {
+    rects: Vec<Rect>,
+    selected: Option<usize>,
+}
+impl MultiRegions {
+    fn promote(&mut self, drag: &RegionDrag) {
+        if let Some(rect) = drag.bounds() {
+            self.rects.push(rect);
+            self.selected = Some(self.rects.len() - 1);
+        }
+    }
+    fn remove_selected(&mut self, drag: &mut RegionDrag) {
+        if let Some(index) = self.selected.take() {
+            self.rects.remove(index);
+        }
+        *drag = RegionDrag::default();
+    }
+    fn preview(&self, drag: &RegionDrag) -> Vec<Rect> {
+        let mut rects: Vec<_> = self
+            .rects
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                if Some(i) == self.selected {
+                    drag.bounds().unwrap_or(*r)
+                } else {
+                    *r
+                }
+            })
+            .collect();
+        if self.selected.is_none()
+            && let Some(rect) = drag.bounds()
+        {
+            rects.push(rect);
+        }
+        rects
+    }
+    fn update(
+        &mut self,
+        drag: &mut RegionDrag,
+        events: &[egui::Event],
+        bounds: Rect,
+        controls: Rect,
+        windows: &[(u32, Rect)],
+    ) {
+        for event in events {
+            if let egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers,
+                ..
+            } = event
+                && bounds.contains(*pos)
+                && !controls.contains(*pos)
+            {
+                let hit = (!modifiers.command)
+                    .then(|| self.rects.iter().rposition(|r| r.expand(7.).contains(*pos)))
+                    .flatten();
+                if hit.is_none() && self.rects.len() >= 32 {
+                    continue;
+                }
+                self.selected = hit;
+                *drag = RegionDrag::default();
+                if let Some(index) = hit {
+                    drag.start = Some(self.rects[index].min);
+                    drag.end = Some(self.rects[index].max);
+                }
+            }
+            drag.completed = false;
+            drag.update_smart_region(std::slice::from_ref(event), bounds, controls, windows);
+            if drag.completed
+                && let Some(rect) = drag.bounds()
+            {
+                if let Some(index) = self.selected {
+                    self.rects[index] = rect;
+                } else if self.rects.len() < 32 {
+                    self.rects.push(rect);
+                    self.selected = Some(self.rects.len() - 1);
+                }
+            }
+        }
+    }
+}
+
+fn capture_on_completion(enabled: bool, mode: CaptureMode, completed: bool) -> bool {
+    enabled && completed && matches!(mode, CaptureMode::Region | CaptureMode::Window)
+}
+
 pub(super) struct CapturedFrame {
     pub image: image::RgbaImage,
     pub windows: Vec<capture::WindowInfo>,
@@ -220,27 +314,9 @@ pub(super) struct ScrollSession {
 }
 
 impl MyImageApp {
-    pub(super) fn save_captured_image(
-        &mut self,
-        ctx: &egui::Context,
-        image: image::RgbaImage,
-        at: DateTime<Local>,
-    ) {
-        self.busy = true;
-        self.view = View::Editor;
-        self.status = "Saving capture…".into();
-        let folder = self.settings.output_dir.clone();
-        let tx = self.work_tx.clone();
-        let ctx = ctx.clone();
-        std::thread::spawn(move || {
-            let path = storage::save_capture(&image, &folder, at);
-            let _ = tx.send(WorkEvent::Saved(Arc::new(image), path, true));
-            ctx.request_repaint();
-        });
-    }
-
     pub(super) fn selection_ui(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let menu_was_open = egui::Popup::is_any_open(ctx);
+        if !menu_was_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.cancel_selection(ctx);
             return;
         }
@@ -289,8 +365,12 @@ impl MyImageApp {
         {
             selection.pointer_ready = true;
         }
-        let mut mode = self.settings.capture_mode;
-        if ctx.input(|i| i.key_pressed(egui::Key::Space)) && mode != CaptureMode::Scrolling {
+        let mut mode = selection.mode;
+        let old_mode = mode;
+        if !menu_was_open
+            && ctx.input(|i| i.key_pressed(egui::Key::Space))
+            && matches!(mode, CaptureMode::Region | CaptureMode::Window)
+        {
             mode = if mode == CaptureMode::Window {
                 CaptureMode::Region
             } else {
@@ -299,9 +379,11 @@ impl MyImageApp {
             selection.drag = RegionDrag::default();
             selection.window_id = None;
         }
-        let old_mode = self.settings.capture_mode;
+        selection.drag.completed = false;
+        let mut destination_changed = false;
         let mut accepted = None;
         let mut cancel = false;
+        let mut accepted_regions = Vec::new();
         let mut window = None;
         // Place the controller before the canvas so its hit region takes priority.
         let area =
@@ -310,7 +392,14 @@ impl MyImageApp {
             area.fixed_pos(controls_position(
                 ctx.content_rect(),
                 rect,
-                Vec2::new(600., 62.),
+                Vec2::new(
+                    if mode == CaptureMode::MultiRegion {
+                        930.
+                    } else {
+                        770.
+                    },
+                    62.,
+                ),
             ))
         } else {
             area.anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0., -24.))
@@ -326,29 +415,37 @@ impl MyImageApp {
                         ui.horizontal(|ui| {
                             ui.label(egui::RichText::new("Capture Now").strong().color(Color32::WHITE));
                             egui::ComboBox::from_id_salt("capture_mode_live").selected_text(mode.label()).width(110.).show_ui(ui, |ui| {
-                                for choice in [CaptureMode::Region,CaptureMode::Window,CaptureMode::Scrolling] {
+                                for choice in [CaptureMode::Region,CaptureMode::MultiRegion,CaptureMode::Window,CaptureMode::Scrolling] {
                                     ui.selectable_value(&mut mode,choice,choice.label());
                                 }
                             }).response.on_hover_text("Space switches Region / Window. Click a window or drag a region.");
+                            destination_changed = crate::capture_panel::destination_picker(ui, &mut self.settings.capture_destination);
                             ui.checkbox(
                                 &mut selection.magnifier,
                                 egui::RichText::new("Magnifier").color(Color32::WHITE),
                             );
                             if ui.button("Reset").clicked() {
                                 selection.drag = RegionDrag::default();
+                                selection.multi = MultiRegions::default();
                                 selection.window_id = None;
                             }
                             if ui.button("Cancel").clicked() {
                                 cancel = true;
                             }
-                            let ready = selection.drag.bounds().is_some();
+                            if mode == CaptureMode::MultiRegion {
+                                ui.label(egui::RichText::new(format!("{}/32", selection.multi.rects.len())).color(Color32::WHITE));
+                                if ui.add_enabled(selection.multi.selected.is_some(), egui::Button::new("Remove")).on_hover_text("Remove selected region · Delete").clicked() {
+                                    selection.multi.remove_selected(&mut selection.drag);
+                                }
+                            }
+                            let ready = selection.drag.bounds().is_some() || (mode == CaptureMode::MultiRegion && !selection.multi.rects.is_empty());
                             if ui
                                 .add_enabled(
                                     ready,
                                     appearance::primary(if mode == CaptureMode::Scrolling {
                                         "Start scrolling"
                                     } else {
-                                        "Capture"
+                                        self.settings.capture_destination.capture_label()
                                     }),
                                 )
                                 .clicked()
@@ -367,22 +464,30 @@ impl MyImageApp {
             .rect;
         if mode != old_mode {
             selection.drag = RegionDrag::default();
+            selection.multi = MultiRegions::default();
+            selection.mode = mode;
             selection.window_id = None;
             selection.hover_cycle = 0;
             self.settings.capture_mode = mode;
         }
-        let confirm = accepted.take().is_some() || ctx.input(|i| i.key_pressed(egui::Key::Enter));
+        let menu_interaction = menu_was_open || egui::Popup::is_any_open(ctx);
+        let mut confirm = accepted.take().is_some()
+            || (!menu_interaction && ctx.input(|i| i.key_pressed(egui::Key::Enter)));
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
                 let bounds = ui.max_rect();
                 let response = ui.allocate_rect(bounds, egui::Sense::click_and_drag());
-                let pointer = ctx
-                    .input(|i| i.pointer.hover_pos())
-                    .filter(|p| selection.pointer_ready && bounds.contains(*p));
+                let pointer = ctx.input(|i| i.pointer.hover_pos()).filter(|p| {
+                    !menu_interaction && selection.pointer_ready && bounds.contains(*p)
+                });
                 if response.hovered() && mode != CaptureMode::Window {
                     ctx.set_cursor_icon(
-                        pointer.map_or(egui::CursorIcon::Crosshair, |p| selection.drag.cursor(p)),
+                        pointer.map_or(egui::CursorIcon::Crosshair, |p| {
+                            if mode == CaptureMode::MultiRegion && let Some(rect) = selection.multi.rects.iter().rev().find(|r| r.expand(7.).contains(p)) {
+                                RegionDrag { start: Some(rect.min), end: Some(rect.max), ..Default::default() }.cursor(p)
+                            } else { selection.drag.cursor(p) }
+                        }),
                     );
                 }
                 let window_rect = |w: &capture::WindowInfo| {
@@ -426,16 +531,35 @@ impl MyImageApp {
                 if mode == CaptureMode::Window && response.hovered() {
                     ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
-                if mode == CaptureMode::Window {
-                    if response.clicked()
+                if !placing_overlay && !menu_interaction && selection.pointer_ready && mode == CaptureMode::Region
+                    && ctx.input(|i| i.events.iter().any(|e| matches!(e,
+                        egui::Event::PointerButton {pos, button: egui::PointerButton::Primary, pressed: true, modifiers, ..}
+                            if modifiers.command && bounds.contains(*pos) && !bar.contains(*pos))))
+                {
+                    selection.multi.promote(&selection.drag);
+                    mode = CaptureMode::MultiRegion;
+                    selection.mode = mode;
+                }
+                if mode == CaptureMode::MultiRegion && !menu_interaction && !placing_overlay {
+                    if ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+                        selection.multi.remove_selected(&mut selection.drag);
+                    }
+                    if selection.pointer_ready {
+                        let windows: Vec<_> = selection.windows.iter().map(|w| (w.id, window_rect(w))).collect();
+                        selection.multi.update(&mut selection.drag, &ctx.input(|i| i.events.clone()), bounds, bar, &windows);
+                    }
+                } else if mode == CaptureMode::Window {
+                    if !placing_overlay && selection.pointer_ready && !menu_interaction
+                        && response.clicked()
                         && let Some(w) = hovered_window
                     {
                         let rect = window_rect(w).intersect(bounds);
                         selection.drag.start = Some(rect.min);
                         selection.drag.end = Some(rect.max);
                         selection.window_id = Some(w.id);
+                        selection.drag.completed = true;
                     }
-                } else if mode == CaptureMode::Scrolling {
+                } else if !placing_overlay && selection.pointer_ready && !menu_interaction && mode == CaptureMode::Scrolling {
                     let windows: Vec<_> = selection
                         .windows
                         .iter()
@@ -448,7 +572,7 @@ impl MyImageApp {
                         &windows,
                         &mut selection.window_id,
                     );
-                } else {
+                } else if !placing_overlay && selection.pointer_ready && !menu_interaction && mode == CaptureMode::Region {
                     let windows: Vec<_> = hovered_window
                         .into_iter()
                         .chain(
@@ -466,6 +590,9 @@ impl MyImageApp {
                         &windows,
                     );
                 }
+                confirm |= !placing_overlay
+                    && !menu_interaction
+                    && capture_on_completion(self.settings.capture_on_release, mode, selection.drag.completed);
                 let chosen = selection.drag.bounds().map(|r| r.intersect(bounds));
                 let selected = chosen.or_else(|| {
                     (!selection.drag.active)
@@ -480,7 +607,25 @@ impl MyImageApp {
                     Color32::WHITE,
                 );
                 let shade = Color32::from_black_alpha(145);
-                if let Some(rect) = selected {
+                if mode == CaptureMode::MultiRegion {
+                    painter.rect_filled(bounds, 0, shade);
+                    for (index, rect) in selection.multi.preview(&selection.drag).into_iter().enumerate() {
+                        let uv = Rect::from_min_max(
+                            ((rect.min - bounds.min) / bounds.size()).to_pos2(),
+                            ((rect.max - bounds.min) / bounds.size()).to_pos2());
+                        painter.image(selection.texture.id(), rect, uv, Color32::WHITE);
+                        painter.rect_stroke(rect, 0, Stroke::new(2., appearance::ACCENT), egui::StrokeKind::Inside);
+                        let badge = Rect::from_min_size(rect.min + Vec2::splat(4.), Vec2::new(25.,22.));
+                        painter.rect_filled(badge, 4, appearance::NAVY);
+                        painter.text(badge.center(), egui::Align2::CENTER_CENTER, (index+1).to_string(), egui::FontId::proportional(12.), Color32::WHITE);
+                    }
+                    if let Some(rect) = chosen {
+                        for p in [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom(), rect.center_top(), rect.center_bottom(), rect.left_center(), rect.right_center()] {
+                            painter.circle_filled(p, 4., Color32::WHITE);
+                            painter.circle_stroke(p, 4., Stroke::new(1., appearance::ACCENT));
+                        }
+                    }
+                } else if let Some(rect) = selected {
                     for outside in [
                         Rect::from_min_max(bounds.min, Pos2::new(bounds.right(), rect.top())),
                         Rect::from_min_max(Pos2::new(bounds.left(), rect.bottom()), bounds.max),
@@ -577,12 +722,20 @@ impl MyImageApp {
                         .magnifier_preview
                         .paint(painter, p, bounds, bar, &selection.image);
                 }
-                let hint = if mode == CaptureMode::Window {
+                let hint = if mode == CaptureMode::MultiRegion {
+                    "Drag to add regions · Drag a region to adjust · Delete removes · Enter captures"
+                } else if self.settings.capture_on_release && mode == CaptureMode::Window {
+                    "Click a window to capture · Tab cycles overlapping windows · Esc cancels"
+                } else if self.settings.capture_on_release && mode == CaptureMode::Region {
+                    if cfg!(target_os = "macos") { "Drag and release to capture · ⌘-drag adds regions · Esc cancels" } else { "Drag and release to capture · Ctrl-drag adds regions · Esc cancels" }
+                } else if mode == CaptureMode::Window {
                     "Click a window · Tab cycles overlapping windows · Enter captures"
                 } else if mode == CaptureMode::Scrolling {
                     "Click a window or drag an area · Adjust edges · Start scrolling"
+                } else if cfg!(target_os = "macos") {
+                    "Click a window or drag an area · ⌘-drag adds regions · Enter captures"
                 } else {
-                    "Click a window or drag an area · Space switches mode · Enter captures"
+                    "Click a window or drag an area · Ctrl-drag adds regions · Enter captures"
                 };
                 let hintrect = Rect::from_center_size(
                     Pos2::new(bounds.center().x, 36.),
@@ -596,8 +749,15 @@ impl MyImageApp {
                     egui::FontId::proportional(13.),
                     Color32::WHITE,
                 );
-                if confirm {
-                    if matches!(mode, CaptureMode::Window | CaptureMode::Scrolling) {
+                if confirm && !placing_overlay && !selection.drag.active {
+                    if mode == CaptureMode::MultiRegion {
+                        accepted_regions = selection.multi.rects.iter().filter_map(|rect|
+                            selection::selection_to_pixels(
+                                [rect.left()-bounds.left(), rect.top()-bounds.top()],
+                                [rect.right()-bounds.left(), rect.bottom()-bounds.top()],
+                                [bounds.width(), bounds.height()],
+                                [selection.image.width(), selection.image.height()])).collect();
+                    } else if matches!(mode, CaptureMode::Window | CaptureMode::Scrolling) {
                         if let Some(w) = selection
                             .windows
                             .iter()
@@ -627,10 +787,19 @@ impl MyImageApp {
                     }
                 }
             });
+        if mode != old_mode || destination_changed {
+            self.persist_settings();
+        }
         if cancel {
             self.cancel_selection(ctx);
         } else if let Some((id, crop)) = window {
             self.capture_selected_window(ctx, id, crop);
+        } else if !accepted_regions.is_empty() {
+            if let Some(selection) = self.selection.take() {
+                self.queue_capture_output(ctx, selection.captured_at, move || {
+                    selection::crop_regions(&selection.image, &accepted_regions)
+                });
+            }
         } else if let Some(rect) = accepted {
             self.accept_selection(ctx, rect);
         }
@@ -880,7 +1049,6 @@ impl MyImageApp {
             return;
         };
         self.generation += 1;
-        self.restore_window(ctx, false);
         if let Some(stitcher) = session.stitcher {
             self.save_captured_image(ctx, stitcher.image, session.captured_at);
         }
@@ -954,7 +1122,7 @@ impl MyImageApp {
                         next=ui.add_enabled(!self.busy,appearance::primary("Capture next section")).clicked();
                     }
                     finish = ui
-                        .add_enabled(!session.finish_requested, appearance::primary("Finish & edit"))
+                        .add_enabled(!session.finish_requested, appearance::primary(self.settings.capture_destination.finish_label()))
                         .clicked();
                     cancel = ui
                         .add(egui::Button::new("Cancel"))
@@ -1045,6 +1213,141 @@ fn window_selection(area: Rect, window: Rect) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fast_capture_only_finishes_completed_single_selections_when_enabled() {
+        for mode in CaptureMode::ALL {
+            assert!(!capture_on_completion(false, mode, true));
+            assert!(!capture_on_completion(true, mode, false));
+            assert_eq!(
+                capture_on_completion(true, mode, true),
+                matches!(mode, CaptureMode::Region | CaptureMode::Window)
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_regions_add_adjust_remove_and_keep_preview_order() {
+        let bounds = Rect::from_min_size(Pos2::ZERO, Vec2::splat(800.));
+        let mut multi = MultiRegions::default();
+        let mut drag = RegionDrag::default();
+        let gesture =
+            |multi: &mut MultiRegions, drag: &mut RegionDrag, a: Pos2, b: Pos2, command: bool| {
+                let button = |pos, pressed| egui::Event::PointerButton {
+                    pos,
+                    pressed,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers {
+                        command,
+                        ..Default::default()
+                    },
+                };
+                multi.update(
+                    drag,
+                    &[
+                        button(a, true),
+                        egui::Event::PointerMoved(b),
+                        button(b, false),
+                    ],
+                    bounds,
+                    Rect::NOTHING,
+                    &[],
+                );
+            };
+        gesture(
+            &mut multi,
+            &mut drag,
+            egui::pos2(50., 50.),
+            egui::pos2(150., 150.),
+            false,
+        );
+        gesture(
+            &mut multi,
+            &mut drag,
+            egui::pos2(400., 400.),
+            egui::pos2(300., 300.),
+            false,
+        );
+        assert_eq!(multi.rects.len(), 2);
+        assert_eq!(multi.rects[1].size(), Vec2::splat(100.));
+        // Grabbing the first region selects it without rearranging or adding.
+        gesture(
+            &mut multi,
+            &mut drag,
+            egui::pos2(100., 100.),
+            egui::pos2(200., 100.),
+            false,
+        );
+        assert_eq!(multi.selected, Some(0));
+        assert_eq!(multi.rects[0].min, egui::pos2(150., 50.));
+        assert_eq!(multi.preview(&drag), multi.rects);
+        // Resize a corner; other regions remain untouched.
+        gesture(
+            &mut multi,
+            &mut drag,
+            egui::pos2(250., 150.),
+            egui::pos2(280., 180.),
+            false,
+        );
+        assert_eq!(multi.rects[0].size(), Vec2::splat(130.));
+        assert_eq!(multi.rects[1].min, egui::pos2(300., 300.));
+        // Modifier starts an overlapping region rather than moving the first.
+        gesture(
+            &mut multi,
+            &mut drag,
+            egui::pos2(180., 80.),
+            egui::pos2(350., 250.),
+            true,
+        );
+        assert_eq!(multi.rects.len(), 3);
+        multi.remove_selected(&mut drag);
+        assert_eq!(multi.rects.len(), 2);
+        assert!(drag.bounds().is_none());
+        assert_eq!(multi.preview(&drag), multi.rects);
+    }
+
+    #[test]
+    fn multiple_regions_ignore_controls_and_bound_region_count() {
+        let bounds = Rect::from_min_size(Pos2::ZERO, Vec2::splat(800.));
+        let controls = Rect::from_min_size(Pos2::ZERO, Vec2::splat(40.));
+        let mut multi = MultiRegions::default();
+        let mut drag = RegionDrag::default();
+        let events = |a, b| {
+            [
+                egui::Event::PointerButton {
+                    pos: a,
+                    pressed: true,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+                egui::Event::PointerButton {
+                    pos: b,
+                    pressed: false,
+                    button: egui::PointerButton::Primary,
+                    modifiers: egui::Modifiers::COMMAND,
+                },
+            ]
+        };
+        multi.update(
+            &mut drag,
+            &events(egui::pos2(10., 10.), egui::pos2(200., 200.)),
+            bounds,
+            controls,
+            &[],
+        );
+        assert!(multi.rects.is_empty());
+        for _ in 0..40 {
+            multi.update(
+                &mut drag,
+                &events(egui::pos2(100., 100.), egui::pos2(200., 200.)),
+                bounds,
+                controls,
+                &[],
+            );
+        }
+        assert_eq!(multi.rects.len(), 32);
+        assert!(!drag.active);
+    }
+
     #[test]
     fn smart_region_clicks_front_window_but_drags_and_handles_remain_free() {
         let bounds = Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 700.));

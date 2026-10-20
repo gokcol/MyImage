@@ -2,13 +2,24 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 1.11.1](https://github.com/gokcol/MyImage/releases/tag/v1.11.1) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
+[Download MyImage 1.2](https://github.com/gokcol/MyImage/releases/tag/v1.2) — notarized macOS Apple Silicon and **Windows x64 (UNTESTED)**.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
 Save **`.myimage` projects** to keep the original image and annotations editable together in one portable file. **Export…** creates flattened PNG, JPEG, WebP, TIFF, or PDF copies with visible annotations included. Image edits are stored as reversible settings in the project.
 
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
+
+## Microsoft Store and signing
+
+The macOS release is signed with Developer ID and notarized. The Windows GitHub
+portable build is **UNTESTED and unsigned**. Store packaging is a separate MSIX
+pipeline modeled on MyPDF, with identity validation, installation checks and
+calico assets. Microsoft signs Store packages after certification; an unsigned
+submission artifact is not a signed end-user installer. See the
+[Store preparation guide](packaging/windows/msix/README.md) and
+[privacy policy](PRIVACY.md). MyImage 1.2 uses internal MSIX version 1.12.0.0 to
+preserve upgrade ordering after earlier public 1.11.x releases.
 
 ## Run
 
@@ -63,15 +74,17 @@ Failed builds/signing/packaging do not trigger cleanup. A failed backup stops cl
 
 ## Capture and view
 
-Capture home has visual **Region**, **Window**, **Full screen**, and **Scrolling** cards, a display selector, **Off / 3s / 5s / 10s** timer chips, an **Include pointer** toggle, and a prominent **Capture Now** panel. Rounded and elliptical region choices are no longer shown. Settings persist between launches.
+Capture home has visual **Region**, **Multi-region**, **Window**, **Full screen**, and **Scrolling** cards, a display selector, **Off / 3s / 5s / 10s** timer chips, an **Include pointer** toggle, and a prominent **Capture Now** panel. Rounded and elliptical region choices are no longer shown. Settings persist between launches.
 
-The built-in **Capture Now** is also available from the menu bar/system tray, **Ctrl + Shift + .**, and on macOS **Command + Shift + .**. The menu shows the current capture mode, display and delay. **Keep ready in background** hides the app while these entry points remain available. The header retains **Open…** and **Open project…**; Editor provides **Save as…**, **Export…**, and **Save project**.
+The built-in **Capture Now** is also available from the menu bar/system tray, **Ctrl + Shift + .**, and on macOS **Command + Shift + .**. Click the menu-bar/tray icon to open a compact native **Capture Now** panel with mode tiles, display, Editor/Clipboard destination, pointer and capture-on-release switches, delay chips, and a round Capture button. Escape or clicking outside dismisses the panel. **Open Editor**, **Library**, and **More settings** provide direct navigation. Right-click retains the native menu; keyboard capture shortcuts still start capture directly. **Keep ready in background** hides the app while these entry points remain available. The header retains **Open…** and **Open project…**; Editor provides **Save as…**, **Export…**, and **Save project**.
+
+Choose **After capture → Editor / Clipboard** in Capture settings, or change **To: Editor / Clipboard** in the Capture Now controls. **Clipboard** copies full-resolution pixels for pasting into another app, saves a PNG in Library, and closes the capture overlay without opening or replacing the Editor. Your existing document, unsaved edits and undo history stay intact. This also works for full-screen, window and scrolling captures; scrolling finishes with **Finish & copy**. The destination is remembered for later captures and hotkeys. Completion appears in MyImage's status bar and tray tooltip; clipboard failure retains the image and offers **Retry copy** or **Open capture in Editor**. The Editor destination asks about unsaved work before replacing it with the completed capture.
 
 1. Select a capture type and adjust its options. Capture Now hides MyImage before taking the screenshot.
 2. **Region:** click a highlighted window or drag a rectangle on the frozen screen, drag inside to move it or drag an edge/corner to resize it, then click **Capture** or press Enter. The magnifier shows original pixels at a consistent **4×** zoom, with pixel coordinates, while placing or adjusting the boundary. It waits for a fresh pointer event after the overlay opens and pads screen edges instead of stretching them. **Reset** lets you redraw and **Esc** cancels.
 3. **Window:** point to a window to highlight it, click to select, then Capture/Enter. Space switches Region/Window inside the overlay; Tab cycles overlapping window candidates. Confirmation controls move near the completed selection. The native backend captures that window; closed/unavailable windows report an error. **Full screen** saves the chosen display directly after the selected delay.
 4. **Scrolling:** click a window to select it, or drag over just its scrolling content. Move/resize the boundary before **Start scrolling**. Scroll down yourself at a steady pace; MyImage collects overlapping sections automatically. A small controller provides a preview, **Pause / Resume**, **Finish & edit**, and **Cancel**. Whole-window capture detects the moving content after its first reliable join; an area selection keeps your exact chosen bounds. Leave some content overlapping rather than jumping to a distant page. If alignment fails, scroll back a little and Resume; accepted sections are retained. Keep the window at the same size. Vertical scrolling is supported; the app does not scroll the target for you, and horizontal scrolling is not implemented.
-5. Captures save as PNG in the dated library and open in Editor. Include pointer uses the native cursor with its hotspot; turn it off for clean screenshots. Keep it off when the cursor could obscure scrolling content. Scrolling captures are bounded to 32,768 pixels per side and 100 megapixels.
+5. Captures save as PNG in the dated library and go to the chosen destination: Editor or Clipboard. Include pointer uses the native cursor with its hotspot; turn it off for clean screenshots. Keep it off when the cursor could obscure scrolling content. Scrolling captures are bounded to 32,768 pixels per side and 100 megapixels.
 
 On macOS, MyImage finds the typing key that produces `.` without modifiers in the layout active at startup and registers both shortcut combinations. Windows uses Control + Shift with `VK_OEM_PERIOD`. Shortcuts trigger on key release to avoid repeat captures.
 
@@ -87,11 +100,15 @@ MyImage/YYYY/MM/DD/HHMMSS-nanoseconds.png
 
 Dates use the computer's local time. A completed PNG is published without overwriting an existing capture. If saving fails, the image stays in memory and **Retry saving capture** is available in View only; choose a writable folder in Capture first.
 
+**Capture immediately after selection** in Capture options is off by default. Turn it on to capture a region on mouse release or a window on click. With it off, adjust the boundary and choose Capture as before.
+
+**Multi-region** combines up to 32 regions into one PNG, preserving their screen positions with transparent gaps. Drag in an empty area to add a region; drag a region or its handles to move/resize it. Hold **Command** on Mac or **Ctrl** on Windows while starting a drag to add an overlapping region, or enter Multi-region directly from Region mode. **Remove** or **Delete/Backspace** removes the selected region; **Reset** clears all. Finish with **Capture** or **Enter** (even when immediate capture is enabled). Editor and Clipboard destinations both support the transparent result.
+
 ## Browse the library
 
 **Ctrl-click** (also **Command-click** on Mac) toggles multiple thumbnails in Library or Recents. **Shift-click** extends a range; **Ctrl/Command+A** selects the visible collection while a thumbnail has focus. Selection borders and counts are separate from the small dot marking the open image in Recents. **Delete/Backspace** or **Move to Trash…** opens a confirmation listing only those selected files. The OS Trash/Recycle Bin provides recovery; deleting an open file first prompts for unsaved changes. Search fields retain ordinary text-editing shortcuts.
 
-Right-click a thumbnail for **Open in Editor**, **Rename**, **Duplicate**, **Favorites**, **File info**, and **Reveal in Finder/Explorer**. A selected batch stays selected when right-clicked. Duplicating a `.myimage` file retains its original and editable objects; renaming preserves its extension and never replaces another file. Recents also offers **Reveal in Library** for files inside the library folder and **Remove from Recents**, which hides entries without deleting files. Reopening a hidden file adds it back.
+Right-click a thumbnail for **Open in Editor**, **Copy**, **Rename**, **Duplicate**, **Favorites**, **File info**, and **Reveal in Finder/Explorer**. **Copy** puts one saved image on the system clipboard at full resolution, including transparency and the saved annotations/effects of `.myimage` projects. It runs in the background, confirms **Copied to clipboard**, and keeps the open document and Recents order unchanged. A selected batch stays selected when right-clicked; Copy is available for a single file. Duplicating a `.myimage` file retains its original and editable objects; renaming preserves its extension and never replaces another file. Recents also offers **Reveal in Library** for files inside the library folder and **Remove from Recents**, which hides entries without deleting files. Reopening a hidden file adds it back.
 
 1. Choose **Library** in the top toolbar. It browses the same folder used for new captures, including images and `.myimage` projects in its subfolders.
 2. Browse **All files**, **Images**, **Projects** or **Favorites**, then select a year, month or day. Collection counts, clickable breadcrumbs and Back/Forward make it easy to move between dates. Search narrows filenames within that collection and date.
@@ -120,7 +137,7 @@ Home, Editor, Library, Capture and Create share one compact top toolbar; the ann
 5. Choose **Save project** (Command/Ctrl+S). The first save opens a native file dialog in the storage folder’s `Projects` subfolder (normally `~/Pictures/MyImage/Projects`). Existing projects keep their location when saved; Save as starts beside that project. Use **App menu → Storage folder…** or **Library → Storage** to see the current paths, open them in Finder/Explorer, or change storage for future captures and new projects. After choosing a new folder, keep **Move existing captures and projects** checked and choose **Move and switch** to migrate the current library. Uncheck it and choose **Use folder** for future files only. Migration preserves date subfolders, favorites and Recents, gives conflicting files unique names, and updates an open project’s save location without discarding its unsaved edits. Only supported images and `.myimage` projects inside the current library move; external Recents, linked folders and other file types stay in place. **Save as…** (Command/Ctrl+Shift+S) makes another editable project. Reopen it with **Open…** to continue editing.
 6. Choose **Export…** for a flattened image or PDF to share. Export does not replace project saving or clear the unsaved-edit indicator. Unsaved edits prompt before opening another file, capturing again, or quitting. Closing to the tray keeps the current project in memory.
 
-Projects use a versioned `.myimage` container with image-edit settings, annotation JSON, and an embedded lossless original PNG. New saves use version 18; version 1–17 projects still open, with version 1 acquiring identity image settings. Older MyImage builds cannot open version 18 projects. Coordinates and sizes are stored in original-image pixels. Save operations publish a complete file atomically. Projects travel without sidecar images; undo history is session-only. Text supports Sans serif and Monospace from the bundled egui font set, italic, underline, color and paragraph alignment. Formatting applies to the entire text object; mixed formatting within a paragraph and installed system fonts are not yet supported. Unsupported glyphs may use font fallback.
+Projects use a versioned `.myimage` container with image-edit settings, annotation JSON, and an embedded lossless original PNG. New saves use version 21; version 1–20 projects still open, with version 1 acquiring identity image settings. Older MyImage builds cannot open version 21 projects. Coordinates and sizes are stored in original-image pixels. Save operations publish a complete file atomically. Projects travel without sidecar images; undo history is session-only. Text supports Sans serif and Monospace from the bundled egui font set, italic, underline, color and paragraph alignment. Formatting applies to the entire text object; mixed formatting within a paragraph and installed system fonts are not yet supported. Unsupported glyphs may use font fallback.
 
 Storage migration copies and verifies files on a worker, saves the new library/Recents references, and only then removes unchanged originals. Copy or preference-save failures keep the original library usable; any completed destination copies are retained and reported. Files changed externally before cleanup are retained at the source with a warning. Old empty directories can remain. Migration requires enough free space for verified copies and a separate destination outside the source tree; Windows runtime/cross-volume behavior is not yet natively tested.
 
@@ -146,7 +163,7 @@ All effects participate in project saving, undo/redo, layers, thumbnails and ima
 
 **Create** offers a blank canvas, visual overview, two-, three- and four-step guides, before/after comparison, and a landscape walkthrough. Enter a title and choose **Create image**. Blank canvases also offer dimensions and background color. Template titles, captions, and image placeholders are separate editable objects. Select a placeholder and choose **Replace image / SVG…** in the right panel; imported artwork fits inside its bounds without stretching. Double-click captions to edit their text.
 
-The collapsible **Recents** strip below Editor combines up to 24 recently opened/saved files with the newest captures from the library folder. It includes projects saved outside the library folder. Click a thumbnail to reopen it; unsaved changes trigger the existing Save/Discard/Cancel prompt. Recents remembers file paths, not separate unsaved editing sessions. Save a new template as a project to add it to the strip. **Refresh** updates external file changes.
+The collapsible **Recents** strip below Editor combines up to 24 recently used files with the newest captures from the library folder. It includes projects saved outside the library folder. Opening an existing thumbnail keeps the strip in place; completed edits, saves and new captures move the file to the front. Clicking another thumbnail with unsaved changes triggers the existing Save/Discard/Cancel prompt. Recents remembers file paths and their order, not separate unsaved editing sessions. Save a new template as a project to add it to the strip. **Refresh** updates external file changes.
 
 ## Stamps and signatures
 
@@ -230,15 +247,23 @@ When copying selected annotation objects, the system clipboard carries a version
 
 ## Layers
 
-Open **Edit → Layers** beside Styles. Groups contain expandable member rows, with the frontmost objects first. Stack numbers show each annotation’s exact position, including older projects whose group members are interleaved with other annotations.
+Open **Edit → Layers** beside Styles. Compact rows show each object’s shape/tool icon and name, with eye and lock controls alongside it. Groups expand into member rows, with frontmost objects first. Select artwork to reveal Rename, Group/Ungroup, Duplicate and Delete; the small ordering controls move it through the stack. Hover an icon for its action.
 
-- **Rename:** select an annotation or group and choose **Rename…**. A blank name restores its automatic label.
+- **Rename:** select an annotation or group and choose **Rename…**, or double-click its name. A blank name restores its automatic label.
 - **Show:** hide or reveal the selected layer. Hiding a group preserves each member’s own visibility setting. Hidden layers stay editable in the project and are omitted from the canvas, viewer, thumbnails, and every export format.
 - **Lock:** protect a layer against moving, resizing, appearance changes, erasing, deletion, grouping, and reordering. Group locks protect every member. A collective edit containing any locked member is blocked; select an unlocked member row to edit it separately. Names and visibility remain adjustable while locked.
 - **Order:** use **Lower / Raise** to move one stack position, or **To back / To front**. Selecting a group moves its members together while retaining their relative order.
 - Click a group row to select its members, or a member row to select just that annotation. Shift-click adds or removes layers from the selection. Hidden and locked layers remain selectable here.
 
 Every layer change supports undo and redo. Saving and reopening `.myimage` retains names, individual and group visibility, locks, stacking order, and editable artwork. Export produces a flattened copy; keep the project to make later changes. Global crop, rotate, and resize still affect the whole image, including locked layers.
+
+## Quick Effects and compact workspace
+
+Open **Effects** beside Styles, Layers and Presets, or use **Effects** in the canvas footer. Visual cards apply **Soft shadow**, **Floating**, **Ink border**, **Calico border** and **Grayscale**. Shadow opacity, softness and offset use sliders; Border offers width, a color picker and swatches. The Shadow, Border and Color tabs show only the chosen properties. Effects style the entire composition while retaining the original image and editable annotations in the project.
+
+Borders and rectangular frame shadows add transparent canvas space around the current image frame. Changing effects reuses that frame, preventing cumulative padding. **No effects** removes styling; the extra canvas remains available. Undo restores both styling and canvas size. Preview, copying, Library thumbnails and every export format include the effects. Grayscale preserves alpha and leaves the border’s independently chosen color intact.
+
+The footer exposes **Fit** and a clickable zoom percentage with common sizes and a slider. These change the view only. Recents keeps its show/hide toggle, uses one compact header and smaller thumbnail cards, and shows selection actions only when files are selected. Refresh and help use icons; full filenames and paths remain in hover tips. Ctrl/Command-click, Shift ranges, right-click actions and stable opening order are unchanged.
 
 ## Image and canvas tools
 
@@ -263,11 +288,11 @@ Edit keeps annotation tools in a top toolbar. Selecting **Arrow**, for example, 
 
 ## Reusable annotation presets
 
-In **Edit → Presets**, select annotations or a group on the canvas or in Layers, then choose **Save selection as preset…** and enter a name. The library shows searchable names and previews. Select a preset and choose **Insert preset** to add a copy to the current image; **Rename…** and **Delete…** manage the saved library. Deletion asks for confirmation and leaves inserted copies intact.
+In **Edit → Presets**, select annotations or a group on the canvas or in Layers, then choose **Save selection as preset…** and enter a name. The compact, searchable two-column gallery shows artwork previews, names and object counts. Double-click a card, or select it and choose **Insert preset**, to add an editable copy to the current image; **Rename…** and **Delete…** manage the saved library. Deletion asks for confirmation and leaves inserted copies intact.
 
 Presets retain annotation types, text, colors, thicknesses, freehand paths, callout pointers, group membership, layer names, visibility, and locks. Each insertion creates independent groups, selects the new artwork, and can be undone in one step. Hidden or locked copies open in Layers so you can show or unlock them. Copies are centered in the destination crop at their original pixel sizes; the destination's rotation and resize apply normally. Very large presets may extend beyond a smaller image. Editing a copy does not update the preset.
 
-Save the destination as a **`.myimage` project** to retain the inserted annotations as editable objects. The project contains the objects themselves and does not depend on the preset library. The local library persists across app restarts in the platform application-data folder as `annotation-presets.json`; hover **Saved on this computer** to see its path. Demo mode uses a separate library in the temporary `MyImage-demo` folder. **Refresh** picks up external changes. The library supports up to 128 presets and 16 MiB total, within the existing per-project annotation limits. Presets contain annotations only, without source image pixels. Blur/pixelate presets show a descriptive preview because their appearance depends on the destination image.
+Save the destination as a **`.myimage` project** to retain the inserted annotations as editable objects. The project contains the objects themselves and does not depend on the preset library. The local library persists across app restarts in the platform application-data folder as `annotation-presets.json`; open the help icon and hover **Saved on this computer** to see its path. Demo mode uses a separate library in the temporary `MyImage-demo` folder. **Refresh** picks up external changes. The library supports up to 128 presets and 16 MiB total, within the existing per-project annotation limits. Presets contain annotations only, without source image pixels. Blur/pixelate presets show a descriptive preview because their appearance depends on the destination image.
 
 ## Steps, callouts, and highlighting
 
@@ -356,6 +381,16 @@ Public macOS packages use `MYIMAGE_DISTRIBUTION=1 MYIMAGE_SIGNING_IDENTITY=<cert
 
 ### Direct canvas handles
 
-Eight small square handles surround the canvas in Editor. Drag a corner or edge midpoint to resize the canvas with a live dimension readout. Artwork keeps its size: new space is transparent and shrinking hides content without deleting it. Grow the canvas again to reveal it, including after saving and reopening a `.myimage` project. Press Escape to cancel; a completed drag is one Undo step. Deselect a pixel region to reveal canvas handles, so region handles retain priority.
+The post-capture **Selection** panel uses illustrated Rectangle, Lasso, Select all and Deselect tiles. Selected areas expose compact width/height fields, an aspect-lock icon and visual Boundary/Pixels drag choices. Copy, Cut, Delete, Blur, Pixelate and Fill are grouped as icon tiles; unavailable actions stay disabled. Hover for shortcuts and details, or open the panel's information button for selection help. Cut and Delete still leave transparency, and edits retain their existing layer and undo behavior.
+
+Eight small square handles surround the canvas in Editor. Drag a corner or edge midpoint to resize the canvas with a live dimension readout. Hold **Shift while dragging a corner** to preserve the canvas aspect ratio with the opposite corner fixed; Shift can be pressed or released during the gesture. Edge midpoints still resize one dimension. Artwork keeps its size: new space is transparent and shrinking hides content without deleting it. Grow the canvas again to reveal it, including after saving and reopening a `.myimage` project. Press Escape to cancel; a completed drag is one Undo step. Deselect a pixel region to reveal canvas handles, so region handles retain priority.
 
 Recents and cached Library thumbnails check file availability in the background while visible. Files deleted externally are removed from navigation and selection automatically, including persisted recent references. Missing-file actions clear stale entries without repeated filesystem errors. This never closes the in-memory image or discards unsaved edits; unreadable or corrupt files are not treated as missing.
+
+Quick Effects includes reversible torn, wave, sawtooth and rounded edges, with depth/radius and individual side controls. Borders and shadows follow the styled edge. The compact Recents header also contains icon-based image tools, Fit, zoom percentage and Effects. Library uses a compact collection/date sidebar and a search/sort header; the calico App menu groups shortcuts and interface-size settings in a compact Studio Contrast panel.
+
+Effect Styles also includes Perspective, Reflection, Fade to transparency, Sepia/Warm/Cool/Invert filters, and brightness/contrast/saturation adjustments. These compose without flattening layers and are saved in project version 21. App → About MyImage credits Orhan Gökçöl and shows version/build details.
+
+The Recents filmstrip uses an icon-only chevron to expand or collapse, with Show/Hide recents tooltips.
+
+Line styles use icon previews in the floating controls and properties panel: Solid, Dashed, Dotted, Dash-dot and Long dash. The same editable patterns apply to 2D and 3D shape outlines, and remain intact in projects and exports.

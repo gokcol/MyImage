@@ -234,28 +234,116 @@ fn paint_endpoint(ui: &egui::Ui, rect: Rect, cap: Endpoint, start: bool) {
 
 fn paint_pattern(ui: &egui::Ui, rect: Rect, pattern: Pattern) {
     let color = ui.visuals().text_color();
-    let y = rect.center().y;
-    let left = rect.left() + 4.;
-    let right = rect.right() - 4.;
-    if pattern == Pattern::Solid {
-        ui.painter().line_segment(
-            [Pos2::new(left, y), Pos2::new(right, y)],
-            Stroke::new(2.5, color),
-        );
-    } else {
-        let mut x = left;
-        while x < right {
-            if pattern == Pattern::Dotted {
-                ui.painter().circle_filled(Pos2::new(x, y), 1.5, color);
-            } else {
-                ui.painter().line_segment(
-                    [Pos2::new(x, y), Pos2::new((x + 7.).min(right), y)],
-                    Stroke::new(2.5, color),
-                );
-            }
-            x += if pattern == Pattern::Dotted { 6. } else { 12. };
+    let start = Pos2::new(rect.left() + 3., rect.center().y);
+    for (lo, hi) in pattern.spans((rect.width() - 6.).max(0.), 1.5) {
+        if hi - lo < 0.1 {
+            ui.painter()
+                .circle_filled(start + Vec2::new(lo, 0.), 1.25, color);
+        } else {
+            ui.painter().line_segment(
+                [start + Vec2::new(lo, 0.), start + Vec2::new(hi, 0.)],
+                Stroke::new(2.5, color),
+            );
         }
     }
+}
+
+fn pattern_choices(ui: &mut egui::Ui, value: &mut Pattern) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.;
+        for pattern in Pattern::ALL {
+            let response = ui.add(
+                egui::Button::new("")
+                    .selected(*value == pattern)
+                    .min_size(Vec2::new(43., 28.)),
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    *value == pattern,
+                    pattern.name(),
+                )
+            });
+            paint_pattern(ui, response.rect.shrink(3.), pattern);
+            if response.on_hover_text(pattern.name()).clicked() {
+                changed |= *value != pattern;
+                *value = pattern;
+            }
+        }
+    });
+    changed
+}
+
+fn fill_choices(ui: &mut egui::Ui, fill: &mut bool) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        for (value, name) in [(false, "Outline"), (true, "Solid fill")] {
+            let r = ui.add(
+                egui::Button::new("")
+                    .selected(*fill == value)
+                    .min_size(Vec2::new(43., 28.)),
+            );
+            r.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    *fill == value,
+                    name,
+                )
+            });
+            let rect = Rect::from_center_size(r.rect.center(), Vec2::new(24., 16.));
+            let color = ui.visuals().text_color();
+            ui.painter().rect(
+                rect,
+                2,
+                if value { color } else { Color32::TRANSPARENT },
+                Stroke::new(2., color),
+                egui::StrokeKind::Inside,
+            );
+            if r.on_hover_text(name).clicked() {
+                changed |= *fill != value;
+                *fill = value;
+            }
+        }
+    });
+    changed
+}
+
+fn pattern_menu(ui: &mut egui::Ui, value: &mut Pattern) -> bool {
+    let mut changed = false;
+    let response = property_button_menu(
+        ui,
+        egui::Button::new(
+            egui::RichText::new(value.name())
+                .size(1.)
+                .color(Color32::TRANSPARENT),
+        )
+        .min_size(Vec2::new(77., 26.)),
+        |ui| {
+            changed |= pattern_choices(ui, value);
+        },
+    )
+    .response;
+    paint_pattern(
+        ui,
+        Rect::from_min_max(
+            response.rect.min + Vec2::new(2., 0.),
+            response.rect.max - Vec2::new(23., 0.),
+        ),
+        *value,
+    );
+    ui.painter().add(egui::Shape::line(
+        vec![
+            response.rect.right_center() + Vec2::new(-15., -2.),
+            response.rect.right_center() + Vec2::new(-11., 2.),
+            response.rect.right_center() + Vec2::new(-7., -2.),
+        ],
+        Stroke::new(1.5, ui.visuals().text_color()),
+    ));
+    response.on_hover_text("Line style");
+    changed
 }
 
 fn endpoint_menu(ui: &mut egui::Ui, value: &mut Endpoint, start: bool) -> bool {
@@ -349,17 +437,7 @@ fn arrow_presets(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle) 
     ui.label("Start");
     changed |= endpoint_choices(ui, &mut arrow.start, true);
     ui.label("Line");
-    ui.horizontal(|ui| {
-        for (pattern, label) in [
-            (Pattern::Solid, "Solid"),
-            (Pattern::Dashed, "Dashed"),
-            (Pattern::Dotted, "Dotted"),
-        ] {
-            changed |= ui
-                .selectable_value(&mut arrow.pattern, pattern, label)
-                .changed();
-        }
-    });
+    changed |= pattern_choices(ui, &mut arrow.pattern);
     ui.label("End");
     changed |= endpoint_choices(ui, &mut arrow.end, false);
     changed
@@ -385,57 +463,7 @@ fn arrow_controls(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle)
             });
             ui.vertical(|ui| {
                 ui.label("Line");
-                let name = match arrow.pattern {
-                    Pattern::Solid => "Solid",
-                    Pattern::Dashed => "Dashed",
-                    Pattern::Dotted => "Dotted",
-                };
-                let response = property_button_menu(
-                    ui,
-                    egui::Button::new(
-                        egui::RichText::new(name)
-                            .size(1.)
-                            .color(Color32::TRANSPARENT),
-                    )
-                    .min_size(Vec2::new(77., 26.)),
-                    |ui| {
-                        ui.set_min_width(150.);
-                        for (pattern, label) in [
-                            (Pattern::Solid, "Solid"),
-                            (Pattern::Dashed, "Dashed"),
-                            (Pattern::Dotted, "Dotted"),
-                        ] {
-                            let response = ui.selectable_value(&mut arrow.pattern, pattern, label);
-                            changed |= response.changed();
-                            paint_pattern(
-                                ui,
-                                Rect::from_min_max(
-                                    Pos2::new(response.rect.right() - 60., response.rect.top()),
-                                    response.rect.right_bottom(),
-                                ),
-                                pattern,
-                            );
-                        }
-                    },
-                )
-                .response;
-                paint_pattern(
-                    ui,
-                    Rect::from_min_max(
-                        response.rect.min + Vec2::new(2., 0.),
-                        response.rect.max - Vec2::new(23., 0.),
-                    ),
-                    arrow.pattern,
-                );
-                ui.painter().add(egui::Shape::line(
-                    vec![
-                        response.rect.right_center() + Vec2::new(-15., -2.),
-                        response.rect.right_center() + Vec2::new(-11., 2.),
-                        response.rect.right_center() + Vec2::new(-7., -2.),
-                    ],
-                    Stroke::new(1.5, ui.visuals().text_color()),
-                ));
-                response.on_hover_text("Line style");
+                changed |= pattern_menu(ui, &mut arrow.pattern);
             });
             ui.vertical(|ui| {
                 ui.label("End");
@@ -600,14 +628,14 @@ impl EditorState {
             changed |= arrow_controls(ui, &mut self.arrow);
         }
         if kind.is_shape() {
+            ui.label("Line");
+            changed |= pattern_choices(ui, &mut self.arrow.pattern);
             ui.horizontal(|ui| {
                 ui.label("Fill");
-                changed |= ui
-                    .selectable_value(&mut self.fill, false, "Outline")
-                    .changed();
-                changed |= ui.selectable_value(&mut self.fill, true, "Solid").changed();
+                changed |= fill_choices(ui, &mut self.fill);
             });
         }
+
         if matches!(kind, AnnotationKind::Callout | AnnotationKind::Step) {
             ui.label("Text color");
             changed |= palette(ui, &mut self.text_color);
@@ -870,6 +898,7 @@ impl EditorState {
                                     changed |= arrow_controls(ui, &mut self.arrow);
                                 });
                             } else if kind.is_shape() {
+                                changed |= pattern_menu(ui, &mut self.arrow.pattern);
                                 property_menu(ui, "Shape ▾", |ui| {
                                     ui.set_min_width(250.);
                                     self.shape_picker(ui, document, history);
@@ -882,12 +911,7 @@ impl EditorState {
                                         "Outline ▾"
                                     },
                                     |ui| {
-                                        changed |= ui
-                                            .selectable_value(&mut self.fill, false, "Outline")
-                                            .changed();
-                                        changed |= ui
-                                            .selectable_value(&mut self.fill, true, "Solid fill")
-                                            .changed();
+                                        changed |= fill_choices(ui, &mut self.fill);
                                     },
                                 );
                             } else if matches!(kind, AnnotationKind::Text | AnnotationKind::Callout)
@@ -1218,6 +1242,7 @@ mod tests {
     #[test]
     fn floating_style_menu_updates_object_without_clicking_through_canvas() {
         let ctx = egui::Context::default();
+        ctx.enable_accesskit();
         crate::appearance::apply(&ctx);
         let mut e = EditorState::default();
         let mut d = document();
@@ -1248,20 +1273,29 @@ mod tests {
                 },
             )
         };
-        let find = |out: egui::FullOutput, label: &str| {
-            out.shapes
-                .into_iter()
-                .rev()
-                .find_map(|s| {
-                    if let egui::Shape::Text(t) = s.shape {
-                        (t.galley.job.text == label)
-                            .then(|| Rect::from_min_size(t.pos, t.galley.size()).center())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| panic!("Missing {label}"))
-        };
+        let find =
+            |out: egui::FullOutput, label: &str| {
+                out.platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .and_then(|update| {
+                        update.nodes.iter().rev().find_map(|(_, n)| {
+                            (n.label() == Some(label)).then(|| n.bounds()).flatten()
+                        })
+                    })
+                    .map(|r| Pos2::new(((r.x0 + r.x1) * 0.5) as f32, ((r.y0 + r.y1) * 0.5) as f32))
+                    .or_else(|| {
+                        out.shapes.iter().rev().find_map(|s| {
+                            if let egui::Shape::Text(t) = &s.shape {
+                                (t.galley.job.text == label)
+                                    .then(|| Rect::from_min_size(t.pos, t.galley.size()).center())
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .unwrap_or_else(|| panic!("Missing {label}"))
+            };
         for _ in 0..3 {
             frame(&mut e, &mut d, &mut h, &mut preview, vec![]);
         }
@@ -1314,7 +1348,7 @@ mod tests {
         assert_eq!(e.selected, Some(0));
         assert!(e.area.is_none());
         assert_eq!(d.annotations.len(), 1);
-        for label in ["Solid", "Dashed"] {
+        for label in ["Dash-dot"] {
             for _ in 0..2 {
                 frame(&mut e, &mut d, &mut h, &mut preview, vec![]);
             }
@@ -1337,7 +1371,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(d.annotations[0].arrow.pattern, Pattern::Dashed);
+        assert_eq!(d.annotations[0].arrow.pattern, Pattern::DashDot);
         assert_eq!(e.selected, Some(0));
         assert!(h.undo(&mut d));
         assert_eq!(d.annotations[0].arrow.pattern, Pattern::Solid);

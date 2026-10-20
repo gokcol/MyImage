@@ -15,12 +15,14 @@ impl EditorState {
         let maximum = document.output_size();
         let mut changed = None;
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.;
+            let width = (ui.available_width() - 40.) / 2.;
             for (axis, label) in [(0, "Width"), (1, "Height")] {
                 ui.push_id(("selection_dimension", axis), |ui| {
                     ui.vertical(|ui| {
                         let label = ui.small(label);
                         let response = ui.add_sized(
-                            [102., 24.],
+                            [width, 26.],
                             egui::DragValue::new(&mut size[axis])
                                 .range(1..=maximum[axis])
                                 .speed(1)
@@ -35,17 +37,20 @@ impl EditorState {
                     });
                 });
             }
+            ui.vertical(|ui| {
+                ui.add_space(17.);
+                let locked = self.area_aspect_ratio.is_some();
+                if inspector_widgets::tile(
+                    ui, "Lock aspect ratio", inspector_widgets::Glyph::Lock(locked),
+                    Vec2::splat(28.), locked, false,
+                ).on_hover_text("Lock proportions while sizing the selection or dragging its handles").clicked() {
+                    self.set_selection_ratio_locked(!locked, document);
+                }
+            });
         });
         if let Some(axis) = changed {
             self.set_selection_dimension(axis, size[axis], document);
         }
-        let mut locked = self.area_aspect_ratio.is_some();
-        if ui.checkbox(&mut locked, "Lock aspect ratio")
-            .on_hover_text("Keep the current proportions when entering dimensions or dragging an edge or corner.")
-            .changed() {
-            self.set_selection_ratio_locked(locked, document);
-        }
-        ui.add_space(4.);
     }
 
     fn set_selection_ratio_locked(&mut self, locked: bool, document: &Document) {

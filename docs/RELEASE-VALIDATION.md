@@ -1,5 +1,27 @@
 # Release validation — MyImage
 
+## Version 1.2.0 — build 58
+
+Public version 1.2.0 consolidates builds 50–57: visual Selection/Layers/Presets, compact Recents and stable ordering, clipboard capture and recent-file Copy, expanded editable image effects, five graphical stroke patterns, multiple-region capture, optional capture on release and the compact native Capture Now launcher. Mac build numbers continue increasing. Project format is version 21. Store package version is independently 1.12.0.0 to preserve ordering after 1.11.x.
+
+Microsoft Store support follows MyPDF’s packaging approach: exact Partner Center identity validation, DPI artwork, MakePri/MakeAppx semantic checks, executable/identity round-trip verification and disposable install/uninstall tests. The public privacy policy is linked in About. Store package identity, certification and production Windows signing require maintainer configuration; a test certificate is never a public release signature. Release publication requires a valid timestamped Windows signature before uploading a Windows download.
+
+Release validation and artifact signing results are recorded in the GitHub v1.2 release notes. Windows interactive testing remains pending.
+
+## Version 1.11.1 — build 57: compact resident capture panel
+
+Left-clicking the menu-bar/tray icon opens a separate native Capture Now window. The panel shares capture settings with the main app, keeps all five capture modes, and provides destination, display, pointer, capture-on-release and delay controls plus Editor/Library/settings navigation. Right-click retains the native menu and hotkeys still capture directly. The final panel measures 560 × 300 logical points, approximately 26% less area than the initial 650 × 350 layout, with shorter tiles and a smaller round Capture button.
+
+Validation: 453 application tests and 15 packaging tests passed (16 explicitly ignored diagnostics/integration tests). Strict Clippy passed. New tests exercise all shared settings, the Capture action, text bounds, and panel placement at display edges and a bottom tray. Native macOS visual review confirmed the 560 × 300 panel, smaller controls and fully visible footer. The UI automation tool refocused the main window when attempting child-window interactions, dismissing the panel; shared control updates are covered by the interaction test. Both isolated review apps were closed and removed. Signed with the existing Developer ID identity, notarized (submission `38273d72-f974-4f00-8263-759a82c4eeb2`), stapled and accepted by Gatekeeper. Installed build 57 after the user confirmed saving and quitting. Installation verified the signature and notarization, retained the previous installed app as rollback, and left captures, projects, settings and permission records unchanged. Reopened the installed app and visually verified the compact Capture Now panel at the user’s existing UI scale. Windows interactive validation remains deferred.
+
+## Version 1.11.1 — build 56: capture timing and multiple regions
+
+Capture options now include opt-in capture on mouse release; existing settings retain explicit confirmation. Region and Window modes support immediate completion. Multi-region capture always waits for Capture/Enter, combines up to 32 rectangles at their original relative positions, and zeroes RGBA outside the selected areas. Regions can be added, moved, resized and removed before capture. Command on Mac / Ctrl on Windows starts an additional region, including overlapping regions, without changing the saved capture mode.
+
+Validation: 451 application tests and 15 packaging tests passed, with 16 explicitly ignored diagnostic/integration tests. Strict Clippy, formatting and whitespace checks passed. Tests cover legacy settings, capture completion gating, region adjustment/removal/limits, overlap alpha preservation, transparent gaps and invalid pixel bounds. Native macOS demo review verified two regions, moving a previous region, the transparent combined image, immediate capture on release, default confirmation, Command-click adding a region and Backspace removal. Snagit's helper could not be controlled reliably by automation; the user performed its multi-region experiment and confirmed one image with transparent gaps. Windows interactive validation remains deferred.
+
+Signed with the existing Developer ID identity, notarized (submission `8283fbff-2e95-4d0a-a049-f896cfd5fc28`), stapled and accepted by Gatekeeper. Installed build 56 successfully captured two real screen regions into a transparent PNG without renewing Screen Recording permission. The fast-capture setting remained off. The isolated QA copy and its two generated captures were removed; automatic release cleanup retained the latest rollback.
+
 ## Version 1.11.1 — build 49
 
 Editor now exposes eight compact canvas resize handles outside the image. Corner and edge drags change the visible canvas window while retaining the original pixels, annotations, crop, rotation, flip and cut-out state. Growing adds transparency; shrinking keeps hidden content editable and recoverable by later expansion, including after saving/reopening. The drag uses a fixed input frame and a reusable bounded composition texture, with live dimensions, resize cursors, Escape cancellation and one Undo step. Pixel-selection handles take priority; blank canvas presses do not swap preview textures. Fit and pointer-anchored pinch reserve room for the handles.

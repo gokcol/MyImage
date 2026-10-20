@@ -45,6 +45,11 @@ fn no_cutouts(cuts: &[Option<Cutout>; 16]) -> bool {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ImageGeometry {
+    #[serde(
+        default,
+        skip_serializing_if = "crate::image_effects::ImageEffects::is_default"
+    )]
+    pub effects: crate::image_effects::ImageEffects,
     #[serde(default, skip_serializing_if = "is_false")]
     pub flip_horizontal: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -178,6 +183,7 @@ impl ImageGeometry {
     }
     pub fn validate(self, original: [u32; 2]) -> Result<(), String> {
         validate_dimensions(original[0], original[1])?;
+        self.effects.validate()?;
         if self.quarter_turns > 3 {
             return Err("The image rotation must be 0, 90, 180, or 270 degrees.".into());
         }
@@ -261,8 +267,29 @@ impl ImageGeometry {
         self.resize.unwrap_or_else(|| self.rotated_size(original))
     }
 
+    /// Texture and canvas bounds are already in effect presentation space.
+    pub fn unwarped(mut self) -> Self {
+        self.effects.styles.perspective = [0; 2];
+        self
+    }
+
+    fn project_point(self, point: Point, inverse: bool) -> Point {
+        let Some(f) = self.effects.frame else {
+            return point;
+        };
+        self.effects.styles.project(
+            point,
+            eframe::egui::Rect::from_min_size(
+                eframe::egui::pos2(f.x as f32, f.y as f32),
+                eframe::egui::vec2(f.width as f32, f.height as f32),
+            ),
+            inverse,
+        )
+    }
+
     /// Map pixel-edge coordinates, including coordinates outside the current crop.
     pub fn map_point(self, point: Point, original: [u32; 2]) -> Point {
+        let point = self.project_point(point, false);
         let [width, height] = self.compact_size(original);
         let (x, y) = (
             self.compact_axis(point.x, original, 0),
@@ -316,10 +343,13 @@ impl ImageGeometry {
             3 => (width as f32 - y, x),
             _ => (x, y),
         };
-        Point {
-            x: self.expand_axis(x, original, 0),
-            y: self.expand_axis(y, original, 1),
-        }
+        self.project_point(
+            Point {
+                x: self.expand_axis(x, original, 0),
+                y: self.expand_axis(y, original, 1),
+            },
+            true,
+        )
     }
 
     /// Produce presentation pixels without changing the original image or annotations.
@@ -473,6 +503,7 @@ mod tests {
         ];
         for quarter_turns in 0..4 {
             let mut geometry = ImageGeometry {
+                effects: Default::default(),
                 viewport: None,
                 flip_horizontal: false,
                 flip_vertical: false,

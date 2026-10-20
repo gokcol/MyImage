@@ -125,6 +125,7 @@ impl MyImageApp {
     pub(super) fn library_action(&mut self, ctx: &egui::Context, action: LibraryAction) {
         match action {
             LibraryAction::Open(p) => self.open_path(ctx, p, true),
+            LibraryAction::Copy(path) => self.copy_library_image(ctx, path),
             LibraryAction::Storage => self.file_dialog = Some(FileDialog::Storage),
             LibraryAction::Trash(paths) => self.file_dialog = Some(FileDialog::Trash(paths)),
             LibraryAction::Duplicate(paths) => {
@@ -158,6 +159,30 @@ impl MyImageApp {
             }
         }
     }
+    fn copy_library_image(&mut self, ctx: &egui::Context, path: PathBuf) {
+        if self.busy {
+            return;
+        }
+        self.busy = true;
+        self.error = None;
+        self.status = "Copying image…".into();
+        let tx = self.work_tx.clone();
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let result = crate::image_clipboard::file_pixels(&path).and_then(|pixels| {
+                crate::image_clipboard::write_image(&pixels)?;
+                Ok([pixels.width(), pixels.height()])
+            });
+            let event = if result.is_err() && library_files::is_missing(&path) {
+                WorkEvent::MissingOpen(path)
+            } else {
+                WorkEvent::FileCopied(path, result)
+            };
+            let _ = tx.send(event);
+            ctx.request_repaint();
+        });
+    }
+
     pub(super) fn start_file_operation(&mut self, ctx: &egui::Context, op: Operation) {
         if self.busy {
             return;

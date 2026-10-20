@@ -1,6 +1,6 @@
 [package]
 name = "myimage"
-version = "1.11.1"
+version = "1.2.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Native desktop screen capture for macOS and Windows"

@@ -31,6 +31,7 @@ use selection::FileSelection;
 
 pub enum LibraryAction {
     Open(PathBuf),
+    Copy(PathBuf),
     Storage,
     Trash(Vec<PathBuf>),
     Duplicate(Vec<PathBuf>),
@@ -227,21 +228,14 @@ impl Drop for LibraryPanel {
 }
 
 impl LibraryPanel {
-    pub fn recents_ui(
-        &mut self,
-        ui: &mut egui::Ui,
-        root: &Path,
-        paths: &[PathBuf],
-        active: Option<&Path>,
-        dirty: bool,
-    ) -> Option<LibraryAction> {
-        if self.root.as_deref() != Some(root) {
-            self.refresh();
-            self.root = Some(root.to_owned());
-        }
-        self.frame = self.frame.wrapping_add(1);
-        self.receive(ui.ctx());
-        self.request_scan(ui.ctx(), root);
+    pub fn recent_paths(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        self.recent_entries(paths)
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect()
+    }
+
+    fn recent_entries(&self, paths: &[PathBuf]) -> Vec<LibraryEntry> {
         let mut entries = Vec::new();
         let mut seen = HashSet::new();
         for path in paths.iter().take(24) {
@@ -281,33 +275,91 @@ impl LibraryPanel {
                 entries.push(entry.clone());
             }
         }
+        entries
+    }
+
+    pub fn recents_header(
+        &mut self,
+        ui: &mut egui::Ui,
+        open: &mut bool,
+        enabled: bool,
+        image_controls: impl FnOnce(&mut egui::Ui),
+    ) -> Option<LibraryAction> {
+        let mut chosen = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().button_padding = Vec2::new(5., 2.);
+            ui.spacing_mut().interact_size.y = 22.;
+            let label = if *open { "Hide recents" } else { "Show recents" };
+            let toggle = ui.add_sized([28., 24.], egui::Button::new("")
+                .fill(if *open { crate::dialogs::CHARCOAL } else { appearance::PAPER })
+                .stroke(Stroke::new(1., if *open { crate::dialogs::CHARCOAL } else { appearance::BORDER }))
+                .corner_radius(5));
+            toggle.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), *open, label));
+            let center = toggle.rect.center();
+            let points = if *open {
+                [center + Vec2::new(-4., -2.), center + Vec2::new(0., 2.), center + Vec2::new(4., -2.)]
+            } else {
+                [center + Vec2::new(-2., -4.), center + Vec2::new(2., 0.), center + Vec2::new(-2., 4.)]
+            };
+            ui.painter().add(egui::Shape::line(points.to_vec(), Stroke::new(1.8, if *open { appearance::GINGER } else { appearance::INK })));
+            if toggle.on_hover_text(label).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                *open = !*open;
+            }
+            let count = self.recent_selection.paths.len();
+            if *open && count > 0 {
+                ui.small(format!("{count} selected"));
+                ui.add_enabled_ui(enabled, |ui| {
+                    if appearance::icon_button(ui, "Move selected files to Trash…", appearance::Icon::Trash).clicked() {
+                        chosen = Some(LibraryAction::Trash(self.recent_selection.list()));
+                    }
+                    if appearance::icon_button(ui, "Clear selection", appearance::Icon::Close).clicked() {
+                        self.recent_selection.clear();
+                    }
+                });
+            }
+            ui.add_space(10.);
+            image_controls(ui);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if appearance::icon_button(ui, "Refresh recents", appearance::Icon::Refresh).clicked() {
+                    self.refresh();
+                }
+                let help = appearance::icon_button(ui, "Recent captures and projects", appearance::Icon::Info);
+                egui::Popup::menu(&help).show(|ui| {
+                    ui.set_max_width(260.);
+                    ui.label("Click a thumbnail to open it. Opening keeps its position; editing or saving moves it to the front.");
+                    ui.label("Ctrl/⌘-click to select several, or Shift-click for a range. Right-click for file actions.");
+                    ui.small("Scroll sideways for more. Hover a thumbnail for its full name and path.");
+                });
+            });
+        });
+        chosen
+    }
+
+    pub fn recents_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        root: &Path,
+        paths: &[PathBuf],
+        active: Option<&Path>,
+        dirty: bool,
+    ) -> Option<LibraryAction> {
+        if self.root.as_deref() != Some(root) {
+            self.refresh();
+            self.root = Some(root.to_owned());
+        }
+        self.frame = self.frame.wrapping_add(1);
+        self.receive(ui.ctx());
+        self.request_scan(ui.ctx(), root);
+        let entries = self.recent_entries(paths);
         let order: Vec<_> = entries.iter().map(|e| e.path.clone()).collect();
         self.check_paths(ui.ctx(), &order);
         self.recent_selection.retain(&order);
         let mut chosen = None;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().interact_size.y = 18.;
-            ui.spacing_mut().button_padding = Vec2::new(4., 2.);
-            let count = self.recent_selection.paths.len();
-            ui.small(if count == 0 {
-                "Ctrl/⌘-click to select · Shift-click for a range".into()
-            } else {
-                format!("{count} selected")
-            });
-            if count > 0 {
-                if ui.small_button("Move to Trash…").clicked() {
-                    chosen = Some(LibraryAction::Trash(self.recent_selection.list()));
-                }
-                if ui.small_button("Clear selection").clicked() {
-                    self.recent_selection.clear();
-                }
-            }
-        });
         egui::ScrollArea::horizontal()
             .id_salt("recent-captures-strip")
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 8.;
+                    ui.spacing_mut().item_spacing.x = 6.;
                     if entries.is_empty() {
                         ui.weak(
                             "Recent captures and projects appear here as you open or save them.",
@@ -315,7 +367,7 @@ impl LibraryPanel {
                     }
                     for entry in &entries {
                         let (rect, response) =
-                            ui.allocate_exact_size(Vec2::new(112., 76.), egui::Sense::click());
+                            ui.allocate_exact_size(Vec2::new(100., 64.), egui::Sense::click());
                         if !ui.is_rect_visible(rect) {
                             continue;
                         }
@@ -351,8 +403,8 @@ impl LibraryPanel {
                             },
                         );
                         let image_rect = Rect::from_min_max(
-                            rect.min + Vec2::splat(4.),
-                            rect.max - Vec2::new(4., 20.),
+                            rect.min + Vec2::splat(3.),
+                            rect.max - Vec2::new(3., 16.),
                         );
                         if let Some(cache) = self.previews.get_mut(&entry.path) {
                             cache.used = self.frame;
@@ -391,24 +443,33 @@ impl LibraryPanel {
                                 20.,
                             );
                         }
-                        if selected {
+                        if selected || is_active {
                             ui.painter().rect_stroke(
                                 rect,
                                 5,
-                                Stroke::new(1.5, appearance::ACCENT),
+                                Stroke::new(if is_active { 2. } else { 1.5 }, appearance::ACCENT),
                                 egui::StrokeKind::Inside,
                             );
                         }
                         let label = if is_active && dirty {
                             "Unsaved changes".into()
                         } else {
-                            entry.name.chars().take(17).collect::<String>()
+                            entry.name.clone()
                         };
-                        ui.painter().text(
-                            rect.center_bottom() - Vec2::new(0., 9.),
-                            egui::Align2::CENTER_CENTER,
+                        let mut job = egui::text::LayoutJob::simple_singleline(
                             label,
                             FontId::proportional(10.),
+                            appearance::INK,
+                        );
+                        job.wrap.max_width = rect.width() - 8.;
+                        job.wrap.max_rows = 1;
+                        let galley = ui.painter().layout_job(job);
+                        ui.painter().galley(
+                            egui::pos2(
+                                rect.center().x - galley.size().x * 0.5,
+                                rect.bottom() - 14.,
+                            ),
+                            galley,
                             appearance::INK,
                         );
                         if is_active {

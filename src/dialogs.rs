@@ -229,18 +229,16 @@ pub fn button(
         ),
     };
     let shadow_index = ui.painter().add(egui::Shape::Noop);
-    let label_width = egui::WidgetText::from(RichText::new(label).strong())
-        .into_galley(
-            ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
-            egui::TextStyle::Button,
-        )
-        .size()
-        .x;
+    let label_galley = egui::WidgetText::from(RichText::new(label).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let label_width = label_galley.size().x;
     let response = ui.add_enabled(
         enabled,
-        egui::Button::new(RichText::new(label).color(ink).strong())
+        egui::Button::new("")
             .fill(fill)
             .stroke(Stroke::new(1., line))
             .corner_radius(6)
@@ -278,6 +276,11 @@ pub fn button(
                 Stroke::new(1., Color32::from_white_alpha(45)),
             );
         }
+        ui.painter().galley_with_override_text_color(
+            response.rect.left_center() + Vec2::new(32., -label_galley.size().y * 0.5),
+            label_galley,
+            if active { ink } else { ink.gamma_multiply(0.4) },
+        );
         appearance::icon(
             ui.painter(),
             response.rect.left_center() + egui::vec2(16., 0.),

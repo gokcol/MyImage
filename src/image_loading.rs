@@ -26,7 +26,7 @@ impl PreparedDocument {
     fn prepare(document: Document, max_side: u32) -> Result<Self, String> {
         let source = Arc::new(prepare_pixels(&document.image, max_side));
         let composition = if document.geometry.canvas.is_some()
-            || document.geometry.has_cutouts()
+            || (document.geometry.has_cutouts() || document.geometry.effects.active())
             || document
                 .annotations
                 .iter()

@@ -51,7 +51,9 @@ pub struct Settings {
     pub corner_radius: u32,
     pub delay_seconds: u32,
     pub capture_mode: crate::capture::CaptureMode,
+    pub capture_destination: crate::capture::CaptureDestination,
     pub include_pointer: bool,
+    pub capture_on_release: bool,
     pub recent_files: Vec<PathBuf>,
     pub recents_open: bool,
     pub library: crate::library::BrowserPreferences,
@@ -72,7 +74,9 @@ impl Default for Settings {
             corner_radius: 24,
             delay_seconds: 0,
             capture_mode: Default::default(),
+            capture_destination: Default::default(),
             include_pointer: false,
+            capture_on_release: false,
             recent_files: Vec::new(),
             recents_open: true,
             library: Default::default(),
@@ -98,6 +102,22 @@ pub fn remember_recent(settings: &mut Settings, path: PathBuf) {
     settings.recent_files.retain(|p| p != &path);
     settings.recent_files.insert(0, path);
     settings.recent_files.truncate(24);
+}
+
+/// Opening an existing thumbnail preserves the complete visible strip, including
+/// library entries not yet in persisted history. Only a new file joins the front.
+pub fn remember_opened_recent(settings: &mut Settings, path: PathBuf, visible: &[PathBuf]) {
+    let mut ordered = Vec::new();
+    if !visible.contains(&path) {
+        ordered.push(path.clone());
+    }
+    ordered.extend_from_slice(visible);
+    ordered.extend_from_slice(&settings.recent_files);
+    let mut seen = std::collections::HashSet::new();
+    ordered.retain(|p| seen.insert(p.clone()));
+    ordered.truncate(24);
+    settings.library.hidden_recents.remove(&path);
+    settings.recent_files = ordered;
 }
 
 fn settings_path() -> Result<PathBuf, String> {
@@ -185,6 +205,25 @@ pub fn save_capture(
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    #[test]
+    fn fast_capture_is_opt_in_and_persists_without_changing_destination() {
+        let old: Settings = serde_json::from_str(r#"{"include_pointer":true}"#).unwrap();
+        assert!(!old.capture_on_release);
+        let settings = Settings {
+            capture_on_release: true,
+            capture_destination: crate::capture::CaptureDestination::Clipboard,
+            ..old
+        };
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert!(restored.capture_on_release);
+        assert!(restored.include_pointer);
+        assert_eq!(
+            restored.capture_destination,
+            crate::capture::CaptureDestination::Clipboard
+        );
+    }
 
     #[test]
     fn project_storage_is_browsable_and_switching_roots_preserves_existing_projects() {

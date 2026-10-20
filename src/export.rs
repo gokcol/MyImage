@@ -528,6 +528,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let mut document = sample_document();
         document.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,
@@ -691,6 +692,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let mut document = review_document();
         document.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,

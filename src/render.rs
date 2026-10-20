@@ -603,7 +603,7 @@ pub fn paint_document_image(
     let output = document.output_size();
     let scale = rect.size() / egui::vec2(output[0] as f32, output[1] as f32);
     for vertex in &mut mesh.vertices {
-        let mapped = document.geometry.map_point(
+        let mapped = document.geometry.unwarped().map_point(
             Point {
                 x: vertex.pos.x,
                 y: vertex.pos.y,
@@ -628,6 +628,7 @@ pub fn paint_document_annotations(
 ) {
     if !scale.is_finite()
         || scale <= 0.0
+        || document.geometry.effects.active()
         || document.geometry.has_cutouts()
         || document.geometry.canvas.is_some()
         || document
@@ -681,6 +682,18 @@ pub fn paint_document_annotations(
     }
 }
 
+fn stroke_preview(points: Vec<Pos2>, stroke: Stroke) -> Shape {
+    if points.len() == 2 && points[0].distance(points[1]) < 0.1 {
+        Shape::circle_filled(
+            points[0].lerp(points[1], 0.5),
+            stroke.width * 0.5,
+            stroke.color,
+        )
+    } else {
+        Shape::line(points, stroke)
+    }
+}
+
 fn annotation_shapes(
     painter: &egui::Painter,
     annotations: &[Annotation],
@@ -712,7 +725,13 @@ fn annotation_shapes(
             .clamp(1, MAX_INK_PREVIEW_PIXELS as usize);
     for annotation in annotations.iter().filter(|a| a.visible()) {
         let color = color(annotation);
-        let stroke = Stroke::new(annotation.stroke_width, color);
+        let patterned = annotation.kind.is_shape()
+            && annotation.arrow.pattern != crate::arrow_style::Pattern::Solid;
+        let stroke = if patterned {
+            Stroke::NONE
+        } else {
+            Stroke::new(annotation.stroke_width, color)
+        };
         let fill = if annotation.fill {
             color
         } else {
@@ -827,7 +846,7 @@ fn annotation_shapes(
                     shapes.push(if part.filled {
                         Shape::convex_polygon(part.points, color, Stroke::NONE)
                     } else {
-                        Shape::line(part.points, stroke)
+                        stroke_preview(part.points, stroke)
                     });
                 }
             }
@@ -899,6 +918,9 @@ fn annotation_shapes(
                     annotation.fill && annotation.kind != AnnotationKind::Torus,
                 );
                 for path in crate::shapes::details(annotation.kind, rect) {
+                    if patterned {
+                        continue;
+                    }
                     shapes.push(Shape::line(
                         path,
                         Stroke::new(
@@ -928,6 +950,17 @@ fn annotation_shapes(
                 }));
             }
         }
+        if patterned {
+            for (path, rgba) in patterned_shape_paths(annotation) {
+                shapes.push(stroke_preview(
+                    path,
+                    Stroke::new(
+                        annotation.stroke_width,
+                        Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]),
+                    ),
+                ));
+            }
+        }
     }
     shapes
 }
@@ -938,11 +971,12 @@ pub fn flatten(document: &Document) -> Result<RgbaImage, String> {
     if document.geometry.canvas.is_some() {
         return flatten(&crate::canvas::render_document(document)?);
     }
-    if document.annotations.is_empty() {
+    if document.annotations.is_empty() && !document.geometry.effects.active() {
         return document.geometry.apply(&document.image);
     }
     let mut output = (*document.image).clone();
     composite_annotations(&mut output, &document.annotations, [1.0; 2])?;
+    crate::image_effects::apply(&mut output, document.geometry.effects, [0.; 2], [1.; 2]);
     if document.geometry == Default::default() {
         Ok(output)
     } else {
@@ -1029,6 +1063,15 @@ pub fn interactive_preview(document: &Document, max_side: u32) -> Result<RgbaIma
             dimensions[1] as f32 / bounds.height as f32,
         ],
     )?;
+    crate::image_effects::apply(
+        &mut output,
+        document.geometry.effects,
+        [bounds.x as f32, bounds.y as f32],
+        [
+            dimensions[0] as f32 / bounds.width as f32,
+            dimensions[1] as f32 / bounds.height as f32,
+        ],
+    );
     Ok(output)
 }
 
@@ -1063,6 +1106,7 @@ pub fn privacy_preview(document: &Document, max_side: u32) -> Result<RgbaImage, 
         dimensions[1] as f32 / original[1] as f32,
     ];
     composite_annotations(&mut output, &document.annotations, scale)?;
+    crate::image_effects::apply(&mut output, document.geometry.effects, [0.; 2], scale);
     Ok(output)
 }
 
@@ -1169,7 +1213,8 @@ pub fn thumbnail(document: &Document, width: u32, height: u32) -> Result<RgbaIma
         }
         return Ok(pixels);
     }
-    if document.geometry.has_cutouts()
+    if document.geometry.effects.active()
+        || document.geometry.has_cutouts()
         || document
             .annotations
             .iter()
@@ -1263,7 +1308,7 @@ fn privacy_thumbnail(document: &Document, width: u32, height: u32) -> Result<Rgb
         let [w, h] = fit_dimensions(document.output_size(), width, height);
         let output = document.output_size();
         return Ok(RgbaImage::from_fn(w, h, |x, y| {
-            let p = document.geometry.inverse_point(
+            let p = document.geometry.unwarped().inverse_point(
                 Point {
                     x: (x as f32 + 0.5) * output[0] as f32 / w as f32,
                     y: (y as f32 + 0.5) * output[1] as f32 / h as f32,
@@ -1493,6 +1538,37 @@ fn composite_overlay(output: &mut RgbaImage, overlay: &Pixmap) {
     }
 }
 
+fn patterned_shape_paths(annotation: &Annotation) -> Vec<(Vec<Pos2>, [u8; 4])> {
+    let rect = Rect::from_two_pos(pos(annotation.start), pos(annotation.end));
+    let outline = crate::shapes::outline(annotation.kind, rect);
+    let mut paths: Vec<_> = crate::arrow_style::patterned_paths(
+        &outline,
+        true,
+        annotation.arrow.pattern,
+        annotation.stroke_width,
+    )
+    .into_iter()
+    .map(|p| (p, annotation.color))
+    .collect();
+    let detail = crate::shapes::detail_color(
+        annotation.color,
+        annotation.fill && annotation.kind != AnnotationKind::Torus,
+    );
+    for path in crate::shapes::details(annotation.kind, rect) {
+        paths.extend(
+            crate::arrow_style::patterned_paths(
+                &path,
+                annotation.kind == AnnotationKind::Torus,
+                annotation.arrow.pattern,
+                annotation.stroke_width,
+            )
+            .into_iter()
+            .map(|p| (p, detail)),
+        );
+    }
+    paths
+}
+
 fn paint_shape(overlay: &mut Pixmap, annotation: &Annotation, transform: Transform) {
     let [r, g, b, a] = annotation.color;
     let mut paint = Paint::default();
@@ -1629,14 +1705,36 @@ fn paint_shape(overlay: &mut Pixmap, annotation: &Annotation, transform: Transfo
         {
             overlay.fill_path(&path, &paint, FillRule::Winding, transform, None);
         }
-        if !matches!(
+        if !(matches!(
             annotation.kind,
             AnnotationKind::Step | AnnotationKind::Highlighter
-        ) {
+        ) || annotation.kind.is_shape()
+            && annotation.arrow.pattern != crate::arrow_style::Pattern::Solid)
+        {
             overlay.stroke_path(&path, &paint, &stroke, transform, None);
         }
     }
-    if annotation.kind.is_3d() && annotation.kind != AnnotationKind::Torus {
+    if annotation.kind.is_shape() && annotation.arrow.pattern != crate::arrow_style::Pattern::Solid
+    {
+        for (points, rgba) in patterned_shape_paths(annotation) {
+            let mut builder = PathBuilder::new();
+            if let Some(first) = points.first() {
+                builder.move_to(first.x, first.y);
+                for p in points.iter().skip(1) {
+                    builder.line_to(p.x, p.y);
+                }
+            }
+            if let Some(path) = builder.finish() {
+                let mut stroke_paint = paint.clone();
+                stroke_paint.set_color_rgba8(rgba[0], rgba[1], rgba[2], rgba[3]);
+                overlay.stroke_path(&path, &stroke_paint, &stroke, transform, None);
+            }
+        }
+    }
+    if annotation.kind.is_3d()
+        && annotation.kind != AnnotationKind::Torus
+        && annotation.arrow.pattern == crate::arrow_style::Pattern::Solid
+    {
         let bounds = Rect::from_min_size(
             egui::pos2(rect.x(), rect.y()),
             egui::vec2(rect.width(), rect.height()),
@@ -2011,6 +2109,19 @@ mod tests {
     use super::*;
     use image::Rgba;
 
+    #[test]
+    fn dotted_stroke_preview_has_full_round_coverage() {
+        let shape = stroke_preview(
+            vec![Pos2::new(20., 30.), Pos2::new(20.01, 30.)],
+            Stroke::new(6., Color32::RED),
+        );
+        let Shape::Circle(dot) = shape else {
+            panic!("Dot must not render as a thin butt-capped line");
+        };
+        assert_eq!(dot.radius, 3.);
+        assert_eq!(dot.fill, Color32::RED);
+    }
+
     fn annotation(kind: AnnotationKind, start: [f32; 2], end: [f32; 2]) -> Annotation {
         Annotation {
             kind,
@@ -2330,6 +2441,7 @@ mod tests {
         let source = annotation_bounds(&ink).expand(1.0);
         let mut doc = document(vec![ink]);
         doc.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,
@@ -2403,6 +2515,7 @@ mod tests {
         assert_eq!(reduced.get_pixel(50, 50)[3], 128);
         assert_eq!(reduced.get_pixel(70, 25)[3], 0);
         doc.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,
@@ -2610,6 +2723,7 @@ mod tests {
         let origin = egui::pos2(35.0, 55.0);
         for turns in 0..4 {
             document.geometry = ImageGeometry {
+                effects: Default::default(),
                 viewport: None,
                 flip_horizontal: false,
                 flip_vertical: false,
@@ -2687,6 +2801,7 @@ mod tests {
         ]);
         let untransformed = flatten(&document).unwrap();
         document.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,
@@ -2718,6 +2833,7 @@ mod tests {
             Rgba([x as u8 * 30, y as u8 * 50, 120, 128])
         }));
         document.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,
@@ -2806,6 +2922,7 @@ mod tests {
         assert_eq!(pixels.get_pixel(250, 180), doc.image.get_pixel(250, 180));
         assert_ne!(pixels.get_pixel(18, 35), doc.image.get_pixel(18, 35));
         doc.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,

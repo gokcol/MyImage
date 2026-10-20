@@ -1138,6 +1138,7 @@ mod tests {
             image: std::sync::Arc::new(image::RgbaImage::new(800, 600)),
             annotations: vec![],
             geometry: ImageGeometry {
+                effects: Default::default(),
                 viewport: None,
                 flip_horizontal: false,
                 flip_vertical: false,

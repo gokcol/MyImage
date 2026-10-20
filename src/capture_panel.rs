@@ -1,7 +1,7 @@
 //! Capture home: visual targets, compact options and the resident Capture Now entry point.
 use crate::{
     appearance,
-    capture::{CaptureMode, DisplayInfo},
+    capture::{CaptureDestination, CaptureMode, DisplayInfo},
     selection::CaptureShape,
     storage::Settings,
 };
@@ -10,6 +10,7 @@ use eframe::egui::{self, Color32, Rect, Stroke, Vec2};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     Capture,
+    Panel,
     RefreshDisplays,
     ChooseFolder,
     Library,
@@ -48,9 +49,10 @@ pub fn menu_summary(settings: &Settings, _shape: CaptureShape, displays: &[Displ
         .map(|i| format!("Display {}", i + 1))
         .unwrap_or_else(|| "No display".into());
     format!(
-        "{} · {display} · {}",
+        "{} · {display} · {} · {}",
         settings.capture_mode.label(),
-        delay_label(settings.delay_seconds)
+        delay_label(settings.delay_seconds),
+        settings.capture_destination.label(),
     )
 }
 fn card() -> egui::Frame {
@@ -93,7 +95,7 @@ pub fn ui(
                     });
                 });
                 ui.horizontal(|ui| {
-                    let tile_width = (width - 30.) / 4.;
+                    let tile_width = (width - 40.) / 5.;
                     for mode in CaptureMode::ALL {
                         if mode_tile(ui, mode, settings.capture_mode == mode, tile_width).clicked() {
                             result.changed |= settings.capture_mode != mode;
@@ -131,6 +133,21 @@ pub fn ui(
                             });
                             result.changed |= ui.checkbox(&mut settings.include_pointer, "Include pointer")
                                 .on_hover_text("Show the mouse pointer in the saved capture. Turn off for a clean image.").changed();
+                            result.changed |= ui.checkbox(&mut settings.capture_on_release, "Capture immediately after selection")
+                                .on_hover_text("Off by default: adjust the selection, then click Capture. When enabled, releasing a region or clicking a window captures immediately. Multiple regions still wait for Capture or Enter.").changed();
+                            ui.strong("After capture");
+                            ui.horizontal(|ui| {
+                                for destination in CaptureDestination::ALL {
+                                    if appearance::action_button(
+                                        ui, destination.label(),
+                                        if destination == CaptureDestination::Editor { appearance::Icon::Edit } else { appearance::Icon::Copy },
+                                        true, settings.capture_destination == destination,
+                                    ).on_hover_text(destination.hint()).clicked() {
+                                        result.changed |= settings.capture_destination != destination;
+                                        settings.capture_destination = destination;
+                                    }
+                                }
+                            });
                             ui.separator();
                             ui.horizontal(|ui| {
                                 ui.strong("Save to library");
@@ -155,12 +172,13 @@ pub fn ui(
                         ui.label(egui::RichText::new("Ctrl + Shift + .").strong().color(Color32::WHITE));
                         ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Also Command + Shift + ." } else { "Available from any app" }).size(12.).color(Color32::from_rgb(224, 213, 197)));
                         ui.separator();
-                        ui.label(egui::RichText::new("Save automatically. Continue in Editor.").size(12.).color(Color32::from_rgb(224, 213, 197)));
+                        ui.label(egui::RichText::new(settings.capture_destination.hint()).size(12.).color(Color32::from_rgb(224, 213, 197)));
                         });
                     });
                 });
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Built-in Capture Now is always in your menu bar." } else { "Built-in Capture Now is always in your system tray." }).size(12.).color(appearance::MUTED));
+                    if appearance::action_button(ui, "Capture panel", appearance::Icon::Tray, true, false).clicked() { result.action = Some(Action::Panel); }
                     if ui.add_enabled(available.background, egui::Button::new("Keep ready in background").small().frame(false)).clicked() { result.action = Some(Action::Background); }
                 });
                 if available.permission_needed {
@@ -177,6 +195,27 @@ pub fn ui(
     result
 }
 
+pub fn destination_picker(ui: &mut egui::Ui, destination: &mut CaptureDestination) -> bool {
+    let before = *destination;
+    egui::ComboBox::from_id_salt("capture-destination")
+        .selected_text(format!("To: {}", destination.label()))
+        .width(118.)
+        .show_ui(ui, |ui| {
+            for choice in CaptureDestination::ALL {
+                if ui
+                    .selectable_value(destination, choice, choice.label())
+                    .on_hover_text(choice.hint())
+                    .clicked()
+                {
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_hover_text(destination.hint());
+    *destination != before
+}
+
 pub(super) fn mode_icon(painter: &egui::Painter, mode: CaptureMode, rect: Rect, color: Color32) {
     let stroke = Stroke::new(1.8, color);
     match mode {
@@ -187,6 +226,16 @@ pub(super) fn mode_icon(painter: &egui::Painter, mode: CaptureMode, rect: Rect, 
             color,
             rect.height(),
         ),
+        CaptureMode::MultiRegion => {
+            for offset in [Vec2::ZERO, Vec2::splat(10.)] {
+                painter.rect_stroke(
+                    Rect::from_min_size(rect.min + offset, rect.size() * 0.65),
+                    2,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
         CaptureMode::Window => {
             painter.rect_stroke(rect, 3, stroke, egui::StrokeKind::Inside);
             painter.line_segment(
@@ -224,8 +273,32 @@ pub(super) fn mode_icon(painter: &egui::Painter, mode: CaptureMode, rect: Rect, 
         }
     }
 }
-fn mode_tile(ui: &mut egui::Ui, mode: CaptureMode, selected: bool, width: f32) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 64.), egui::Sense::click());
+pub(super) fn mode_tile(
+    ui: &mut egui::Ui,
+    mode: CaptureMode,
+    selected: bool,
+    width: f32,
+) -> egui::Response {
+    sized_mode_tile(ui, mode, selected, Vec2::new(width, 64.))
+}
+
+pub(super) fn compact_mode_tile(
+    ui: &mut egui::Ui,
+    mode: CaptureMode,
+    selected: bool,
+    width: f32,
+) -> egui::Response {
+    sized_mode_tile(ui, mode, selected, Vec2::new(width, 54.))
+}
+
+fn sized_mode_tile(
+    ui: &mut egui::Ui,
+    mode: CaptureMode,
+    selected: bool,
+    size: Vec2,
+) -> egui::Response {
+    let compact = size.y < 64.;
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -268,14 +341,17 @@ fn mode_tile(ui: &mut egui::Ui, mode: CaptureMode, selected: bool, width: f32) -
     mode_icon(
         ui.painter(),
         mode,
-        Rect::from_center_size(rect.center_top() + Vec2::new(0., 21.), Vec2::new(25., 20.)),
+        Rect::from_center_size(
+            rect.center_top() + Vec2::new(0., if compact { 17. } else { 21. }),
+            Vec2::new(25., 20.),
+        ),
         color,
     );
     ui.painter().text(
         rect.center_bottom() - Vec2::new(0., 13.),
         egui::Align2::CENTER_CENTER,
         mode.label(),
-        egui::FontId::proportional(13.),
+        egui::FontId::proportional(if compact { 12. } else { 13. }),
         color,
     );
     appearance::calico_tabs(ui.painter(), rect.min + Vec2::new(12., 0.));
@@ -325,9 +401,12 @@ mod tests {
         for label in [
             "Region",
             "Window",
+            "Multi-region",
             "Full screen",
             "Scrolling",
             "Include pointer",
+            "Editor",
+            "Clipboard",
             "Capture Now",
         ] {
             let t = output
@@ -359,10 +438,14 @@ mod tests {
         };
         for label in [
             "Window",
+            "Multi-region",
             "Full screen",
             "Scrolling",
             "Region",
             "Include pointer",
+            "Capture immediately after selection",
+            "Clipboard",
+            "Editor",
             "Capture Now",
         ] {
             let (output, _) = frame(vec![]);

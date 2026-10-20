@@ -8,6 +8,43 @@
 
 use image::RgbaImage;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureDestination {
+    #[default]
+    Editor,
+    Clipboard,
+}
+impl CaptureDestination {
+    pub const ALL: [Self; 2] = [Self::Editor, Self::Clipboard];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Editor => "Editor",
+            Self::Clipboard => "Clipboard",
+        }
+    }
+    pub fn hint(self) -> &'static str {
+        match self {
+            Self::Editor => "Save to Library and open in Editor.",
+            Self::Clipboard => {
+                "Copy, save to Library, and return to your other app. Your open project stays untouched."
+            }
+        }
+    }
+    pub fn capture_label(self) -> &'static str {
+        match self {
+            Self::Editor => "Capture",
+            Self::Clipboard => "Capture & copy",
+        }
+    }
+    pub fn finish_label(self) -> &'static str {
+        match self {
+            Self::Editor => "Finish & edit",
+            Self::Clipboard => "Finish & copy",
+        }
+    }
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use xcap::Monitor;
 
@@ -15,13 +52,15 @@ use xcap::Monitor;
 pub enum CaptureMode {
     #[default]
     Region,
+    MultiRegion,
     Window,
     FullScreen,
     Scrolling,
 }
 impl CaptureMode {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::Region,
+        Self::MultiRegion,
         Self::Window,
         Self::FullScreen,
         Self::Scrolling,
@@ -29,6 +68,7 @@ impl CaptureMode {
     pub fn label(self) -> &'static str {
         match self {
             Self::Region => "Region",
+            Self::MultiRegion => "Multi-region",
             Self::Window => "Window",
             Self::FullScreen => "Full screen",
             Self::Scrolling => "Scrolling",
@@ -37,6 +77,9 @@ impl CaptureMode {
     pub fn hint(self) -> &'static str {
         match self {
             Self::Region => "Click a window or drag an area. Adjust its edges before capturing.",
+            Self::MultiRegion => {
+                "Select several areas. Adjust each one, then capture together with transparent gaps."
+            }
             Self::Window => "Point to a window, click to select, then capture.",
             Self::FullScreen => "Capture the entire selected display.",
             Self::Scrolling => {

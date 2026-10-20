@@ -149,63 +149,69 @@ impl EditorState {
         document: &mut Document,
         history: &mut EditHistory,
     ) {
-        ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-        ui.spacing_mut().button_padding = Vec2::new(8.0, 6.0);
+        use inspector_widgets::{Glyph, tile};
+        ui.spacing_mut().item_spacing = Vec2::new(5., 5.);
         ui.horizontal(|ui| {
-            ui.strong("Layers");
-            ui.weak(format!("{} annotations", document.annotations.len()));
-        });
-        ui.weak("Top layers appear in front. Select a group or one of its members.");
-        ui.add_space(8.0);
-        if let Some(target) = self.selected_layer(document) {
-            ui.horizontal(|ui| {
-                if ui.button("Rename…").clicked() {
-                    self.rename_layer = Some(RenameDraft {
-                        target,
-                        name: target.settings(document).unwrap().name.clone(),
-                        focus: true,
-                    });
-                }
-                let mut settings = target.settings(document).unwrap().clone();
-                let mut visible = !settings.hidden;
-                let changed = ui.checkbox(&mut visible, "Show").changed()
-                    | ui.checkbox(&mut settings.locked, "Lock").changed();
-                if changed {
-                    settings.hidden = !visible;
-                    self.change_layer(target, settings, document, history);
-                }
+            ui.label(egui::RichText::new("Layers").size(16.).strong());
+            ui.weak(document.annotations.len().to_string());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
+                let help=tile(ui,"Layer help",Glyph::Help,Vec2::splat(26.),false,false);
+                egui::Popup::menu(&help).show(|ui| {
+                    ui.set_max_width(240.);
+                    ui.label("Top layers appear in front. Expand a group to edit its members.");
+                    ui.label("The eye hides artwork from the image and exports. The lock protects it from edits.");
+                    ui.label("Shift-click rows to select more. Double-click a name to rename it.");
+                    if ui.button("All annotations").clicked() {
+                        self.tool=Tool::Select;
+                        self.set_selection((0..document.annotations.len()).collect(),document);
+                        ui.close();
+                    }
+                });
             });
-            if let LayerTarget::Annotation(i) = target {
-                let a = &document.annotations[i];
-                if a.group_layer.hidden {
-                    ui.weak("Hidden by its group.");
-                }
-                if a.group_layer.locked {
-                    ui.weak("Locked by its group. Unlock the group first.");
-                }
-            }
+        });
+        if !document.annotations.is_empty() {
+            ui.add_enabled_ui(self.can_edit_selection(document), |ui| {
+                ui.horizontal(|ui| {
+                    let size = Vec2::new((ui.available_width() - 15.) / 4., 26.);
+                    for (label, front, extreme) in [
+                        ("To back", false, true),
+                        ("Lower", false, false),
+                        ("Raise", true, false),
+                        ("To front", true, true),
+                    ] {
+                        if tile(
+                            ui,
+                            label,
+                            Glyph::Order { front, extreme },
+                            size,
+                            false,
+                            false,
+                        )
+                        .on_hover_text(label)
+                        .clicked()
+                        {
+                            if extreme {
+                                self.reorder_extreme(document, history, front);
+                            } else {
+                                self.reorder(document, history, front);
+                            }
+                        }
+                    }
+                });
+            });
+            ui.add_space(3.);
         } else {
-            ui.weak("Select one layer or a complete group to rename, show or lock it.");
-        }
-        ui.add_enabled_ui(self.can_edit_selection(document), |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("To back").clicked() {
-                    self.reorder_extreme(document, history, false);
-                }
-                if ui.button("Lower").clicked() {
-                    self.reorder(document, history, false);
-                }
-                if ui.button("Raise").clicked() {
-                    self.reorder(document, history, true);
-                }
-                if ui.button("To front").clicked() {
-                    self.reorder_extreme(document, history, true);
-                }
-            });
-        });
-        ui.separator();
-        if document.annotations.is_empty() {
-            ui.weak("Add text, shapes or a pen stroke to begin.");
+            let (r, _) =
+                ui.allocate_exact_size(Vec2::new(ui.available_width(), 66.), Sense::hover());
+            inspector_widgets::paint_glyph(
+                ui.painter(),
+                r.center(),
+                Glyph::Stack,
+                crate::appearance::MUTED,
+                34.,
+            );
+            ui.label(egui::RichText::new("Your artwork will appear here").strong());
+            ui.small("Add an arrow, text, shape or stamp.");
         }
         let mut seen = BTreeSet::new();
         for i in (0..document.annotations.len()).rev() {
@@ -214,79 +220,269 @@ impl EditorState {
                     continue;
                 }
                 let target = LayerTarget::Group(id);
-                self.layer_row(ui, target, document);
-                egui::CollapsingHeader::new(format!("{} members", target.indices(document).len()))
-                    .id_salt(("layer-group", id))
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        for child in target.indices(document).into_iter().rev() {
-                            self.layer_row(ui, LayerTarget::Annotation(child), document);
-                        }
-                    });
+                egui::collapsing_header::CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    ui.make_persistent_id(("layer-group", id)),
+                    true,
+                )
+                .show_header(ui, |ui| self.layer_row(ui, target, document, history))
+                .body(|ui| {
+                    for child in target.indices(document).into_iter().rev() {
+                        self.layer_row(ui, LayerTarget::Annotation(child), document, history);
+                    }
+                });
             } else {
-                self.layer_row(ui, LayerTarget::Annotation(i), document);
+                self.layer_row(ui, LayerTarget::Annotation(i), document, history);
             }
         }
-        ui.add_space(8.0);
-        ui.separator();
-        self.selection_controls(ui, document, history);
-        if ui
-            .add_enabled(
-                self.can_edit_selection(document),
-                egui::Button::new("Delete selected"),
-            )
-            .clicked()
-        {
-            self.delete(document, history);
+        let indices = self.selected_indices(document);
+        if !indices.is_empty() {
+            ui.add_space(5.);
+            ui.separator();
+            ui.horizontal(|ui| {
+                let size = Vec2::new((ui.available_width() - 15.) / 4., 46.);
+                let target = self.selected_layer(document);
+                ui.add_enabled_ui(target.is_some(), |ui| {
+                    if tile(
+                        ui,
+                        "Rename…",
+                        Glyph::App(DialogIcon::Edit),
+                        size,
+                        false,
+                        true,
+                    )
+                    .on_hover_text("Rename the selected layer or group")
+                    .clicked()
+                    {
+                        let target = target.unwrap();
+                        self.rename_layer = Some(RenameDraft {
+                            target,
+                            name: target.settings(document).unwrap().name.clone(),
+                            focus: true,
+                        });
+                    }
+                });
+                let grouped = indices
+                    .iter()
+                    .any(|&i| document.annotations[i].group_id.is_some());
+                ui.add_enabled_ui(
+                    self.can_edit_selection(document) && (grouped || indices.len() >= 2),
+                    |ui| {
+                        if tile(
+                            ui,
+                            if grouped { "Ungroup" } else { "Group" },
+                            Glyph::Group(grouped),
+                            size,
+                            false,
+                            true,
+                        )
+                        .on_hover_text("Group: Command/Ctrl+G · Ungroup: Command/Ctrl+Shift+G")
+                        .clicked()
+                        {
+                            if grouped {
+                                self.ungroup_selection(document, history);
+                            } else {
+                                self.group_selection(document, history);
+                            }
+                        }
+                    },
+                );
+                if tile(ui, "Duplicate", Glyph::Copy, size, false, true)
+                    .on_hover_text("Create an independent copy · Command/Ctrl+D")
+                    .clicked()
+                {
+                    self.duplicate_selection(document, history);
+                }
+                ui.add_enabled_ui(self.can_edit_selection(document), |ui| {
+                    if tile(
+                        ui,
+                        "Delete",
+                        Glyph::App(DialogIcon::Trash),
+                        size,
+                        false,
+                        true,
+                    )
+                    .on_hover_text("Delete selected layers · Delete")
+                    .clicked()
+                    {
+                        self.delete(document, history);
+                    }
+                });
+            });
+            ui.menu_button("Arrange ▾", |ui| {
+                self.layout_controls(ui, document, history)
+            });
         }
-        ui.weak("Hidden layers stay in the project but are excluded from exports. Locking protects artwork; names and visibility remain adjustable.");
     }
 
-    fn layer_row(&mut self, ui: &mut egui::Ui, target: LayerTarget, document: &Document) {
+    fn layer_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        target: LayerTarget,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
+        use crate::appearance::{BORDER, CREAM, INK, MUTED};
+        use inspector_widgets::{Glyph, tile};
         let indices = target.indices(document);
         let selection = self.selected_indices(document);
         let selected = !indices.is_empty() && indices.iter().all(|i| selection.contains(i));
-        let settings = target.settings(document).unwrap();
+        let mut settings = target.settings(document).unwrap().clone();
         let label = target.label(document);
+        let parent_hidden = matches!(target,LayerTarget::Annotation(i) if document.annotations[i].group_layer.hidden);
+        let parent_locked = matches!(target,LayerTarget::Annotation(i) if document.annotations[i].group_layer.locked);
+        let visible = !settings.hidden && !parent_hidden;
+        let locked = settings.locked || parent_locked;
         ui.push_id(target, |ui| {
-            let response = ui.add_sized(
-                [ui.available_width(), 32.0],
-                egui::Button::selectable(selected, &label).truncate(),
-            );
-            response.clone().on_hover_text(&label);
-            if response.clicked() {
-                self.tool = Tool::Select;
-                self.choose_annotation(
-                    indices.first().copied(),
-                    ui.input(|i| i.modifiers.shift),
-                    matches!(target, LayerTarget::Annotation(_)),
-                    document,
-                );
-                // Choosing a layer supersedes any prior pixel marquee, including effects.
-                self.area = None;
-                self.area_mask.clear();
-                self.pixel_mask = None;
-                self.area_aspect_ratio = None;
-                self.layer_target = Some(target);
-                self.focus_canvas = true;
-            }
-            let (visible, locked) = match target {
-                LayerTarget::Annotation(i) => (
-                    document.annotations[i].visible(),
-                    document.annotations[i].locked(),
-                ),
-                LayerTarget::Group(_) => (!settings.hidden, settings.locked),
-            };
-            let order = match target {
-                LayerTarget::Annotation(i) => format!("#{}", i + 1),
-                LayerTarget::Group(_) => "Group".into(),
-            };
-            ui.small(format!(
-                "{order}  ·  {}  ·  {}",
-                if visible { "Visible" } else { "Hidden" },
-                if locked { "Locked" } else { "Unlocked" }
-            ));
-            ui.add_space(4.0);
+            egui::Frame::new()
+                .fill(if selected {
+                    CREAM
+                } else {
+                    crate::appearance::PAPER
+                })
+                .stroke(Stroke::new(
+                    1.,
+                    if selected {
+                        crate::appearance::ACCENT
+                    } else {
+                        BORDER
+                    },
+                ))
+                .corner_radius(5)
+                .inner_margin(4)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.;
+                        let (badge, _) = ui.allocate_exact_size(Vec2::splat(24.), Sense::hover());
+                        match target {
+                            LayerTarget::Group(_) => inspector_widgets::paint_glyph(
+                                ui.painter(),
+                                badge.center(),
+                                Glyph::Stack,
+                                INK,
+                                19.,
+                            ),
+                            LayerTarget::Annotation(i) => {
+                                let a = &document.annotations[i];
+                                let color = if visible {
+                                    Color32::from_rgb(a.color[0], a.color[1], a.color[2])
+                                } else {
+                                    MUTED
+                                };
+                                if a.kind.is_shape() {
+                                    ui.painter().add(egui::Shape::closed_line(
+                                        crate::shapes::outline(a.kind, badge.shrink(3.)),
+                                        Stroke::new(1.5, color),
+                                    ));
+                                } else {
+                                    let tool = match a.kind {
+                                        AnnotationKind::Text => Tool::Text,
+                                        AnnotationKind::Arrow => Tool::Arrow,
+                                        AnnotationKind::Callout => Tool::Callout,
+                                        AnnotationKind::Step => Tool::Step,
+                                        AnnotationKind::Stamp => Tool::Stamp,
+                                        AnnotationKind::Fill => Tool::Fill,
+                                        AnnotationKind::Freehand => Tool::Pen,
+                                        AnnotationKind::Highlighter => Tool::Highlighter,
+                                        AnnotationKind::Blur => Tool::Blur,
+                                        AnnotationKind::Pixelate => Tool::Pixelate,
+                                        _ => Tool::Area,
+                                    };
+                                    paint_tool_icon(ui.painter(), badge.center(), tool, color);
+                                }
+                            }
+                        }
+                        let response = ui.add_sized(
+                            [(ui.available_width() - 56.).max(20.), 28.],
+                            egui::Button::new(
+                                egui::RichText::new(&label).size(12.).color(if visible {
+                                    INK
+                                } else {
+                                    MUTED
+                                }),
+                            )
+                            .frame(false)
+                            .truncate(),
+                        );
+                        response.clone().on_hover_text(format!(
+                            "{label}{}",
+                            if matches!(target, LayerTarget::Group(_)) {
+                                format!(" · {} layers", indices.len())
+                            } else {
+                                String::new()
+                            }
+                        ));
+                        if response.clicked() {
+                            self.tool = Tool::Select;
+                            self.choose_annotation(
+                                indices.first().copied(),
+                                ui.input(|i| i.modifiers.shift),
+                                matches!(target, LayerTarget::Annotation(_)),
+                                document,
+                            );
+                            self.area = None;
+                            self.area_mask.clear();
+                            self.pixel_mask = None;
+                            self.area_aspect_ratio = None;
+                            self.layer_target = Some(target);
+                            self.focus_canvas = true;
+                        }
+                        if selected
+                            && self.layer_target == Some(target)
+                            && response.double_clicked()
+                        {
+                            self.rename_layer = Some(RenameDraft {
+                                target,
+                                name: settings.name.clone(),
+                                focus: true,
+                            });
+                        }
+                        ui.add_enabled_ui(!parent_hidden, |ui| {
+                            if tile(
+                                ui,
+                                &format!("Show {label}"),
+                                Glyph::Visible(visible),
+                                Vec2::splat(24.),
+                                false,
+                                false,
+                            )
+                            .on_hover_text(if parent_hidden {
+                                "Hidden by its group"
+                            } else if visible {
+                                "Hide layer"
+                            } else {
+                                "Show layer"
+                            })
+                            .clicked()
+                            {
+                                settings.hidden = !settings.hidden;
+                                self.change_layer(target, settings.clone(), document, history);
+                            }
+                        });
+                        ui.add_enabled_ui(!parent_locked, |ui| {
+                            if tile(
+                                ui,
+                                &format!("Lock {label}"),
+                                Glyph::Lock(locked),
+                                Vec2::splat(24.),
+                                locked,
+                                false,
+                            )
+                            .on_hover_text(if parent_locked {
+                                "Locked by its group"
+                            } else if locked {
+                                "Unlock layer"
+                            } else {
+                                "Lock layer"
+                            })
+                            .clicked()
+                            {
+                                settings.locked = !settings.locked;
+                                self.change_layer(target, settings.clone(), document, history);
+                            }
+                        });
+                    });
+                });
         });
     }
 
@@ -658,23 +854,22 @@ mod tests {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280.0, 1000.0))),
             ..Default::default()
         };
+        ctx.enable_accesskit();
         let frame = ui_frame(e, d, h, ctx, texture, input());
         let at = frame
-            .shapes
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
             .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.job.text == label => {
-                    assert!(
-                        shape
-                            .clip_rect
-                            .contains_rect(Rect::from_min_size(text.pos, text.galley.size())),
-                        "Clipped control: {label}"
-                    );
-                    Some(text.pos + text.galley.size() * 0.5)
-                }
-                _ => None,
+            .find_map(|(_, node)| {
+                (node.label() == Some(label))
+                    .then(|| node.bounds())
+                    .flatten()
+                    .map(|r| egui::pos2(((r.x0 + r.x1) * 0.5) as f32, ((r.y0 + r.y1) * 0.5) as f32))
             })
-            .unwrap_or_else(|| panic!("Missing visible control: {label}"));
+            .unwrap_or_else(|| panic!("Missing accessible control: {label}"));
         for pressed in [true, false] {
             let mut input = input();
             input.events = vec![
@@ -707,7 +902,7 @@ mod tests {
         assert!(e.layers_open);
         click_label("Group 1", &mut e, &mut d, &mut h, &ctx, &texture);
         assert_eq!(e.selected_indices(&d), vec![0, 1]);
-        click_label("Show", &mut e, &mut d, &mut h, &ctx, &texture);
+        click_label("Show Group 1", &mut e, &mut d, &mut h, &ctx, &texture);
         assert!(
             d.annotations[..2].iter().all(|a| !a.visible()),
             "selection={:?} error={:?} layers={:?}",
@@ -718,7 +913,7 @@ mod tests {
                 .map(|a| (&a.layer, &a.group_layer))
                 .collect::<Vec<_>>()
         );
-        click_label("Lock", &mut e, &mut d, &mut h, &ctx, &texture);
+        click_label("Lock Group 1", &mut e, &mut d, &mut h, &ctx, &texture);
         assert!(d.annotations[..2].iter().all(Annotation::locked));
         click_label("Rename…", &mut e, &mut d, &mut h, &ctx, &texture);
         assert!(e.has_modal());
@@ -731,7 +926,14 @@ mod tests {
         click_label("Rename", &mut e, &mut d, &mut h, &ctx, &texture);
         assert!(!e.has_modal());
         assert_eq!(d.annotations[0].group_layer.name, "Important notes");
-        click_label("Lock", &mut e, &mut d, &mut h, &ctx, &texture);
+        click_label(
+            "Lock Important notes",
+            &mut e,
+            &mut d,
+            &mut h,
+            &ctx,
+            &texture,
+        );
         click_label("To front", &mut e, &mut d, &mut h, &ctx, &texture);
         assert_eq!(d.annotations[0].layer.name, "Artwork 3");
         for _ in 0..5 {

@@ -26,7 +26,7 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"MYIMAGE\0";
-const VERSION: u32 = 18;
+const VERSION: u32 = 21;
 const HEADER_BYTES: u64 = 24;
 const MAX_PROJECT_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_METADATA_BYTES: usize = 48 * 1024 * 1024;
@@ -367,8 +367,14 @@ pub(crate) fn validate_annotations(annotations: &[Annotation]) -> Result<(), Str
 pub(crate) fn validate_annotation(annotation: &Annotation) -> Result<(), String> {
     annotation.studio.validate()?;
     annotation.arrow.validate()?;
-    if annotation.kind != AnnotationKind::Arrow && !annotation.arrow.is_default() {
-        return Err("Arrow styles require an arrow object.".into());
+    if annotation.kind != AnnotationKind::Arrow {
+        let mut style = annotation.arrow.clone();
+        if annotation.kind.is_shape() {
+            style.pattern = crate::arrow_style::Pattern::Solid;
+        }
+        if !style.is_default() {
+            return Err("Endpoint and curve styles require an arrow object; outline patterns require a shape.".into());
+        }
     }
     if let Some(mask) = &annotation.pixel_mask {
         mask.validate()?;
@@ -633,6 +639,25 @@ pub fn load_project(path: &Path) -> Result<Document, String> {
         serde_json::from_slice(&json)
             .map_err(|error| format!("Cannot read project metadata: {error}"))?
     };
+    if version < 21
+        && metadata.annotations.iter().any(|a| {
+            matches!(
+                a.arrow.pattern,
+                crate::arrow_style::Pattern::DashDot | crate::arrow_style::Pattern::LongDash
+            ) || (a.kind.is_shape() && a.arrow.pattern != crate::arrow_style::Pattern::Solid)
+        })
+    {
+        return Err("Expanded stroke styles require MyImage project version 21.".into());
+    }
+    if version < 20
+        && (metadata.geometry.effects.edges != Default::default()
+            || metadata.geometry.effects.styles != Default::default())
+    {
+        return Err("Expanded image styling requires MyImage project version 20.".into());
+    }
+    if version < 19 && !metadata.geometry.effects.is_default() {
+        return Err("Image styling requires MyImage project version 19.".into());
+    }
     if version < 18 && metadata.annotations.iter().any(|a| a.arrow.curve.is_some()) {
         return Err("Curved arrows require MyImage project version 18.".into());
     }
@@ -789,6 +814,7 @@ pub struct EditHistory {
     undo: VecDeque<EditState>,
     redo: Vec<EditState>,
     saved: EditState,
+    revision: u64,
 }
 
 impl EditHistory {
@@ -797,6 +823,7 @@ impl EditHistory {
             undo: VecDeque::new(),
             redo: Vec::new(),
             saved: initial,
+            revision: 0,
         }
     }
 
@@ -805,6 +832,7 @@ impl EditHistory {
         if before.geometry == after.geometry && before.annotations == after.annotations {
             return;
         }
+        self.revision = self.revision.wrapping_add(1);
         self.undo.push_back(before);
         self.redo.clear();
         self.trim();
@@ -814,6 +842,7 @@ impl EditHistory {
         let Some(previous) = self.undo.pop_back() else {
             return false;
         };
+        self.revision = self.revision.wrapping_add(1);
         self.redo.push(document.replace_edit_state(previous));
         self.trim();
         true
@@ -823,9 +852,14 @@ impl EditHistory {
         let Some(next) = self.redo.pop() else {
             return false;
         };
+        self.revision = self.revision.wrapping_add(1);
         self.undo.push_back(document.replace_edit_state(next));
         self.trim();
         true
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn can_undo(&self) -> bool {
@@ -945,6 +979,7 @@ mod tests {
         let moved = directory.path().join("moved.myimage");
         let mut original = sample_document();
         original.geometry = ImageGeometry {
+            effects: Default::default(),
             viewport: None,
             flip_horizontal: false,
             flip_vertical: false,

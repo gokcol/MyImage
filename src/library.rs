@@ -699,6 +699,7 @@ mod tests {
                 points: Vec::new(),
             }],
             geometry: ImageGeometry {
+                effects: Default::default(),
                 viewport: None,
                 flip_horizontal: false,
                 flip_vertical: false,

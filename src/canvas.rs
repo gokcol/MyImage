@@ -53,6 +53,7 @@ pub fn prepare_image(
     }
     let mut transformed = geometry;
     transformed.canvas = None;
+    transformed.effects.shift(bounds.x, bounds.y);
     transformed.crop = geometry.viewport.map(|v| crate::geometry::CropRect {
         x: (v.x - bounds.x) as u32,
         y: (v.y - bounds.y) as u32,

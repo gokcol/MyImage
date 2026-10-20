@@ -555,6 +555,7 @@ impl EditorState {
         self.layers_open |= protected;
         if protected {
             self.presets_open = false;
+            self.effects_open = false;
         }
         self.image_error = None;
         (count, protected)
@@ -1239,6 +1240,7 @@ mod tests {
         for turns in 0..4 {
             let mut d = blank();
             d.geometry = ImageGeometry {
+                effects: Default::default(),
                 viewport: None,
                 flip_horizontal: false,
                 flip_vertical: false,
@@ -1353,6 +1355,7 @@ mod tests {
         texture: &egui::TextureHandle,
         events: Vec<egui::Event>,
     ) -> egui::FullOutput {
+        ctx.enable_accesskit();
         ctx.run(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 1000.))),
@@ -1360,6 +1363,9 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
+                egui::TopBottomPanel::bottom("test-image-controls").show(ctx, |ui| {
+                    ui.horizontal(|ui| e.image_controls(ui, d, h));
+                });
                 egui::CentralPanel::default()
                     .show(ctx, |ui| e.ui(ui, d, h, texture, &mut Default::default()));
             },
@@ -1482,7 +1488,7 @@ mod tests {
             label,
             "Copy" | "Copy editable annotations" | "Paste" | "Undo" | "Redo"
         ) {
-            click("Image actions", e, d, h, ctx, texture);
+            click("Image tools · crop, resize, rotate", e, d, h, ctx, texture);
         }
         let output = frame(e, d, h, ctx, texture, vec![]);
         let at = output
@@ -1493,6 +1499,18 @@ mod tests {
                     Some(t.pos + t.galley.size() * 0.5)
                 }
                 _ => None,
+            })
+            .or_else(|| {
+                output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .and_then(|update| {
+                        update.nodes.iter().find_map(|(_, n)| {
+                            (n.label() == Some(label)).then(|| n.bounds()).flatten()
+                        })
+                    })
+                    .map(|r| Pos2::new(((r.x0 + r.x1) * 0.5) as f32, ((r.y0 + r.y1) * 0.5) as f32))
             })
             .unwrap_or_else(|| panic!("Missing button {label}"));
         frame(

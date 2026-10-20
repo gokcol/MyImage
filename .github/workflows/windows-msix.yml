@@ -1,0 +1,90 @@
+name: Microsoft Store MSIX — validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows-msix.yml'
+      - 'packaging/windows/msix/**'
+      - 'scripts/*msix*'
+      - 'examples/msix_assets.rs'
+      - 'assets/branding/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  pull_request:
+    paths:
+      - '.github/workflows/windows-msix.yml'
+      - 'packaging/windows/msix/**'
+      - 'scripts/*msix*'
+      - 'examples/msix_assets.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag or full commit SHA to package
+        default: main
+        required: true
+      mode:
+        description: Store mode requires the MSIX identity repository variables
+        type: choice
+        options: [test, store]
+        default: test
+      package_version:
+        description: Optional Store version override (at least version.txt; last part 0)
+        default: ''
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Install Rust
+        run: rustup toolchain install 1.93.1 --profile minimal
+      - name: Build desktop app and Store artwork
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc --bin myimage --example msix_assets
+      - name: Package and validate
+        shell: pwsh
+        env:
+          MODE: ${{ inputs.mode || 'test' }}
+          PACKAGE_VERSION: ${{ inputs.package_version }}
+          STORE_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          STORE_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          STORE_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+          STORE_DISPLAY_NAME: ${{ vars.MSIX_DISPLAY_NAME }}
+        run: |
+          $packageArgs = @{ SkipBuild = $true; OutputDirectory = 'dist/msix' }
+          if ($env:PACKAGE_VERSION) { $packageArgs.PackageVersion = $env:PACKAGE_VERSION }
+          if ($env:MODE -eq 'store') {
+            $packageArgs.IdentityName = $env:STORE_IDENTITY_NAME
+            $packageArgs.Publisher = $env:STORE_PUBLISHER
+            $packageArgs.PublisherDisplayName = $env:STORE_PUBLISHER_DISPLAY_NAME
+            if ($env:STORE_DISPLAY_NAME) { $packageArgs.DisplayName = $env:STORE_DISPLAY_NAME }
+          } else {
+            $packageArgs.TestIdentity = $true
+          }
+          & ./scripts/package-msix.ps1 @packageArgs
+      - name: Check invalid identities, versions and XML escaping
+        shell: pwsh
+        run: '& ./scripts/test-msix.ps1'
+      - name: Verify disposable test package installation and removal
+        if: ${{ inputs.mode != 'store' }}
+        shell: powershell
+        run: '& ./scripts/test-msix-install.ps1'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyImage-msix-${{ inputs.mode || 'test' }}-x64
+          if-no-files-found: error
+          path: |
+            dist/msix/*.msix
+            dist/msix/*.sha256
+            dist/msix/*.json
+      # Test packages and temporary signing keys are never GitHub release assets.
+      # Partner Center submission and Microsoft signing require the real identity
+      # and certification; this workflow does not publish a Store listing.

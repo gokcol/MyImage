@@ -12,12 +12,14 @@ struct PreviewKey {
     annotations: Vec<Annotation>,
     max_side: u32,
     expanded_geometry: Option<crate::geometry::ImageGeometry>,
+    effects: crate::image_effects::ImageEffects,
 }
 
 impl PreviewKey {
     fn matches(&self, document: &Document, max_side: u32) -> bool {
         Arc::ptr_eq(&self.original, &document.image)
             && self.annotations == document.annotations
+            && self.effects == document.geometry.effects
             && self.max_side == max_side
             && self.expanded_geometry == document.geometry.canvas.map(|_| document.geometry)
     }
@@ -70,6 +72,7 @@ impl PrivacyPreview {
             annotations: document.annotations.clone(),
             max_side: max_side.min(MAX_PREVIEW_SIDE),
             expanded_geometry: document.geometry.canvas.map(|_| document.geometry),
+            effects: document.geometry.effects,
         });
         self.refined = true;
         self.ready =
@@ -164,6 +167,7 @@ impl PrivacyPreview {
                 annotations: document.annotations.clone(),
                 max_side,
                 expanded_geometry: document.geometry.canvas.map(|_| document.geometry),
+                effects: document.geometry.effects,
             });
             self.ready = None;
             self.refined = false;

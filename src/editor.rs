@@ -32,10 +32,16 @@ mod editor_tools;
 mod fill_tool;
 #[path = "freehand.rs"]
 mod freehand;
+#[path = "image_effects_panel.rs"]
+mod image_effects_panel;
+#[path = "inspector_widgets.rs"]
+mod inspector_widgets;
 #[path = "object_properties.rs"]
 mod object_properties;
 #[path = "quick_styles.rs"]
 mod quick_styles;
+#[path = "selection_panel.rs"]
+mod selection_panel;
 #[path = "selection_size.rs"]
 mod selection_size;
 #[path = "shape_picker.rs"]
@@ -243,6 +249,8 @@ pub struct EditorState {
     canvas_resize: Option<canvas_handles::CanvasResize>,
     layers_open: bool,
     presets_open: bool,
+    effects_open: bool,
+    image_effect_tab: u8,
     presets: annotation_presets::PresetState,
     stamps: stamp_panel::StampState,
     fill_tool: fill_tool::FillState,
@@ -314,6 +322,8 @@ impl Default for EditorState {
             canvas_resize: None,
             layers_open: false,
             presets_open: false,
+            effects_open: false,
+            image_effect_tab: 0,
             presets: Default::default(),
             stamps: Default::default(),
             fill_tool: Default::default(),
@@ -462,6 +472,7 @@ impl EditorState {
     }
 
     fn activate_tool(&mut self, tool: Tool) {
+        self.effects_open = false;
         self.tool = tool;
         self.color = match tool {
             Tool::Step => self.step_color,
@@ -609,11 +620,15 @@ impl EditorState {
                     ui.spacing_mut().button_padding = Vec2::new(6., 6.);
                     ui.spacing_mut().item_spacing.x = 4.;
                     if ui
-                        .selectable_label(!self.layers_open && !self.presets_open, "Styles")
+                        .selectable_label(
+                            !self.layers_open && !self.presets_open && !self.effects_open,
+                            "Styles",
+                        )
                         .clicked()
                     {
                         self.layers_open = false;
                         self.presets_open = false;
+                        self.effects_open = false;
                     }
                     if ui
                         .selectable_label(self.layers_open && !self.presets_open, "Layers")
@@ -621,13 +636,25 @@ impl EditorState {
                     {
                         self.layers_open = true;
                         self.presets_open = false;
+                        self.effects_open = false;
                     }
                     if ui.selectable_label(self.presets_open, "Presets").clicked() {
                         self.cancel_image_tools();
                         self.presets_open = true;
+                        self.effects_open = false;
+                    }
+                    if ui.selectable_label(self.effects_open, "Effects").clicked() {
+                        self.open_image_effects(document, history);
                     }
                 });
                 ui.separator();
+                if self.effects_open {
+                    egui::ScrollArea::vertical()
+                        .id_salt("image-effects-panel")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| self.image_effects_panel(ui, document, history));
+                    return;
+                }
                 if !(self.extra_panel_active(document)
                     || self.tool == Tool::Crop
                     || self.presets_open
@@ -714,86 +741,6 @@ impl EditorState {
                     },
                 );
             });
-        let hint = match self.tool {
-            Tool::Wand => "Click a color to select matching pixels • Adjust tolerance on the right",
-            Tool::CutOut => "Drag across a strip • Choose horizontal or vertical • Apply cut out",
-            Tool::Magnify => "Drag a lens • Adjust zoom, shape and border on the right",
-            Tool::Spotlight => "Drag over the focus area • Dim or blur the surroundings",
-            Tool::Simplify => {
-                "Cover details with editable blocks • Auto simplify finds text-like rows"
-            }
-            Tool::Area => {
-                "Drag inside to move the boundary • Drag edges or corners to resize • Move pixels is an explicit option"
-            }
-            Tool::Select => "Click annotations to edit • Shift-click to select more",
-            Tool::Crop => {
-                "Drag a crop area • Apply to keep it • Original pixels stay in your project"
-            }
-            Tool::Fill => {
-                "Click a background to fill • Solid edges stop the fill • Select an area first to limit it"
-            }
-            Tool::Stamp => "Choose a stamp on the right • Click to place • Drag corners to resize",
-            Tool::Text => "Click to write text • Double-click existing text to edit",
-            Tool::Arrow => {
-                "Drag to draw • Click an arrow to select • Drag its center handle to bend"
-            }
-            Tool::Pen => "Draw with the pen • Select a stroke later to change color or thickness",
-            Tool::Eraser => "Drag to erase parts of pen strokes • Undo restores the whole gesture",
-            Tool::Rectangle => "Drag to draw a rectangle",
-            Tool::Ellipse => "Drag to draw an ellipse",
-            Tool::Shape(_) => "Choose a shape in the right panel, then drag to draw",
-            Tool::Blur => "Drag to blur an area • Select it later to adjust strength or size",
-            Tool::Pixelate => "Drag to pixelate an area • Select it later to adjust block size",
-            Tool::Step => {
-                "Click to add numbered steps • Select a marker to adjust its number or size"
-            }
-            Tool::Callout => "Drag a bubble • Edit its text • Drag the pointer handle to aim it",
-            Tool::Highlighter => {
-                "Drag to highlight an area • Adjust color and opacity in the inspector"
-            }
-        };
-        let hint = if self.draws_objects() {
-            format!(
-                "{hint} • Click/drag existing objects to edit • Hold Alt/Option to draw over them"
-            )
-        } else {
-            hint.to_owned()
-        };
-        egui::TopBottomPanel::bottom("editor-canvas-status")
-            .exact_height(24.)
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
-            .show_inside(ui, |ui| {
-                ui.spacing_mut().button_padding = Vec2::new(4., 1.);
-                ui.spacing_mut().interact_size.y = 18.;
-                ui.horizontal(|ui| {
-                    ui.menu_button("Image actions", |ui| {
-                        self.canvas_menu(ui, document, history)
-                    })
-                    .response
-                    .on_hover_text("Right-click the image for these actions");
-                    let [width, height] = document.output_size();
-                    ui.small(format!("{width} × {height} px · {:.0}%", self.zoom * 100.))
-                        .on_hover_text(hint);
-                    ui.separator();
-                    ui.small(self.copy_scope(document))
-                        .on_hover_text("Copy includes the selected pixels and visible edits. Select all: Command/Ctrl+A. Deselect: Escape.");
-                    if let Some(error) = &self.image_error {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(error)
-                                    .small()
-                                    .color(Color32::from_rgb(170, 35, 45)),
-                            )
-                            .truncate(),
-                        )
-                        .on_hover_text(error);
-                    } else if let Some(status) = &self.clipboard_status {
-                        ui.add(egui::Label::new(egui::RichText::new(status).small()).truncate())
-                            .on_hover_text(status);
-                    }
-                });
-            });
-
         egui::Frame::new()
             .fill(Color32::from_rgb(36, 41, 48))
             .inner_margin(12)
@@ -801,6 +748,83 @@ impl EditorState {
             .show(ui, |ui| {
                 self.canvas(ui, document, history, texture, preview)
             });
+    }
+
+    /// Image-level controls share the Recents row to leave more canvas space.
+    pub fn image_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
+        use crate::appearance::{self, Icon};
+        ui.spacing_mut().item_spacing.x = 5.;
+        ui.spacing_mut().button_padding = Vec2::new(7., 3.);
+        let actions =
+            appearance::icon_button(ui, "Image tools · crop, resize, rotate", Icon::Settings);
+        egui::Popup::menu(&actions).show(|ui| self.canvas_menu(ui, document, history));
+        if appearance::icon_button(ui, "Fit canvas to window", Icon::Fit).clicked() {
+            self.fit = true;
+        }
+        ui.menu_button(format!("{:.0}% ▾", self.zoom * 100.), |ui| {
+            ui.set_min_width(160.);
+            ui.strong("View zoom");
+            for percent in [25, 50, 75, 100, 150, 200, 400] {
+                if ui
+                    .selectable_label(
+                        !self.fit && (self.zoom * 100. - percent as f32).abs() < 0.1,
+                        format!("{percent}%"),
+                    )
+                    .clicked()
+                {
+                    self.fit = false;
+                    self.zoom = percent as f32 / 100.;
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if appearance::zoom_slider(ui, &mut self.zoom, 0.05..=8.).changed() {
+                self.fit = false;
+            }
+        })
+        .response
+        .on_hover_text("View percentage · Pinch or Ctrl-scroll over the image to zoom");
+        if appearance::icon_button(
+            ui,
+            "Quick Effects · edges, shadow, border, grayscale",
+            Icon::Effects,
+        )
+        .clicked()
+        {
+            self.open_image_effects(document, history);
+        }
+        let [width, height] = document.output_size();
+        ui.label(
+            egui::RichText::new(format!("{width} × {height} px"))
+                .size(11.)
+                .color(appearance::MUTED),
+        )
+        .on_hover_text("Image dimensions · Use the image tools menu to resize");
+        let scope = self.copy_scope(document);
+        let copy_info = appearance::icon_button(ui, &scope, Icon::Info);
+        egui::Popup::menu(&copy_info).show(|ui| {
+            ui.strong(&scope);
+            ui.label("Copy includes visible edits. Select all: Command/Ctrl+A. Deselect: Escape.");
+        });
+        if let Some(error) = &self.image_error {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(error)
+                        .small()
+                        .color(crate::dialogs::DANGER),
+                )
+                .truncate(),
+            )
+            .on_hover_text(error);
+        } else if let Some(status) = &self.clipboard_status {
+            ui.add(egui::Label::new(egui::RichText::new(status).small()).truncate())
+                .on_hover_text(status);
+        }
     }
 
     pub fn image_menu(
@@ -830,6 +854,7 @@ impl EditorState {
             self.finish_gesture(document, history);
             self.layers_open = false;
             self.presets_open = false;
+            self.effects_open = false;
             self.tool = Tool::Crop;
             self.clear_selection();
             self.crop = Some(CropDraft {
@@ -933,6 +958,7 @@ impl EditorState {
             self.tool = Tool::Select;
             self.layers_open = false;
             self.presets_open = false;
+            self.effects_open = false;
             self.set_selection((0..document.annotations.len()).collect(), document);
             self.focus_canvas = true;
             ui.close();
@@ -1246,6 +1272,8 @@ impl EditorState {
         if let Some(annotation) = document.annotations.get_mut(index) {
             if annotation.kind == AnnotationKind::Arrow {
                 annotation.arrow = self.arrow.clone();
+            } else if annotation.kind.is_shape() {
+                annotation.arrow.pattern = self.arrow.pattern;
             }
             if annotation.kind.is_studio() {
                 annotation.studio = self.studio.clone();
@@ -1739,7 +1767,8 @@ impl EditorState {
                 // moved privacy region can never reveal the unprocessed image
                 // for one frame while its replacement preview is being built.
                 if paint_document.geometry.canvas.is_some()
-                    || paint_document.geometry.has_cutouts()
+                    || (paint_document.geometry.has_cutouts()
+                        || paint_document.geometry.effects.active())
                     || paint_document
                         .annotations
                         .iter()
@@ -2054,6 +2083,11 @@ impl EditorState {
                 crate::arrow_style::ArrowStyle {
                     curve: None,
                     ..self.arrow.clone()
+                }
+            } else if kind.is_shape() {
+                crate::arrow_style::ArrowStyle {
+                    pattern: self.arrow.pattern,
+                    ..Default::default()
                 }
             } else {
                 Default::default()
@@ -2590,10 +2624,17 @@ fn output_point(at: Point, document: &Document) -> Pos2 {
 }
 
 fn mapped_bounds(bounds: Rect, document: &Document) -> Rect {
-    Rect::from_two_pos(
-        output_point(from_pos(bounds.min), document),
-        output_point(from_pos(bounds.max), document),
-    )
+    [
+        bounds.left_top(),
+        bounds.right_top(),
+        bounds.left_bottom(),
+        bounds.right_bottom(),
+    ]
+    .into_iter()
+    .fold(Rect::NOTHING, |mut rect, p| {
+        rect.extend_with(output_point(from_pos(p), document));
+        rect
+    })
 }
 
 fn hit_document_handle(
@@ -5151,6 +5192,7 @@ mod tests {
             image: std::sync::Arc::new(image::RgbaImage::new(200, 160)),
             annotations: vec![annotation(AnnotationKind::Rectangle)],
             geometry: ImageGeometry {
+                effects: Default::default(),
                 viewport: None,
                 flip_horizontal: false,
                 flip_vertical: false,
