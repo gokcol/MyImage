@@ -7,9 +7,10 @@ pending, including real capture, clipboard, DPI, permissions and tray behavior.
 
 ## Signing
 
-The Mac GitHub release is Developer ID signed and notarized. Windows builds are **UNTESTED**. The GitHub release workflow refuses to upload
-a Windows download until a production Windows signing service is configured
-and a trusted timestamped signature is verified. A Mac certificate cannot sign Windows binaries.
+The Mac GitHub release is Developer ID signed and notarized. Windows builds are
+**UNTESTED**. Windows distribution will use the Microsoft Store; no direct
+Windows installer is currently offered on GitHub. The separate GitHub release
+workflow retains its signature guard against publishing unsigned executables.
 
 Microsoft signs an MSIX after Store submission/certification. The unsigned MSIX
 produced here is an upload artifact, not a direct GitHub installer. Test identities
@@ -32,6 +33,16 @@ Do not reuse MyPDF's package identity or invent a publisher. In Actions, run
 **Microsoft Store MSIX — validation**, select the release tag and `store` mode.
 Without identity values use `test` mode, which deliberately produces TEST-ONLY
 artifacts. The workflow does not submit to Partner Center.
+
+The registered MyImage identity supplied from Partner Center is:
+
+- Package name: `OrhanGkl.MyImageOG`
+- Publisher: `CN=A9F0208B-CC43-472D-AE82-9FE4556DC935`
+- Publisher display name: `Orhan Gökçöl`
+
+These public values are configured as GitHub Actions variables. The product's
+reserved display name is configured separately in `MSIX_DISPLAY_NAME`; it must
+match Partner Center exactly, including punctuation.
 
 Public app version is **1.2.0**; the independent MSIX version is **1.12.0.0**.
 This preserves increasing package order after the public 1.11.x numbering.
