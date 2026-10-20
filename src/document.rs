@@ -518,6 +518,57 @@ pub(crate) fn validate_annotation(annotation: &Annotation) -> Result<(), String>
 /// Atomically replaces a project only after its complete contents are flushed.
 /// A failed validation, encoding, write, or publish leaves an existing file intact.
 pub fn save_project(document: &Document, destination: &Path) -> Result<(), String> {
+    let parent = destination
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    project_temporary(document, parent)?
+        .persist(destination)
+        .map_err(|e| format!("Cannot save project {}: {}", destination.display(), e.error))?;
+    Ok(())
+}
+
+/// Publish a new project without ever replacing a same-named document.
+pub fn save_new_project(
+    document: &Document,
+    directory: &Path,
+    stem: &str,
+) -> Result<std::path::PathBuf, String> {
+    std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+    let stem: String = stem
+        .chars()
+        .filter(|c| !c.is_control() && !"/\\:*?\"<>|".contains(*c))
+        .take(100)
+        .collect();
+    let stem = stem.trim().trim_matches('.');
+    let stem = if stem.is_empty() {
+        "Untitled image"
+    } else {
+        stem
+    };
+    let mut temporary = project_temporary(document, directory)?;
+    for n in 0..10000 {
+        let name = if n == 0 {
+            stem.to_owned()
+        } else {
+            format!("{stem} ({n})")
+        };
+        let destination =
+            crate::library_files::rename_target(&directory.join("image.myimage"), &name)
+                .unwrap_or_else(|_| directory.join(format!("Image-{n}.myimage")));
+        match temporary.persist_noclobber(&destination) {
+            Ok(_) => return Ok(destination),
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => temporary = e.file,
+            Err(e) => return Err(format!("Cannot create project: {}", e.error)),
+        }
+    }
+    Err("Cannot allocate a unique project filename.".into())
+}
+
+fn project_temporary(
+    document: &Document,
+    parent: &Path,
+) -> Result<tempfile::NamedTempFile, String> {
     validate_document(document)?;
     let metadata = Metadata {
         width: document.image.width(),
@@ -530,10 +581,6 @@ pub fn save_project(document: &Document, destination: &Path) -> Result<(), Strin
     if json.len() > MAX_METADATA_BYTES {
         return Err("The project annotation data is too large.".into());
     }
-    let parent = destination
-        .parent()
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|error| {
         format!(
             "Cannot create a project file in {}: {error}",
@@ -543,20 +590,13 @@ pub fn save_project(document: &Document, destination: &Path) -> Result<(), Strin
     {
         let mut writer = BufWriter::new(temporary.as_file_mut());
         write_contents(&mut writer, document, &json)
-            .map_err(|error| format!("Cannot write project {}: {error}", destination.display()))?;
+            .map_err(|error| format!("Cannot write project: {error}"))?;
     }
     temporary
         .as_file()
         .sync_all()
         .map_err(|error| format!("Cannot flush project to disk: {error}"))?;
-    temporary.persist(destination).map_err(|error| {
-        format!(
-            "Cannot save project {}: {}",
-            destination.display(),
-            error.error
-        )
-    })?;
-    Ok(())
+    Ok(temporary)
 }
 
 fn write_contents(

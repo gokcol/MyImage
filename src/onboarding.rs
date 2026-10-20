@@ -31,12 +31,12 @@ pub fn show(ctx: &egui::Context, open: &mut bool, calico: &egui::TextureHandle) 
                 .show(ui, |ui| {
                     step_card(ui, "01", Icon::Capture, "Catch a moment", "Capture a region, a window, or your whole screen.", "Ctrl + Shift + .  ·  On Mac, ⌘ + Shift + . also works", appearance::palette(ui.ctx()).cream, appearance::palette(ui.ctx()).accent);
                     step_card(ui, "02", Icon::Edit, "Make your mark", "Add arrows, text and stamps. Click an object to style it.", "Drag a selection to move pixels; use its handles to adjust the boundary.", Color32::from_rgb(229, 242, 239), Color32::from_rgb(30, 104, 94));
-                    step_card(ui, "03", Icon::Save, "Keep it editable. Share it anywhere.", "Save .myimage for the layers. Export an image or PDF to share.", "Right-click a selection for actions, including Delete.", Color32::from_rgb(239, 234, 227), appearance::palette(ui.ctx()).ink);
+                    step_card(ui, "03", Icon::Save, "Keep it editable. Share it anywhere.", "Each image saves automatically as one editable .myimage project. Export an image or PDF to share.", "Right-click a selection for actions, including Delete.", Color32::from_rgb(239, 234, 227), appearance::palette(ui.ctx()).ink);
                     ui.add_space(3.);
                     egui::Frame::new().fill(appearance::palette(ui.ctx()).cream).corner_radius(7).inner_margin(9).show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.label(RichText::new("A little peace of mind").strong().color(appearance::palette(ui.ctx()).accent));
-                        ui.add(egui::Label::new(RichText::new("Autosave keeps a separate editable recovery copy. If a session ends unexpectedly, choose what to recover next time.").small().color(appearance::palette(ui.ctx()).ink)).wrap());
+                        ui.add(egui::Label::new(RichText::new("Edits save to your project automatically. Recovery also protects unfinished work after an unexpected exit.").small().color(appearance::palette(ui.ctx()).ink)).wrap());
                     });
                     ui.add_space(4.);
                     shortcuts(ui);

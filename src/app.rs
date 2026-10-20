@@ -40,6 +40,8 @@ use std::{
 
 enum WorkEvent {
     Recovery(crate::recovery::Event),
+    ProjectLibraryReady(Result<crate::project_store::Migration, String>),
+    LegacyCapturesRetired(Vec<String>),
     Displays(Result<Vec<DisplayInfo>, String>),
     Captured(
         u64,
@@ -60,7 +62,6 @@ enum WorkEvent {
         Result<bool, String>,
         bool,
     ),
-    Saved(Arc<image::RgbaImage>, Result<PathBuf, String>, bool),
     CaptureFinished(Result<CaptureOutput, String>),
     #[cfg(test)]
     Opened(PathBuf, bool, Result<Document, String>),
@@ -81,6 +82,8 @@ enum WorkEvent {
 
 #[path = "file_browser.rs"]
 mod file_browser;
+#[path = "project_session.rs"]
+mod project_session;
 #[path = "recent_history.rs"]
 mod recent_history;
 #[path = "recovery_ui.rs"]
@@ -180,6 +183,7 @@ pub struct MyImageApp {
     last_path: Option<PathBuf>,
     document: Option<Document>,
     project_path: Option<PathBuf>,
+    project_session: project_session::ProjectSession,
     history: EditHistory,
     recent_revision: u64,
     editor: EditorState,
@@ -311,6 +315,7 @@ impl MyImageApp {
             last_path: None,
             document: None,
             project_path: None,
+            project_session: Default::default(),
             history: EditHistory::new(document::EditState::default()),
             recent_revision: 0,
             editor,
@@ -739,6 +744,16 @@ impl MyImageApp {
     }
 
     fn begin_open(&mut self, ctx: &egui::Context, path: PathBuf, _edit: bool) {
+        let path = if !is_project_path(&path) {
+            self.settings
+                .project_sources
+                .get(&crate::project_store::source_key(&path))
+                .filter(|p| p.is_file())
+                .cloned()
+                .unwrap_or(path)
+        } else {
+            path
+        };
         if self.image_loader.is_none() {
             let tx = self.work_tx.clone();
             let worker_ctx = ctx.clone();
@@ -776,6 +791,7 @@ impl MyImageApp {
 
     fn install_document(&mut self, document: Document, project_path: Option<PathBuf>) {
         self.clear_recovery();
+        self.project_session = Default::default();
         self.install_document_state(document, project_path);
     }
 
@@ -797,6 +813,31 @@ impl MyImageApp {
             return false;
         }
         self.finish_edit();
+        if !save_as && self.project_path.is_none() {
+            let document = self.document.as_ref().unwrap().clone();
+            let directory = storage::projects_folder(&self.settings);
+            let stem = self
+                .last_path
+                .as_ref()
+                .and_then(|p| p.file_stem())
+                .and_then(|s| s.to_str())
+                .unwrap_or(&self.draft_title)
+                .to_owned();
+            let tx = self.work_tx.clone();
+            let ctx = ctx.clone();
+            self.busy = true;
+            self.status = "Creating editable project…".into();
+            std::thread::spawn(move || {
+                let result = document::save_new_project(&document, &directory, &stem);
+                let (path, result) = match result {
+                    Ok(path) => (path, Ok(())),
+                    Err(error) => (directory, Err(error)),
+                };
+                let _ = tx.send(WorkEvent::ProjectSaved(path, document.edit_state(), result));
+                ctx.request_repaint();
+            });
+            return true;
+        }
         let path = if !save_as && self.project_path.is_some() {
             self.project_path.clone().unwrap()
         } else {
@@ -1029,7 +1070,7 @@ impl MyImageApp {
                             self.last_path = None;
                             self.draft_title = "Pasted image".into();
                             self.view = View::Editor;
-                            self.status = "Image pasted. Save a project to keep your edits.".into();
+                            self.status = "Image pasted · creating editable project…".into();
                             self.error = None;
                         }
                         Err(error) => self.error = Some(error),
@@ -1180,39 +1221,22 @@ impl MyImageApp {
                         self.show(ctx);
                     }
                 }
-                WorkEvent::CaptureFinished(output) => self.finish_capture_output(ctx, output),
-                WorkEvent::Saved(image, path, replace_document) => {
+                WorkEvent::ProjectLibraryReady(result) => {
+                    self.project_migration_finished(ctx, result)
+                }
+                WorkEvent::LegacyCapturesRetired(warnings) => {
                     self.busy = false;
-                    if replace_document {
-                        self.install_document(
-                            Document {
-                                image,
-                                annotations: Vec::new(),
-                                geometry: Default::default(),
-                            },
-                            None,
-                        );
-                    }
-                    self.last_texture = None;
-                    self.fit = true;
-                    match path {
-                        Ok(path) => {
-                            self.library.refresh();
-                            self.status = "Capture saved".into();
-                            self.remember_recent(path.clone());
-                            self.last_path = Some(path);
-                            self.error = None;
-                        }
-                        Err(error) => {
-                            self.last_path = None;
-                            self.status = "Capture is in memory — save failed".into();
-                            self.error = Some(error);
-                        }
+                    if !warnings.is_empty() {
+                        self.error = Some(format!(
+                            "Projects are safe; some old captures were retained: {}",
+                            warnings.join("\n")
+                        ));
                     }
                     if std::mem::take(&mut self.quit_after_work) {
                         self.request_quit(ctx);
                     }
                 }
+                WorkEvent::CaptureFinished(output) => self.finish_capture_output(ctx, output),
                 WorkEvent::MissingOpen(path) => {
                     self.busy = false;
                     self.settings.recent_files.retain(|p| p != &path);
@@ -1286,18 +1310,16 @@ impl MyImageApp {
                         Ok(()) => {
                             self.library.refresh();
                             self.history.mark_saved(&saved_state);
-                            if self.last_path.is_none() {
-                                self.last_path = Some(path.clone());
-                            }
+                            self.project_saved(&path);
+                            self.error = None;
                             self.remember_recent(path.clone());
                             self.project_path = Some(path);
                             if !self.has_unsaved_edits() {
                                 self.clear_recovery();
                             }
                             self.status =
-                                "Project saved • image edits and annotations remain editable"
+                                "Saved automatically · original image and edits in one project"
                                     .into();
-                            self.error = None;
                             if let Some(action) = self.after_save.take() {
                                 self.perform_action(ctx, action, false);
                             }
@@ -1306,6 +1328,7 @@ impl MyImageApp {
                             self.error = Some(error);
                             self.status =
                                 "Project save failed • your edits are still in memory".into();
+                            self.project_save_failed();
                             self.pending_action = self.after_save.take();
                         }
                     }
@@ -1317,8 +1340,6 @@ impl MyImageApp {
                     self.busy = false;
                     match result {
                         Ok(()) => {
-                            self.library.refresh();
-                            self.remember_recent(path.clone());
                             self.status =
                                 format!("{} exported to {}", format.label(), path.display());
                             self.error = None;
@@ -1337,7 +1358,7 @@ impl MyImageApp {
     }
 
     fn has_unsaved_capture(&self) -> bool {
-        self.last_image.is_some() && self.last_path.is_none()
+        self.document.is_some() && self.project_path.is_none()
     }
 
     fn has_unsaved_edits(&self) -> bool {
@@ -1354,6 +1375,10 @@ impl MyImageApp {
             return true;
         }
         if self.has_unsaved_capture() || self.has_unsaved_edits() {
+            if self.save_project(ctx, false) {
+                self.after_save = Some(action);
+                return false;
+            }
             self.pending_action = Some(action);
             self.show(ctx);
             false
@@ -1494,16 +1519,7 @@ impl MyImageApp {
             }
         });
         if self.last_path.is_none() && !self.busy && ui.button("Retry saving capture").clicked() {
-            let image = Arc::clone(image);
-            let tx = self.work_tx.clone();
-            let ctx = ctx.clone();
-            let root = self.settings.output_dir.clone();
-            self.busy = true;
-            std::thread::spawn(move || {
-                let path = storage::save_capture(&image, &root, Local::now());
-                let _ = tx.send(WorkEvent::Saved(image, path, false));
-                ctx.request_repaint();
-            });
+            self.save_project(ctx, false);
         }
         let size = Vec2::new(output_size[0] as f32, output_size[1] as f32);
         let available = ui.available_size() - Vec2::splat(14.0);
@@ -1783,6 +1799,7 @@ impl eframe::App for MyImageApp {
         if !self.initialized {
             self.initialized = true;
             self.start_recovery(ctx);
+            self.start_project_migration(ctx);
             #[cfg(target_os = "macos")]
             match crate::desktop::TerminationGuard::install(ctx.clone(), self.desktop_tx.clone()) {
                 Ok(guard) => self._termination_guard = Some(guard),
@@ -1803,6 +1820,7 @@ impl eframe::App for MyImageApp {
         }
         self.handle_events(ctx);
         self.promote_edited_recent(ctx);
+        self.autosave_project(ctx);
         self.autosave(ctx);
         if let Some(desktop) = &mut self.desktop {
             desktop.update_capture_menu(
@@ -2283,6 +2301,7 @@ impl eframe::App for MyImageApp {
             }
         }
         self.promote_edited_recent(ctx);
+        self.autosave_project(ctx);
         self.autosave(ctx);
         crate::pointer_style::paint(ctx, self.settings.pointer_style);
     }

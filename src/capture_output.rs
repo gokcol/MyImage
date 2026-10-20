@@ -25,9 +25,10 @@ impl CaptureOutput {
         } else {
             Ok(())
         };
-        let path = storage::save_capture(&image, folder, at);
+        let image = Arc::new(image);
+        let path = crate::project_store::capture(image.clone(), folder, at);
         Self {
-            image: Arc::new(image),
+            image,
             path,
             destination,
             clipboard,
@@ -143,7 +144,7 @@ impl MyImageApp {
                 annotations: Vec::new(),
                 geometry: Default::default(),
             },
-            None,
+            output.path.as_ref().ok().cloned(),
         );
         self.last_texture = None;
         self.fit = true;
@@ -241,7 +242,7 @@ mod tests {
         );
         assert!(output.clipboard.is_ok());
         assert_eq!(
-            image::open(output.path.unwrap()).unwrap().into_rgba8(),
+            *document::load_project(&output.path.unwrap()).unwrap().image,
             expected
         );
         let output = CaptureOutput::prepare(
@@ -330,11 +331,13 @@ mod tests {
     }
 
     #[test]
-    fn editor_capture_defers_replacement_until_unsaved_work_is_resolved() {
+    fn editor_capture_flushes_current_project_before_replacement() {
         let ctx = egui::Context::default();
         let mut app = dirty_editor(&ctx);
         let original = app.document.clone().unwrap();
         let dir = tempfile::tempdir().unwrap();
+        app.project_path = Some(dir.path().join("Working.myimage"));
+        app.last_path = app.project_path.clone();
         let output = CaptureOutput::prepare(
             pixels(),
             dir.path(),
@@ -347,14 +350,24 @@ mod tests {
             app.document.as_ref().unwrap().edit_state(),
             original.edit_state()
         );
-        let action = app
-            .pending_action
-            .take()
-            .expect("Save prompt before replacing dirty project");
-        assert!(matches!(action, PendingAction::OpenCapture(_)));
-        app.perform_action(&ctx, action, true);
+        assert!(matches!(
+            app.after_save,
+            Some(PendingAction::OpenCapture(_))
+        ));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.busy && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            app.handle_events(&ctx);
+        }
+        assert!(!app.busy);
+        assert_eq!(
+            document::load_project(&dir.path().join("Working.myimage"))
+                .unwrap()
+                .edit_state(),
+            original.edit_state()
+        );
         assert_eq!(*app.document.as_ref().unwrap().image, pixels());
-        assert!(app.project_path.is_none());
+        assert_eq!(app.project_path, app.last_path);
         assert!(app.last_path.as_ref().unwrap().is_file());
         assert!(!app.has_unsaved_edits());
     }

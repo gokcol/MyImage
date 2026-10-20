@@ -1,9 +1,9 @@
-MyImage 2.0 refreshes everyday capture and editing:
+New in MyImage 2.0:
 
-- Pearl Compact Capture Now panel with a large red Capture button, lighter graphite background and neatly grouped capture options.
-- Compact Settings with independent GUI, icon and pointer choices, including the complete Calico pointer family.
-- Resizable editing sidebar with a compact default and a quick reset to fit.
-- Pen in the main toolbar, a compact tools dropdown and more room for editing.
-- Optional start at login, off by default, and improvements to background/reopen behavior.
-
-Captures, projects, settings, custom stamps and recovery data remain in their existing locations.
+- One image, one project: captures, imports, pastes and new canvases automatically become .myimage projects containing the original image and editable changes.
+- Automatic project saving, with pending changes saved before switching images or quitting. Recents and Library show projects only; PNG/JPEG and other flattened files are explicit exports.
+- Existing capture/project pairs are consolidated by matching original pixels. Verified old captures in dated MyImage storage can move to Trash; external imported originals remain untouched. Deleting a project also includes its embedded image and any remaining linked capture in MyImage storage.
+- Pearl Compact Capture Now with a large red circular Capture button, lighter graphite background and compact options.
+- In-place text and callouts, visual Magnify styles, quick image effects, layers and presets.
+- Compact Settings, selectable GUI/icon/pointer styles, the complete Calico pointer family, a resizable properties panel and Pen in the main toolbar.
+- Improved background/reopen behavior and optional start at login, off by default.

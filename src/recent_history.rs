@@ -84,7 +84,7 @@ mod tests {
     fn opening_and_browsing_keep_recents_stable_but_completed_edits_promote_once() {
         let ctx = egui::Context::default();
         let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
-        let paths: Vec<PathBuf> = ["new.png", "middle.myimage", "old.png"]
+        let paths: Vec<PathBuf> = ["new.myimage", "middle.myimage", "old.myimage"]
             .into_iter()
             .map(PathBuf::from)
             .collect();

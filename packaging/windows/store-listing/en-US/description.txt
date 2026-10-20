@@ -1,11 +1,21 @@
-MyImage is a native screen-capture and annotation studio with a playful calico companion.
+MyImage (OG) 2.0 is a native screen-capture and image-annotation studio. Capture, explain, polish and share your work from one compact workspace.
 
-Capture a region, several regions, a window or a full display. Use guided scrolling capture for longer content. Copy a capture directly to the clipboard or open it in the editor.
+ONE IMAGE, ONE EDITABLE PROJECT
+Captures, imported images, pasted images and new canvases are saved automatically as .myimage projects. Each portable project contains its original image and editable changes. Recents and Library show projects, so you do not have to manage a capture and an edited file separately. Open a project to continue editing; export a flattened copy when you are ready to share. External imported originals stay untouched.
 
-Annotate with arrows, text, shapes, callouts, stamps and freehand drawing. Use blur or pixelation for selected content. Adjust the canvas with resize handles, zoom in to work precisely, and keep annotations editable in .myimage projects.
+CAPTURE YOUR WAY
+Use the Pearl Compact Capture Now panel with its large red Capture button. Capture a region, several separate regions with transparent gaps, a window or a full display. Guided vertical scrolling capture helps collect longer content. Send the capture to the editor or directly to the clipboard. Choose a delay, include the pointer, and optionally capture as soon as you finish selecting.
 
-Style images with borders, shadows, edges, reflection, perspective, color adjustments and fade. Browse captures and projects in Library and Recents. Autosave offers recovery of unfinished projects after an unexpected exit.
+EDIT DIRECTLY ON THE CANVAS
+Type in place in text boxes and callouts. Add arrows, shapes, stamps, numbered steps and freehand strokes. Move, resize, recolor and arrange objects, manage layers, and reuse presets. Undo and redo keep experimentation simple. Crop, resize, rotate and extend the canvas while retaining the original pixels in your project.
 
-Images are processed on your computer. No MyImage account, subscription or AI service is required. The SVG stamp designer lets you copy a prompt and paste SVG from an AI service of your choice.
+DRAW ATTENTION TO THE DETAILS
+Use adjustable Magnify lenses and linked source areas. Blur or pixelate selected content, highlight important areas, or use Fill to recolor or clear connected backgrounds. Quick Effects include borders, shadows, edge styles, reflection, perspective, color adjustments and fade.
 
-Export flattened PNG, JPEG, WebP, TIFF or PDF copies for sharing. Animated images open as a still frame. Scrolling capture is guided and vertical; video recording is not included.
+MAKE THE WORKSPACE YOURS
+Choose Cobalt Satin, Amber Enamel or Jade Graphite, with independent icon and pointer styles. Use Standard pointers or subtle Calico pointers. Resize the properties panel, customize your toolbar and keep Recents close at hand. Background capture and optional start at login are available; start at login is off by default.
+
+LOCAL AND READY TO SHARE
+Images are processed on your computer. No MyImage account, subscription or AI service is required. Export flattened PNG, JPEG, WebP, TIFF or PDF copies, or copy an image to paste into another app. The optional SVG stamp designer lets you copy a prompt and paste SVG from an AI service of your choice.
+
+Animated images open as a still frame. Scrolling capture is guided and vertical. Video recording is not included.

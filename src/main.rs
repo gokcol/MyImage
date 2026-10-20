@@ -39,6 +39,7 @@ mod pointer_style;
 mod presets;
 mod privacy;
 mod privacy_preview;
+mod project_store;
 mod recovery;
 mod render;
 mod runtime;

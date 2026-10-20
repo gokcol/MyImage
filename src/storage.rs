@@ -1,9 +1,7 @@
-use chrono::{DateTime, Local};
 use directories::{ProjectDirs, UserDirs};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
 
@@ -59,6 +57,9 @@ pub struct Settings {
     pub capture_on_release: bool,
     pub recent_files: Vec<PathBuf>,
     pub recents_open: bool,
+    pub project_library_version: u8,
+    pub project_sources: std::collections::BTreeMap<PathBuf, PathBuf>,
+    pub managed_image_sources: std::collections::BTreeSet<PathBuf>,
     pub library: crate::library::BrowserPreferences,
     pub editor_toolbar: Vec<String>,
     #[serde(default)]
@@ -87,6 +88,9 @@ impl Default for Settings {
             capture_on_release: false,
             recent_files: Vec::new(),
             recents_open: true,
+            project_library_version: 0,
+            project_sources: Default::default(),
+            managed_image_sources: Default::default(),
             library: Default::default(),
             editor_toolbar: crate::editor::default_toolbar(),
             toolbar_layout_version: 1,
@@ -167,53 +171,11 @@ pub fn save_settings(settings: &Settings) -> Result<(), String> {
     Ok(())
 }
 
-/// Publishes a complete PNG atomically; existing captures are never overwritten.
-pub fn save_capture(
-    image: &image::RgbaImage,
-    root: &Path,
-    captured_at: DateTime<Local>,
-) -> Result<PathBuf, String> {
-    let directory = root.join(captured_at.format("%Y/%m/%d").to_string());
-    fs::create_dir_all(&directory)
-        .map_err(|e| format!("Cannot create {}: {e}", directory.display()))?;
-    let mut temporary = tempfile::NamedTempFile::new_in(&directory).map_err(|e| e.to_string())?;
-    {
-        let mut writer = BufWriter::new(temporary.as_file_mut());
-        image
-            .write_to(&mut writer, image::ImageFormat::Png)
-            .map_err(|e| format!("PNG encoding failed: {e}"))?;
-        writer.flush().map_err(|e| e.to_string())?;
-    }
-    temporary.as_file().sync_all().map_err(|e| e.to_string())?;
-    let stem = captured_at.format("%H%M%S-%f").to_string();
-    for index in 0..1000 {
-        let name = if index == 0 {
-            format!("{stem}.png")
-        } else {
-            format!("{stem}-{index}.png")
-        };
-        let destination = directory.join(name);
-        match temporary.persist_noclobber(&destination) {
-            Ok(_) => return Ok(destination),
-            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
-                temporary = error.file;
-            }
-            Err(error) => {
-                return Err(format!(
-                    "Cannot save {}: {}",
-                    destination.display(),
-                    error.error
-                ));
-            }
-        }
-    }
-    Err("Could not allocate a unique capture filename.".into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{Local, TimeZone};
+    use std::sync::Arc;
 
     #[test]
     fn fast_capture_is_opt_in_and_persists_without_changing_destination() {
@@ -335,16 +297,18 @@ mod tests {
     }
 
     #[test]
-    fn png_round_trip_preserves_alpha_and_does_not_overwrite() {
+    fn project_capture_preserves_alpha_and_does_not_overwrite() {
         let directory = tempfile::tempdir().unwrap();
         let at = Local.with_ymd_and_hms(2026, 10, 17, 21, 22, 23).unwrap();
         let mut image = image::RgbaImage::from_pixel(3, 2, image::Rgba([10, 20, 30, 255]));
         image.put_pixel(0, 0, image::Rgba([100, 80, 60, 0]));
-        let first = save_capture(&image, directory.path(), at).unwrap();
-        let second = save_capture(&image, directory.path(), at).unwrap();
+        let first =
+            crate::project_store::capture(Arc::new(image.clone()), directory.path(), at).unwrap();
+        let second =
+            crate::project_store::capture(Arc::new(image.clone()), directory.path(), at).unwrap();
         assert_ne!(first, second);
         assert!(first.starts_with(directory.path().join("2026/10/17")));
-        assert_eq!(image::open(first).unwrap().into_rgba8(), image);
+        assert_eq!(*crate::document::load_project(&first).unwrap().image, image);
         assert_eq!(
             fs::read_dir(directory.path().join("2026/10/17"))
                 .unwrap()
@@ -358,6 +322,13 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let file = directory.path().join("file");
         fs::write(&file, b"not a directory").unwrap();
-        assert!(save_capture(&image::RgbaImage::new(2, 2), &file, Local::now()).is_err());
+        assert!(
+            crate::project_store::capture(
+                Arc::new(image::RgbaImage::new(2, 2)),
+                &file,
+                Local::now()
+            )
+            .is_err()
+        );
     }
 }

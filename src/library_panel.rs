@@ -118,7 +118,13 @@ impl Worker {
                                 .filter(|p| crate::library_files::is_missing(p))
                                 .collect(),
                         ),
-                        Request::Scan(version, root) => Reply::Scan(version, library::scan(&root)),
+                        Request::Scan(version, root) => Reply::Scan(
+                            version,
+                            library::scan(&root).map(|mut index| {
+                                index.entries.retain(|e| e.kind == EntryKind::Project);
+                                index
+                            }),
+                        ),
                         Request::Thumbnail(version, entry) => {
                             let result = library::thumbnail(&entry).map(PreparedThumbnail::from);
                             if result.is_err() && crate::library_files::is_missing(&entry.path) {
@@ -239,7 +245,8 @@ impl LibraryPanel {
         let mut entries = Vec::new();
         let mut seen = HashSet::new();
         for path in paths.iter().take(24) {
-            if !self.preferences.hidden_recents.contains(path)
+            if crate::project_store::is_project(path)
+                && !self.preferences.hidden_recents.contains(path)
                 && !self.missing_paths.contains(path)
                 && seen.insert(path.clone())
             {
@@ -269,7 +276,8 @@ impl LibraryPanel {
             if entries.len() >= 24 {
                 break;
             }
-            if !self.preferences.hidden_recents.contains(&entry.path)
+            if crate::project_store::is_project(&entry.path)
+                && !self.preferences.hidden_recents.contains(&entry.path)
                 && seen.insert(entry.path.clone())
             {
                 entries.push(entry.clone());
@@ -323,7 +331,7 @@ impl LibraryPanel {
                 if appearance::icon_button(ui, "Refresh recents", appearance::Icon::Refresh).clicked() {
                     self.refresh();
                 }
-                let help = appearance::icon_button(ui, "Recent captures and projects", appearance::Icon::Info);
+                let help = appearance::icon_button(ui, "Recent projects", appearance::Icon::Info);
                 egui::Popup::menu(&help).show(|ui| {
                     ui.set_max_width(260.);
                     ui.label("Click a thumbnail to open it. Opening keeps its position; editing or saving moves it to the front.");
@@ -361,9 +369,7 @@ impl LibraryPanel {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.;
                     if entries.is_empty() {
-                        ui.weak(
-                            "Recent captures and projects appear here as you open or save them.",
-                        );
+                        ui.weak("Recent projects appear here as you open or save them.");
                     }
                     for entry in &entries {
                         let (rect, response) =

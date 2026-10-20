@@ -194,6 +194,17 @@ impl MyImageApp {
         if active && !self.can_replace_image(ctx, PendingAction::Files(op.clone())) {
             return;
         }
+        let op = if let Operation::Trash(mut paths) = op {
+            let companions = crate::project_store::owned_companions(&self.settings, &paths);
+            for source in companions {
+                if !paths.contains(&source) {
+                    paths.push(source);
+                }
+            }
+            Operation::Trash(paths)
+        } else {
+            op
+        };
         self.busy = true;
         self.status = "Updating files…".into();
         let tx = self.work_tx.clone();
@@ -226,6 +237,11 @@ impl MyImageApp {
         self.library.forget_paths(&result.removed);
         self.library.forget_paths(&result.missing);
         for (old, new) in &result.renamed {
+            for target in self.settings.project_sources.values_mut() {
+                if target == old {
+                    *target = new.clone();
+                }
+            }
             for p in &mut self.settings.recent_files {
                 if p == old {
                     *p = new.clone();
@@ -292,7 +308,7 @@ impl MyImageApp {
             match &mut dialog {
                 FileDialog::Storage => {
 
-                    ui.label("Captures and editable projects are ordinary files in your library.");
+                    ui.label("Each project contains its original image and editable changes. PNG/JPEG files are created only when you export.");
                     ui.add_space(8.);
                     ui.strong("Library & captures");
                     ui.label(self.settings.output_dir.display().to_string());
@@ -337,7 +353,7 @@ impl MyImageApp {
                 }
                 FileDialog::Trash(paths) => {
 
-                    ui.label("You can restore them from your system Trash or Recycle Bin. Only the selected files will be moved.");
+                    ui.label("You can restore them from your system Trash or Recycle Bin. The selected projects, their embedded images and edits, and any linked legacy captures in MyImage storage will be moved.");
                     egui::ScrollArea::vertical().max_height(180.).show(ui,|ui| {for p in paths.iter() {ui.label(p.file_name().unwrap_or_default().to_string_lossy());}});
                     ui.add_space(8.);
                     ui.horizontal_wrapped(|ui| {

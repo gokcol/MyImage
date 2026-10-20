@@ -67,11 +67,11 @@ mod tests {
     #[test]
     fn opening_a_scanned_recent_keeps_the_whole_strip_in_order_across_restart() {
         let paths: Vec<PathBuf> = [
-            "first.png",
-            "second.png",
+            "first.myimage",
+            "second.myimage",
             "third.myimage",
-            "hidden.png",
-            "missing.png",
+            "hidden.myimage",
+            "missing.myimage",
         ]
         .into_iter()
         .map(PathBuf::from)
@@ -83,7 +83,7 @@ mod tests {
                 path: path.clone(),
                 name: path.display().to_string(),
                 date: chrono::Local::now().date_naive(),
-                kind: EntryKind::Image,
+                kind: EntryKind::Project,
                 modified: None,
                 created: None,
                 bytes: 0,
@@ -110,7 +110,7 @@ mod tests {
             p.recent_paths(&settings.recent_files),
             vec![paths[2].clone(), paths[0].clone(), paths[1].clone()]
         );
-        let fresh = PathBuf::from("new.png");
+        let fresh = PathBuf::from("new.myimage");
         let visible = p.recent_paths(&settings.recent_files);
         crate::storage::remember_opened_recent(&mut settings, fresh.clone(), &visible);
         assert_eq!(p.recent_paths(&settings.recent_files)[0], fresh);

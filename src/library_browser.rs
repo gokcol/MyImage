@@ -6,7 +6,7 @@ use crate::library::{BrowserPreferences, GalleryView, SortBy, TileSize};
 pub(super) enum Collection {
     #[default]
     All,
-    Images,
+    #[cfg(test)]
     Projects,
     Favorites,
 }
@@ -14,8 +14,8 @@ pub(super) enum Collection {
 impl Collection {
     fn label(self) -> &'static str {
         match self {
-            Self::All => "All files",
-            Self::Images => "Images",
+            Self::All => "All projects",
+            #[cfg(test)]
             Self::Projects => "Projects",
             Self::Favorites => "Favorites",
         }
@@ -24,7 +24,7 @@ impl Collection {
     pub(super) fn includes(self, entry: &LibraryEntry, preferences: &BrowserPreferences) -> bool {
         match self {
             Self::All => true,
-            Self::Images => entry.kind == EntryKind::Image,
+            #[cfg(test)]
             Self::Projects => entry.kind == EntryKind::Project,
             Self::Favorites => preferences.favorites.contains(&entry.path),
         }
@@ -305,8 +305,6 @@ impl LibraryPanel {
             .show(ui, |ui| {
                 for (collection, icon) in [
                     (Collection::All, appearance::Icon::Open),
-                    (Collection::Images, appearance::Icon::View),
-                    (Collection::Projects, appearance::Icon::OpenProject),
                     (Collection::Favorites, appearance::Icon::Favorite),
                 ] {
                     let count = self

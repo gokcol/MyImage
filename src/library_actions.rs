@@ -233,16 +233,20 @@ mod tests {
             let mut p = LibraryPanel::default();
             p.root = Some("/test".into());
             p.needs_scan = false;
-            let paths: Vec<PathBuf> = ["/test/Alpha.png", "/test/Beta.png", "/test/Gamma.png"]
-                .map(PathBuf::from)
-                .into();
+            let paths: Vec<PathBuf> = [
+                "/test/Alpha.myimage",
+                "/test/Beta.myimage",
+                "/test/Gamma.myimage",
+            ]
+            .map(PathBuf::from)
+            .into();
             p.entries = paths
                 .iter()
                 .map(|path| LibraryEntry {
                     path: path.clone(),
                     name: path.file_name().unwrap().to_string_lossy().into_owned(),
                     date: chrono::Local::now().date_naive(),
-                    kind: EntryKind::Image,
+                    kind: EntryKind::Project,
                     modified: None,
                     created: None,
                     bytes: 1,
@@ -252,8 +256,8 @@ mod tests {
                 frame(&ctx, &mut p, recent, &paths, vec![], egui::Modifiers::NONE);
             }
             for (label, modifiers) in [
-                ("Alpha.png", egui::Modifiers::CTRL),
-                ("Beta.png", egui::Modifiers::COMMAND),
+                ("Alpha.myimage", egui::Modifiers::CTRL),
+                ("Beta.myimage", egui::Modifiers::COMMAND),
             ] {
                 let (out, _) = frame(&ctx, &mut p, recent, &paths, vec![], modifiers);
                 let pos = find(&out, label);
@@ -304,7 +308,7 @@ mod tests {
                 "Delete did not target two files in recent={recent}"
             );
             let (out, _) = frame(&ctx, &mut p, recent, &paths, vec![], egui::Modifiers::NONE);
-            let pos = find(&out, "Alpha.png");
+            let pos = find(&out, "Alpha.myimage");
             for pressed in [true, false] {
                 frame(
                     &ctx,

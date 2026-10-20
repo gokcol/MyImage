@@ -418,7 +418,8 @@ mod tests {
         let (mut app, ctx, rx) = app();
         app.install_document(document(), None);
         let _ = rx.recv().unwrap();
-        app.last_path = Some(PathBuf::from("/tmp/original.png"));
+        app.last_path = Some(PathBuf::from("/tmp/original.myimage"));
+        app.project_path = app.last_path.clone();
         let original = app.document.as_ref().unwrap().edit_state();
         app.document.as_mut().unwrap().geometry.flip_horizontal = true;
         app.history.commit(original, app.document.as_ref().unwrap());
@@ -443,21 +444,25 @@ mod tests {
         assert!(matches!(rx.recv().unwrap(), Command::Clear(_)));
     }
     #[test]
-    fn quit_prompts_for_dirty_work_then_waits_for_serial_recovery_cleanup() {
+    fn quit_flushes_dirty_work_then_waits_for_serial_recovery_cleanup() {
         let (mut app, ctx, rx) = app();
+        let directory = tempfile::tempdir().unwrap();
+        app.settings.output_dir = directory.path().to_owned();
         app.install_document(document(), None);
         let _ = rx.recv().unwrap();
         app.request_quit(&ctx);
-        assert!(matches!(app.pending_action, Some(PendingAction::Quit)));
+        assert!(app.pending_action.is_none());
+        assert!(app.busy);
         assert!(!app.quitting);
-        assert!(rx.try_recv().is_err());
-        app.pending_action = None;
-        app.perform_action(&ctx, PendingAction::Quit, true);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while app.project_path.is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+            app.handle_events(&ctx);
+        }
+        assert!(app.project_path.as_ref().unwrap().is_file());
+        assert!(matches!(rx.recv().unwrap(), Command::Clear(_)));
         assert!(matches!(rx.recv().unwrap(), Command::Stop));
-        assert!(
-            !app.quitting,
-            "must await any preceding autosave and its cleanup"
-        );
+        assert!(!app.quitting, "must wait for recovery cleanup");
         app.recovery_event(&ctx, Event::Stopped(Ok(())));
         assert!(app.quitting);
     }

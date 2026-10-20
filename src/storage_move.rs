@@ -43,6 +43,23 @@ impl PreparedMove {
                 p
             })
             .collect();
+        next.managed_image_sources = next
+            .managed_image_sources
+            .into_iter()
+            .map(|mut path| {
+                self.remap(&mut path);
+                path
+            })
+            .collect();
+        next.project_sources = next
+            .project_sources
+            .into_iter()
+            .map(|(mut source, mut project)| {
+                self.remap(&mut source);
+                self.remap(&mut project);
+                (source, project)
+            })
+            .collect();
         next
     }
     pub fn remap(&self, path: &mut PathBuf) {
