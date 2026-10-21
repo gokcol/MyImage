@@ -237,6 +237,21 @@ mod tests {
         assert!(app.project_path.unwrap().is_file());
     }
     #[test]
+    fn recovered_or_replaced_document_does_not_inherit_a_failed_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        app.project_save_failed();
+        assert_eq!(app.project_session.failed_revision, Some(0));
+        let recovered = app.document.clone().unwrap();
+        app.install_document_state(recovered, None);
+        app.last_path = None;
+        app.autosave_project(&ctx);
+        finish(&mut app, &ctx);
+        assert!(!app.has_unsaved_edits());
+        assert!(app.project_path.unwrap().is_file());
+    }
+
+    #[test]
     fn quitting_flushes_the_latest_edit_without_a_save_dialog() {
         let dir = tempfile::tempdir().unwrap();
         let (mut app, ctx) = app(dir.path());

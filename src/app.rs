@@ -791,11 +791,11 @@ impl MyImageApp {
 
     fn install_document(&mut self, document: Document, project_path: Option<PathBuf>) {
         self.clear_recovery();
-        self.project_session = Default::default();
         self.install_document_state(document, project_path);
     }
 
     fn install_document_state(&mut self, document: Document, project_path: Option<PathBuf>) {
+        self.project_session = Default::default();
         self.last_image = Some(Arc::clone(&document.image));
         self.last_texture = None;
         self.privacy_preview.clear();
