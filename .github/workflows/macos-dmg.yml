@@ -1,0 +1,90 @@
+name: macOS signed and notarized DMG
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing GitHub release with a notarized MyImage-macos-aarch64.zip
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  dmg:
+    runs-on: macos-14
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check signing configuration
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ vars.APPLE_NOTARY_ISSUER }}
+        run: |
+          for name in CERTIFICATE CERTIFICATE_PASSWORD SIGNING_IDENTITY NOTARY_KEY NOTARY_KEY_ID NOTARY_ISSUER; do
+            if [ -z "${!name}" ]; then echo "Missing $name. See packaging/macos/SIGNING.md; local signing remains supported." >&2; exit 1; fi
+          done
+      - name: Download and verify released app
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?(-build[0-9]+)?$ ]]
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'MyImage-macos-aarch64.zip*' --dir input
+          (cd input && shasum -a 256 -c MyImage-macos-aarch64.zip.sha256)
+          ditto -x -k input/MyImage-macos-aarch64.zip input
+          python3 - <<'PY'
+          import os, plistlib, re
+          with open('input/MyImage.app/Contents/Info.plist', 'rb') as file:
+              info = plistlib.load(file)
+          match = re.fullmatch(r'v(\d+\.\d+(?:\.\d+)?)(?:-build(\d+))?', os.environ['RELEASE_TAG'])
+          version = match[1] + ('.0' if match[1].count('.') == 1 else '')
+          assert info['CFBundleShortVersionString'] == version, 'Release/app version mismatch'
+          assert not match[2] or info['CFBundleVersion'] == match[2], 'Release/app build mismatch'
+          PY
+      - name: Prepare temporary signing keychain
+        env:
+          CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ vars.APPLE_NOTARY_ISSUER }}
+        run: |
+          umask 077
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          printf '%s' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          security create-keychain -p "$password" "$RUNNER_TEMP/myimage-signing.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/myimage-signing.keychain-db"
+          security unlock-keychain -p "$password" "$RUNNER_TEMP/myimage-signing.keychain-db"
+          security import "$RUNNER_TEMP/signing.p12" -P "$CERTIFICATE_PASSWORD" -k "$RUNNER_TEMP/myimage-signing.keychain-db" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$RUNNER_TEMP/myimage-signing.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/myimage-signing.keychain-db" login.keychain-db
+          xcrun notarytool store-credentials MyImageCI --key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER"
+      - name: Sign, notarize and verify DMG
+        env:
+          MYIMAGE_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MYIMAGE_NOTARY_PROFILE: MyImageCI
+        run: sh scripts/package-dmg.sh input/MyImage.app dist/dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MyImage-notarized-DMG
+          path: dist/dmg/*
+          if-no-files-found: error
+      - name: Attach DMG to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release upload "$RELEASE_TAG" dist/dmg/*.dmg dist/dmg/*.sha256 --repo "$GITHUB_REPOSITORY"
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/myimage-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/signing.p12" "$RUNNER_TEMP/notary.p8"

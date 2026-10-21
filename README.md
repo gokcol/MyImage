@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 2.0](https://github.com/gokcol/MyImage/releases/tag/v2.0-build68) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
+[Download MyImage 2.0](https://github.com/gokcol/MyImage/releases/tag/v2.0-build68) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending; the Microsoft Store submission is in certification.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -24,9 +24,15 @@ Text and twelve callout styles edit directly on the canvas. The main-toolbar Mag
 
 ## Microsoft Store and signing
 
-The macOS release is signed with Developer ID and notarized. Windows builds remain **UNTESTED**.
-Windows distribution will use the Microsoft Store. No direct Windows installer
-is currently offered on GitHub. Store packaging is a separate MSIX
+The macOS app and DMG are signed with Developer ID and notarized. The DMG contains
+the same release app as the ZIP; drag it to Applications to install.
+The GitHub Windows Setup installer and portable ZIP are **unsigned**, matching
+MyPDF's direct-download approach. Windows may show an unknown publisher or
+SmartScreen warning. Installation/update/removal are checked on a disposable
+Windows runner; interactive capture, clipboard and device testing remain pending.
+The installer is per-user, offers Open with integration without changing defaults,
+and preserves projects/settings on uninstall. See the [installer guide](packaging/windows/README.md).
+Store packaging is a separate MSIX
 pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the

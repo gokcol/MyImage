@@ -96,3 +96,33 @@ can cause macOS to require a fresh Screen Recording grant; do not reset
 TCC automatically. Subsequent releases retain the same Developer ID and
 bundle identifier. `--allow-unnotarized` exists only for explicit local
 troubleshooting and must not be used for a normal public release.
+
+## Signed disk image
+
+After notarizing the app, create a DMG without rebuilding or modifying it:
+
+```sh
+MYIMAGE_SIGNING_IDENTITY=<SHA-1-fingerprint> MYIMAGE_NOTARY_PROFILE=MyPDF \
+  sh scripts/package-dmg.sh target/bundle/MyImage.app dist/installers
+```
+
+This creates `MyImage-<version>-build<N>-macos-<arch>.dmg`, its SHA-256 checksum
+and Apple's submission receipt. The image contains the same signed/stapled app,
+an Applications link and concise installation instructions. The script requires
+the official Developer ID and notarized source app, signs and notarizes the DMG,
+validates its ticket/Gatekeeper status, mounts it read-only, verifies the embedded
+app and link, and detaches it before publishing files. Existing output is refused.
+
+The **macOS signed and notarized DMG** workflow performs the same packaging on a
+hosted Mac using the ZIP already attached to the selected GitHub release. The
+ZIP checksum is checked first, and the workflow never rebuilds the application.
+Hosted signing requires these GitHub Actions settings:
+
+- Secrets: `MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`, `APPLE_NOTARY_KEY_P8`.
+- Variables: `MACOS_SIGNING_IDENTITY` (certificate SHA-1), `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER`.
+
+Hosted credentials are not configured automatically and are never copied out of
+the maintainer's Keychain. Until they are configured, use the local command above
+and attach the DMG/checksum with `gh release upload`. The workflow fails clearly
+if its signing configuration is missing. Temporary hosted signing material is
+removed even if packaging fails; no unsigned DMG is published as a fallback.

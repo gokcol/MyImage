@@ -1,95 +1,77 @@
-name: Windows build — UNTESTED
+name: Windows installer and portable ZIP
 on:
-  # Windows distribution uses Microsoft Store. Direct signed downloads are opt-in.
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing GitHub release tag to attach the untested package to (optional)
+        description: Existing release tag to package and attach installers to (empty builds current commit only)
         required: false
         type: string
 permissions:
-  contents: write
+  contents: read
 jobs:
   windows:
     runs-on: windows-2022
     timeout-minutes: 45
+    permissions:
+      contents: write
     env:
       CARGO_TERM_COLOR: always
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
     steps:
+      # The application always comes from the release tag. Installer tooling may
+      # be newer, allowing packaging-only additions without moving release tags.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ inputs.release_tag || github.sha }}
+          path: source
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: packaging-tools
+      - name: Validate release source
+        if: inputs.release_tag != ''
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:-build[0-9]+)?$') { throw 'Invalid release tag.' }
+          $tagVersion = ($env:RELEASE_TAG -replace '^v','') -replace '-build[0-9]+$',''
+          if ($tagVersion -match '^[0-9]+\.[0-9]+$') { $tagVersion += '.0' }
+          $version = (Select-String -Path source/Cargo.toml -Pattern '^version = "([0-9]+\.[0-9]+\.[0-9]+)"').Matches[0].Groups[1].Value
+          if ($tagVersion -ne $version) { throw 'Release tag does not match application version.' }
+          [xml]$plist = Get-Content source/packaging/macos/Info.plist -Raw
+          $build = $plist.SelectSingleNode("/plist/dict/key[text()='CFBundleVersion']/following-sibling::string[1]").InnerText
+          if ($env:RELEASE_TAG -match '-build([0-9]+)$' -and $Matches[1] -ne $build) { throw 'Release tag does not match build number.' }
       - name: Install Rust toolchain
         run: rustup toolchain install 1.93.1 --profile minimal --target x86_64-pc-windows-msvc
-      - name: Build native Windows executable
-        run: cargo build --locked --release --target x86_64-pc-windows-msvc
-      # A production signing step must run here once the maintainer's provider
-      # is configured. Never substitute a self-signed test certificate.
-      - name: Require a trusted production signature before publishing
-        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+      - name: Install Inno Setup if needed
         shell: pwsh
         run: |
-          $signature = Get-AuthenticodeSignature target/x86_64-pc-windows-msvc/release/myimage.exe
-          if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate) {
-            throw 'Windows release signing is not configured or did not produce a valid timestamped signature. No Windows release download will be published.'
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
           }
-      - name: Package untested build
-        id: package
+      - name: Build installer and portable ZIP (unsigned)
         shell: pwsh
-        run: |
-          $metadata = cargo metadata --format-version 1 --no-deps --locked | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot read package version' }
-          $version = ($metadata.packages | Where-Object name -eq 'myimage').version
-          if ($version -notmatch '^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$') { throw 'Invalid package version' }
-          "version=$version" >> $env:GITHUB_OUTPUT
-          $file = "dist/MyImage-$version-windows-x64-UNTESTED.zip"
-          "archive=$file" >> $env:GITHUB_OUTPUT
-          New-Item -ItemType Directory -Force dist/MyImage | Out-Null
-          Copy-Item target/x86_64-pc-windows-msvc/release/myimage.exe dist/MyImage/MyImage.exe
-          Copy-Item LICENSE dist/MyImage/LICENSE.txt
-          Copy-Item assets/stamps/LICENSE-GRAPHICS dist/MyImage/Twemoji-LICENSE.txt
-          Copy-Item assets/stamps/ATTRIBUTION.txt dist/MyImage/Twemoji-ATTRIBUTION.txt
-          @"
-          MyImage $version — Windows x64 — UNTESTED
-          This package was compiled on GitHub Actions. It has NOT been tested interactively on Windows.
-          Screen capture, shortcuts, clipboard, scaling and installation require real-device validation.
-          $(
-            $signature = Get-AuthenticodeSignature dist/MyImage/MyImage.exe
-            if ($signature.Status -eq 'Valid') {
-              "Windows Authenticode signature verified. Signing does not replace interactive testing or guarantee SmartScreen reputation."
-            } else {
-              "Unsigned QA build only. Not a signed public release."
-            }
-          )
-          Extract the complete folder and run MyImage.exe. No administrator rights or service installation are required.
-          To update, save your work and quit MyImage from its tray menu before replacing the extracted folder.
-          To uninstall, quit and delete only this application folder. Pictures/MyImage, projects, settings and recovery copies are preserved.
-          Source and releases: https://github.com/gokcol/MyImage
-          "@ | Set-Content dist/MyImage/READ-ME-UNTESTED.txt
-          Compress-Archive -Path dist/MyImage -DestinationPath $file
-          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
-          "$hash  $(Split-Path $file -Leaf)" | Set-Content "$file.sha256"
+        run: '& ./packaging-tools/scripts/package-windows.ps1 -SourceDirectory ./source -OutputDirectory ./dist/windows'
+      - name: Test installation, upgrade and uninstall
+        shell: pwsh
+        run: '& ./packaging-tools/scripts/test-windows-installer.ps1 -OutputDirectory ./dist/windows'
       - uses: actions/upload-artifact@v4
         with:
-          name: MyImage-Windows-x64-UNTESTED
-          path: |
-            ${{ steps.package.outputs.archive }}
-            ${{ steps.package.outputs.archive }}.sha256
+          name: MyImage-Windows-x64-installers
+          path: dist/windows/*
           if-no-files-found: error
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''
+        if: inputs.release_tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
-          PACKAGE_VERSION: ${{ steps.package.outputs.version }}
-          PACKAGE_ARCHIVE: ${{ steps.package.outputs.archive }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
-          if ($env:RELEASE_TAG -notmatch '^v[0-9]+\.[0-9]+(?:\.[0-9]+(?:[-.][A-Za-z0-9.-]+)?)?$') { throw 'Invalid release tag' }
-          $tagVersion = $env:RELEASE_TAG.Substring(1)
-          if ($tagVersion -match '^[0-9]+\.[0-9]+$') { $tagVersion += '.0' }
-          if ($tagVersion -ne $env:PACKAGE_VERSION) { throw 'Release tag does not match package version' }
-          gh release upload $env:RELEASE_TAG $env:PACKAGE_ARCHIVE "$($env:PACKAGE_ARCHIVE).sha256" --repo $env:GITHUB_REPOSITORY
-          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed' }
+          $assets = @(Get-ChildItem dist/windows -File | ForEach-Object FullName)
+          gh release upload $env:RELEASE_TAG @assets --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
+          "Windows downloads are unsigned; interactive device validation is pending. Installer lifecycle checks passed." >> $env:GITHUB_STEP_SUMMARY

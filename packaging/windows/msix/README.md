@@ -7,10 +7,12 @@ pending, including real capture, clipboard, DPI, permissions and tray behavior.
 
 ## Signing
 
-The Mac GitHub release is Developer ID signed and notarized. Windows builds are
-**UNTESTED**. Windows distribution will use the Microsoft Store; no direct
-Windows installer is currently offered on GitHub. The separate GitHub release
-workflow retains its signature guard against publishing unsigned executables.
+The Mac GitHub release is Developer ID signed and notarized. Windows interactive
+validation remains pending. GitHub also offers an explicitly **unsigned** Inno
+Setup installer and portable ZIP, matching MyPDF's direct-download approach.
+Their packaging/install/uninstall checks are separate from this Store pipeline.
+See [Windows installers](../README.md). These direct downloads are not
+Microsoft-signed and may trigger Windows publisher/SmartScreen warnings.
 
 Microsoft signs an MSIX after Store submission/certification. The unsigned MSIX
 produced here is an upload artifact, not a direct GitHub installer. Test identities
