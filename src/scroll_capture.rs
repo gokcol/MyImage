@@ -8,6 +8,8 @@ pub struct Stitcher {
     window_size: Option<(u32, u32)>,
     window_area: Option<crate::selection::PixelRect>,
     pending: Option<RgbaImage>,
+    preserve_bounds: bool,
+    footer_height: u32,
 }
 impl Stitcher {
     pub fn new(image: RgbaImage) -> Self {
@@ -18,6 +20,8 @@ impl Stitcher {
             window_size: None,
             window_area: None,
             pending: None,
+            preserve_bounds: false,
+            footer_height: 0,
         }
     }
     pub fn window(image: RgbaImage) -> Self {
@@ -30,6 +34,7 @@ impl Stitcher {
     pub fn region(image: RgbaImage) -> Self {
         let (width, height) = image.dimensions();
         Self {
+            preserve_bounds: true,
             window_area: Some(crate::selection::PixelRect {
                 x: 0,
                 y: 0,
@@ -63,7 +68,28 @@ impl Stitcher {
             if similar_frame(&self.last, &next) {
                 return Ok(false);
             }
-            return self.append(next);
+            match self.append(next) {
+                Ok(added) => {
+                    if added && self.footer_height > 0 {
+                        let footer = image::imageops::crop_imm(
+                            frame,
+                            0,
+                            frame.height() - self.footer_height,
+                            frame.width(),
+                            self.footer_height,
+                        )
+                        .to_image();
+                        let y = self.image.height() - self.footer_height;
+                        image::imageops::replace(&mut self.image, &footer, 0, i64::from(y));
+                    }
+                    return Ok(added);
+                }
+                // A region can include a PDF toolbar or footer. Locate its
+                // moving middle before giving up, retaining the selected width
+                // and including fixed edges only once in the final image.
+                Err(_) if self.sections == 1 && self.preserve_bounds => {}
+                Err(error) => return Err(error),
+            }
         }
         if similar_frame(&self.last, frame) {
             return Ok(false);
@@ -72,10 +98,42 @@ impl Stitcher {
         if regions.is_empty() {
             return Ok(false);
         }
-        for rect in regions {
+        for mut rect in regions {
+            if self.preserve_bounds {
+                rect.x = 0;
+                rect.width = frame.width();
+            }
             let mut candidate = Self::new(crop(&self.last, rect));
             if candidate.append(crop(frame, rect)).is_ok_and(|added| added) {
-                self.image = candidate.image;
+                if self.preserve_bounds {
+                    let footer_height = frame.height() - rect.y - rect.height;
+                    let height = rect.y + candidate.image.height() + footer_height;
+                    if height > 32_768 || u64::from(height) * u64::from(frame.width()) > 100_000_000
+                    {
+                        return Err("This capture reached the image size limit. Finish it and start another capture.".into());
+                    }
+                    let mut joined = RgbaImage::new(frame.width(), height);
+                    image::imageops::replace(&mut joined, &self.image, 0, 0);
+                    image::imageops::replace(&mut joined, &candidate.image, 0, i64::from(rect.y));
+                    let footer = image::imageops::crop_imm(
+                        frame,
+                        0,
+                        rect.y + rect.height,
+                        frame.width(),
+                        footer_height,
+                    )
+                    .to_image();
+                    image::imageops::replace(
+                        &mut joined,
+                        &footer,
+                        0,
+                        i64::from(height - footer_height),
+                    );
+                    self.image = joined;
+                    self.footer_height = footer_height;
+                } else {
+                    self.image = candidate.image;
+                }
                 self.last = candidate.last;
                 self.sections = candidate.sections;
                 self.window_area = Some(rect);
@@ -95,16 +153,26 @@ impl Stitcher {
         if self.last == next {
             return Ok(false);
         }
-        let mut candidates: Vec<(f64, u32)> = (24..h - 4)
+        // A tiny all-white overlap in a PDF margin is not enough evidence to
+        // stitch. Require a useful fraction of the visible page.
+        let mut candidates: Vec<(f64, u32)> = (24.max(h / 4)..h)
             .map(|overlap| (difference(&self.last, &next, overlap), overlap))
             .collect();
+        candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Refine the strongest offsets using actual edges, not the large blank
+        // margins common in PDFs. Sparse sampling alone can mistake a repeated
+        // line or page margin for an equally good overlap.
+        candidates.truncate(12);
+        for (cost, overlap) in &mut candidates {
+            *cost = edge_difference(&self.last, &next, *overlap);
+        }
         candidates.sort_by(|a, b| a.0.total_cmp(&b.0));
         let (score, overlap) = candidates[0];
         let ambiguous = candidates
             .iter()
             .skip(1)
             .any(|(cost, other)| overlap.abs_diff(*other) > 3 && *cost < score + 0.6);
-        if score > 5. || ambiguous {
+        if !score.is_finite() || score > 12. || ambiguous {
             return Err("Could not align this section. Scroll back to leave at least a third overlapping. Select only the moving content, excluding fixed headers and sidebars.".into());
         }
         let added = h - overlap;
@@ -122,7 +190,24 @@ impl Stitcher {
         let mut joined = RgbaImage::new(next.width(), height);
         image::imageops::replace(&mut joined, &self.image, 0, 0);
         let tail = image::imageops::crop_imm(&next, 0, overlap, next.width(), added).to_image();
-        image::imageops::replace(&mut joined, &tail, 0, i64::from(self.image.height()));
+        let insertion = self.image.height() - self.footer_height;
+        image::imageops::replace(&mut joined, &tail, 0, i64::from(insertion));
+        if self.footer_height > 0 {
+            let footer = image::imageops::crop_imm(
+                &self.image,
+                0,
+                insertion,
+                self.image.width(),
+                self.footer_height,
+            )
+            .to_image();
+            image::imageops::replace(
+                &mut joined,
+                &footer,
+                0,
+                i64::from(height - self.footer_height),
+            );
+        }
         self.image = joined;
         self.last = next;
         self.sections += 1;
@@ -224,8 +309,8 @@ fn difference(previous: &RgbaImage, next: &RgbaImage, overlap: u32) -> f64 {
     let mut total = 0u64;
     let mut count = 0u64;
     // Deterministic spread across the overlap; avoid edges and scrollbars.
-    for row in 0..32 {
-        let y = row * (overlap - 1) / 31;
+    for row in 0..64 {
+        let y = row * (overlap - 1) / 63;
         for col in 0..48 {
             let x = (col + 1) * (next.width() - 1) / 49;
             let a = previous.get_pixel(x, previous.height() - overlap + y);
@@ -239,9 +324,76 @@ fn difference(previous: &RgbaImage, next: &RgbaImage, overlap: u32) -> f64 {
     total as f64 / count as f64
 }
 
+fn edge_difference(previous: &RgbaImage, next: &RgbaImage, overlap: u32) -> f64 {
+    let mut total = 0u64;
+    let mut count = 0u64;
+    let offset = previous.height() - overlap;
+    // A dense deterministic grid catches small differences such as PDF line
+    // numbers. Flat pixels provide no alignment evidence and get no vote.
+    for y in (0..overlap - 2).step_by(3) {
+        for x in (2..next.width() - 3).step_by(3) {
+            let a = previous.get_pixel(x, offset + y);
+            let b = next.get_pixel(x, y);
+            let edge = |image: &RgbaImage, y, pixel: &image::Rgba<u8>| {
+                let right = image.get_pixel(x + 2, y);
+                let below = image.get_pixel(x, y + 2);
+                (0..3).any(|c| pixel[c].abs_diff(right[c]) > 18 || pixel[c].abs_diff(below[c]) > 18)
+            };
+            if edge(previous, offset + y, a) || edge(next, y, b) {
+                for c in 0..3 {
+                    total += u64::from(a[c].abs_diff(b[c]));
+                    count += 1;
+                }
+            }
+        }
+    }
+    if count < 48 {
+        f64::INFINITY
+    } else {
+        total as f64 / count as f64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires CUA screenshots of the synthetic PDF"]
+    fn review_pdf_viewer_frames() {
+        let root = std::path::PathBuf::from(std::env::var("MYIMAGE_SCROLL_REVIEW_DIR").unwrap());
+        let frame = |index| {
+            let image = image::ImageReader::open(root.join(format!("frame-{index}.png")))
+                .unwrap()
+                .with_guessed_format()
+                .unwrap()
+                .decode()
+                .unwrap()
+                .into_rgba8();
+            // Exclude Preview's thumbnail sidebar, but deliberately retain its
+            // toolbar and footer as in the reported selected-region capture.
+            image::imageops::crop_imm(&image, 440, 0, image.width() - 460, image.height())
+                .to_image()
+        };
+        let initial = frame(0);
+        let initial_height = initial.height();
+        let mut stitch = Stitcher::region(initial);
+        for index in 1..=12 {
+            let next = frame(index);
+            let mut added = stitch.observe_window(next.clone()).unwrap();
+            if !added {
+                added = stitch.observe_window(next).unwrap();
+            }
+            assert!(added, "frame {index}");
+        }
+        assert!(stitch.image.height() > initial_height * 3);
+        stitch.image.save(root.join("stitched-pdf.png")).unwrap();
+        eprintln!(
+            "Joined {} sections into {} × {}",
+            stitch.sections,
+            stitch.image.width(),
+            stitch.image.height()
+        );
+    }
     fn page() -> RgbaImage {
         RgbaImage::from_fn(240, 1200, |x, y| {
             let n = x
@@ -255,6 +407,54 @@ mod tests {
                 255,
             ])
         })
+    }
+    #[test]
+    fn selected_pdf_region_keeps_toolbar_once_and_collects_all_pages() {
+        let mut page = RgbaImage::from_pixel(320, 1800, image::Rgba([255; 4]));
+        // Sparse text-like glyphs and blank page gaps, rather than random noise.
+        for line in 0..75u32 {
+            let y = 35 + line * 22 + (line / 24) * 28;
+            for col in 0..36u32 {
+                let seed = (line * 1777 + col * 97 + 13) % 251;
+                for dy in 0..11 {
+                    for dx in 0..5 {
+                        if (seed + dx * 3 + dy * 7) % 11 < 5 {
+                            page.put_pixel(
+                                18 + col * 8 + dx,
+                                y + dy,
+                                image::Rgba([35, 40, 50, 255]),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let frame = |offset| {
+            let mut frame = RgbaImage::from_pixel(320, 440, image::Rgba([40, 42, 48, 255]));
+            image::imageops::replace(
+                &mut frame,
+                &image::imageops::crop_imm(&page, 0, offset, 320, 360).to_image(),
+                0,
+                60,
+            );
+            frame
+        };
+        let mut stitch = Stitcher::region(frame(0));
+        for offset in [80, 180, 320, 440, 600, 750, 920, 1080] {
+            assert!(
+                stitch.observe_window(frame(offset)).unwrap(),
+                "offset {offset}"
+            );
+        }
+        let mut expected = RgbaImage::from_pixel(320, 1520, image::Rgba([40, 42, 48, 255]));
+        image::imageops::replace(
+            &mut expected,
+            &image::imageops::crop_imm(&page, 0, 0, 320, 1440).to_image(),
+            0,
+            60,
+        );
+        assert_eq!(stitch.image, expected);
+        assert_eq!(stitch.sections, 9);
     }
     #[test]
     fn automatic_partial_window_preserves_exact_area_and_ignores_idle_frames() {
@@ -347,10 +547,11 @@ mod tests {
         assert!(!stitch.append(frame(0)).unwrap());
         assert!(stitch.append(frame(180)).unwrap());
         assert!(stitch.append(frame(420)).unwrap());
-        assert_eq!(stitch.sections, 3);
+        assert!(stitch.append(frame(421)).unwrap());
+        assert_eq!(stitch.sections, 4);
         assert_eq!(
             stitch.image,
-            image::imageops::crop_imm(&page, 0, 0, 240, 820).to_image()
+            image::imageops::crop_imm(&page, 0, 0, 240, 821).to_image()
         );
     }
     #[test]
@@ -361,6 +562,27 @@ mod tests {
         assert!(stitch.append(RgbaImage::new(240, 400)).is_err());
         assert!(stitch.append(RgbaImage::new(200, 400)).is_err());
         assert_eq!(stitch.image, before);
+        assert_eq!(stitch.sections, 1);
+    }
+    #[test]
+    fn a_blank_page_margin_is_not_enough_evidence_to_join_unrelated_content() {
+        let mut first = RgbaImage::from_pixel(240, 400, image::Rgba([255; 4]));
+        image::imageops::replace(
+            &mut first,
+            &image::imageops::crop_imm(&page(), 0, 0, 240, 150).to_image(),
+            0,
+            0,
+        );
+        let mut next = RgbaImage::from_pixel(240, 400, image::Rgba([255; 4]));
+        image::imageops::replace(
+            &mut next,
+            &image::imageops::crop_imm(&page(), 0, 700, 240, 150).to_image(),
+            0,
+            250,
+        );
+        let mut stitch = Stitcher::new(first.clone());
+        assert!(stitch.append(next).is_err());
+        assert_eq!(stitch.image, first);
         assert_eq!(stitch.sections, 1);
     }
 }

@@ -308,6 +308,7 @@ pub(super) struct ScrollSession {
     window_crop: Option<selection::PixelRect>,
     pub paused: bool,
     pub finish_requested: bool,
+    pub single_frame_warning: bool,
     pub next_capture: std::time::Instant,
     placement_frames: u8,
     demo_offset: u32,
@@ -812,9 +813,10 @@ impl MyImageApp {
         self.pending_capture = Some(selection.return_hidden);
         self.generation += 1;
         let generation = self.generation;
-        let pointer = self.settings.include_pointer;
-        let demo = self.demo;
         let scrolling = self.settings.capture_mode == CaptureMode::Scrolling;
+        // A moving pointer is not document content and can spoil an overlap.
+        let pointer = self.settings.include_pointer && !scrolling;
+        let demo = self.demo;
         let cancel = Arc::new(AtomicBool::new(false));
         self.capture_cancel = Some(cancel.clone());
         self.hidden.store(true, Ordering::Relaxed);
@@ -876,7 +878,7 @@ impl MyImageApp {
         match selection::crop_selection(&selection.image, rect, CaptureShape::Rectangle, 0) {
             Ok(image) => {
                 self.scroll_session=Some(ScrollSession {capture_size: selection.image.dimensions(), display:selection.display,rect,captured_at:selection.captured_at,
-                    stitcher:Some(Stitcher::new(image)),message:"Scroll the target down, leaving at least a third overlapping. Then capture the next section.".into(),texture:None,placement_frames:0,demo_offset:0,window_id:None,window_crop:None,paused:false,finish_requested:false,next_capture:std::time::Instant::now()});
+                    stitcher:Some(Stitcher::new(image)),message:"Scroll the target down, leaving at least a third overlapping. Then capture the next section.".into(),texture:None,placement_frames:0,demo_offset:0,window_id:None,window_crop:None,paused:false,finish_requested:false,single_frame_warning:false,next_capture:std::time::Instant::now()});
                 self.restore_frames_left = 0;
                 ctx.send_viewport_cmd(ViewportCommand::Decorations(true));
                 ctx.send_viewport_cmd(ViewportCommand::Resizable(false));
@@ -949,7 +951,8 @@ impl MyImageApp {
             window_crop,
             paused: false,
             finish_requested: false,
-            next_capture: std::time::Instant::now() + Duration::from_millis(700),
+            single_frame_warning: false,
+            next_capture: std::time::Instant::now() + Duration::from_millis(100),
         });
         self.restore_frames_left = 0;
         ctx.send_viewport_cmd(ViewportCommand::Decorations(true));
@@ -974,7 +977,6 @@ impl MyImageApp {
         let window_id = session.window_id;
         let window_crop = session.window_crop;
         let final_sample = session.finish_requested;
-        let pointer = self.settings.include_pointer;
         let demo = self.demo;
         session.demo_offset += 1;
         let demo_offset = session.demo_offset.div_ceil(2) * rect.height / 3;
@@ -998,9 +1000,9 @@ impl MyImageApp {
                         |x, y| demo_scroll_pixel(x, y + demo_offset),
                     ))
                 } else if let Some(id) = window_id {
-                    capture::capture_window(id, pointer)
+                    capture::capture_window(id, false)
                 } else {
-                    capture::capture_display(display.id, pointer)
+                    capture::capture_display(display.id, false)
                 }
             };
             let mut observe = || {
@@ -1045,6 +1047,19 @@ impl MyImageApp {
         });
     }
     pub(super) fn finish_scroll_capture(&mut self, ctx: &egui::Context) {
+        let Some(session) = &mut self.scroll_session else {
+            return;
+        };
+        let Some(stitcher) = &session.stitcher else {
+            return;
+        };
+        if stitcher.sections == 1 && !session.single_frame_warning {
+            session.single_frame_warning = true;
+            session.finish_requested = false;
+            session.paused = true;
+            session.message = "No additional sections were captured. For a PDF, use continuous scrolling and move down in small steps. Resume to try again, or keep only the visible area.".into();
+            return;
+        }
         let Some(session) = self.scroll_session.take() else {
             return;
         };
@@ -1077,7 +1092,7 @@ impl MyImageApp {
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("Capture Now").size(21.).strong());
-                    ui.weak(if session.window_id.is_some() { "Automatic sections" } else { "Scrolling" });
+                    ui.weak("Scrolling");
                     if let Some(stitcher) = &session.stitcher {
                         ui.weak(format!(
                             "{} section{} · {} × {}",
@@ -1102,9 +1117,11 @@ impl MyImageApp {
                         ui.set_width(380.);
                         ui.label(&session.message);
                         ui.add_space(8.);
-                        if session.window_id.is_some() {
+                        if session.single_frame_warning {
+                            // The recovery message above replaces the normal instructions.
+                        } else if session.window_id.is_some() {
                             ui.strong("1. Scroll the selected window");
-                            ui.small("Scroll steadily, keeping some content overlapping. Pause or finish whenever you like.");
+                            ui.small("Use small steps, keeping at least half the previous content visible. For PDFs, choose continuous scrolling in the PDF viewer.");
                             ui.strong("2. Finish when you have enough");
                             ui.small(if session.window_crop.is_some() { "Only your selected area is included." } else { "The scrolling content is collected automatically." });
                         } else {
@@ -1117,12 +1134,16 @@ impl MyImageApp {
                     if session.window_id.is_some() {
                         if ui.add_enabled(!session.finish_requested, egui::Button::new(if session.paused { "Resume" } else { "Pause" })).clicked() {
                             session.paused = !session.paused;
+                            if !session.paused {
+                                session.single_frame_warning = false;
+                                session.message = "Scroll down in the selected window. Sections are collected automatically.".into();
+                            }
                         }
                     } else {
                         next=ui.add_enabled(!self.busy,appearance::primary(ui.ctx(), "Capture next section")).clicked();
                     }
                     finish = ui
-                        .add_enabled(!session.finish_requested, appearance::primary(ui.ctx(), self.settings.capture_destination.finish_label()))
+                        .add_enabled(!session.finish_requested, appearance::primary(ui.ctx(), if session.single_frame_warning { "Keep visible area" } else { self.settings.capture_destination.finish_label() }))
                         .clicked();
                     cancel = ui
                         .add(egui::Button::new("Cancel"))
@@ -1213,6 +1234,41 @@ fn window_selection(area: Rect, window: Rect) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn finish_without_scroll_keeps_session_open_and_warns_instead_of_saving() {
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.displays.push(DisplayInfo {
+            id: 1,
+            name: "Test display".into(),
+            x: 0,
+            y: 0,
+            width: 800,
+            height: 600,
+            scale_factor: 1.,
+            is_primary: true,
+        });
+        app.start_window_scroll(
+            &ctx,
+            42,
+            Some([0., 0., 1., 1.]),
+            image::RgbaImage::new(300, 400),
+            Local::now(),
+        );
+        app.scroll_session.as_mut().unwrap().finish_requested = true;
+        app.finish_scroll_capture(&ctx);
+        let session = app
+            .scroll_session
+            .as_ref()
+            .expect("single frame must not silently save");
+        assert!(session.single_frame_warning);
+        assert!(session.paused);
+        assert!(!session.finish_requested);
+        assert_eq!(session.stitcher.as_ref().unwrap().sections, 1);
+        assert!(app.document.is_none());
+        assert!(!app.busy);
+        assert!(session.message.contains("No additional sections"));
+    }
     #[test]
     fn fast_capture_only_finishes_completed_single_selections_when_enabled() {
         for mode in CaptureMode::ALL {

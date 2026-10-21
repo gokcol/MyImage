@@ -1189,6 +1189,7 @@ impl MyImageApp {
                                 session.message =
                                     "Section added. Keep scrolling down, or choose Finish.".into();
                                 session.texture = None;
+                                session.single_frame_warning = false;
                             }
                             Ok(false) => {
                                 if !session.paused {
