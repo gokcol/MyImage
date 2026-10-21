@@ -7,3 +7,4 @@ New in MyImage 2.0:
 - In-place text and callouts, visual Magnify styles, quick image effects, layers and presets.
 - Compact Settings, selectable GUI/icon/pointer styles, the complete Calico pointer family, a resizable properties panel and Pen in the main toolbar.
 - Improved background/reopen behavior and optional start at login, off by default.
+- Lighter, compact arrow and shape controls with icon-based styles, a vertical stroke-weight slider and popups positioned away from the selected drawing.

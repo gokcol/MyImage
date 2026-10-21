@@ -1,5 +1,11 @@
 # Release validation — MyImage
 
+## Version 2.0 — build 68
+
+The floating arrow and shape properties bars now show only essential icon controls: color, stroke weight, line pattern, and start/end caps or fill/outline. Pen selections retain color and weight. Weight uses a slim vertical slider with an accessible value. Bars use their measured size; popups choose available space around the selected drawing and stay still while weight changes its bounds. Advanced properties remain in the right inspector. App version stays 2.0.0; Mac build advances to 68 and MSIX to 2.0.1.0 for an ordered update to the published build 67.
+
+Validation: 484 app tests and 15 packaging tests passed, with 16 explicitly ignored diagnostics/integration tests. Formatting, whitespace checks and strict workspace/all-targets Clippy passed. Regression coverage exercises arrow endpoints and line patterns, shape fill/color changes, preserved selection and Undo, and popup placement near each canvas edge. Isolated native macOS review confirmed the compact arrow/shape bars, vertical slider appearance and changes, shape fill, and native Undo restoring stroke weight. Windows interactive testing remains pending; release CI and signing results are recorded with the release artifacts.
+
 ## Version 2.0 — build 67
 
 Version 2.0 packages the build 62–65 improvements below, including Pearl Compact Capture Now, compact Settings, opt-in start at login, native background/reopen handling, the complete Calico pointer family, the resizable inspector, and compact toolbar with Pen after Shapes. Public app version is 2.0.0 and the Store package version is 2.0.0.0, retaining MyImage's existing Partner Center identity and increasing from the previous 1.13.0.0 package. The Store startup task remains disabled by default. The existing portable document format is retained. A one-time library conversion matches legacy images to projects by embedded source pixels, creates verified projects for unpaired images, remaps Recents/favorites, and retires verified dated captures to Trash only after associations are persisted. External imports remain untouched. The editor now automatically creates and saves its canonical project, flushes before navigation/quit, and excludes flattened exports from Library and Recents. Deleting projects includes embedded pixels and remaining managed image companions.

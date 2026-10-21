@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 2.0](https://github.com/gokcol/MyImage/releases/tag/v2.0) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
+[Download MyImage 2.0](https://github.com/gokcol/MyImage/releases/tag/v2.0-build68) — notarized macOS Apple Silicon. **Windows x64 remains UNTESTED**; Microsoft Store distribution is being prepared and is not yet available.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -11,6 +11,8 @@ MyImage automatically creates and saves **`.myimage` projects**, keeping each or
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
 
 ## New in 2.0
+
+Arrow and shape selections have a light, icon-only shortcut strip: color, vertical stroke-weight slider, line pattern, and either arrow endpoints or shape fill/outline. Popups use available space around the selection; advanced properties remain in the right inspector.
 
 Choose Cobalt Satin, Amber Enamel or Jade Graphite in **App menu → Settings**, then independently select Studio Color, Cobalt Duotone or Precision Outline icons. Preferences apply immediately and persist; tool positions stay familiar. Capture Now uses its own Pearl Compact finish: lighter graphite surfaces, violet accents, a quiet mode selector, aligned switches and a prominent red circular Capture button.
 
@@ -29,7 +31,7 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 2.0 uses MSIX version 2.0.0.0, which preserves upgrade ordering
+[privacy policy](PRIVACY.md). MyImage 2.0 uses MSIX version 2.0.1.0, which preserves upgrade ordering
 after earlier 1.x Store packages.
 
 ## Run

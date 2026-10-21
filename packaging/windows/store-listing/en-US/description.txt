@@ -7,7 +7,7 @@ CAPTURE YOUR WAY
 Use the Pearl Compact Capture Now panel with its large red Capture button. Capture a region, several separate regions with transparent gaps, a window or a full display. Guided vertical scrolling capture helps collect longer content. Send the capture to the editor or directly to the clipboard. Choose a delay, include the pointer, and optionally capture as soon as you finish selecting.
 
 EDIT DIRECTLY ON THE CANVAS
-Type in place in text boxes and callouts. Add arrows, shapes, stamps, numbered steps and freehand strokes. Move, resize, recolor and arrange objects, manage layers, and reuse presets. Undo and redo keep experimentation simple. Crop, resize, rotate and extend the canvas while retaining the original pixels in your project.
+Type in place in text boxes and callouts. Add arrows, shapes, stamps, numbered steps and freehand strokes. Move, resize, recolor and arrange objects, manage layers, and reuse presets. Compact on-canvas controls put essential colors, stroke weights, line patterns and arrow endpoints within reach; the right panel holds advanced properties. Undo and redo keep experimentation simple. Crop, resize, rotate and extend the canvas while retaining the original pixels in your project.
 
 DRAW ATTENTION TO THE DETAILS
 Use adjustable Magnify lenses and linked source areas. Blur or pixelate selected content, highlight important areas, or use Fill to recolor or clear connected backgrounds. Quick Effects include borders, shadows, edge styles, reflection, perspective, color adjustments and fade.
