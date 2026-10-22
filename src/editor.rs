@@ -52,6 +52,8 @@ mod shape_picker;
 mod stamp_panel;
 #[path = "text_editor.rs"]
 mod text_editor;
+#[path = "text_extract.rs"]
+mod text_extract;
 use annotation_selection::*;
 
 use eframe::egui::{
@@ -265,6 +267,7 @@ pub struct EditorState {
     image_error: Option<String>,
     clipboard_status: Option<String>,
     clipboard_job: Option<annotation_clipboard::ClipboardJob>,
+    text_extraction: text_extract::State,
     copy_confirmation: Option<(String, std::time::Instant)>,
     property_before: Option<EditState>,
     property_interacting: bool,
@@ -339,6 +342,7 @@ impl Default for EditorState {
             image_error: None,
             clipboard_status: None,
             clipboard_job: None,
+            text_extraction: Default::default(),
             copy_confirmation: None,
             property_before: None,
             property_interacting: false,
@@ -392,7 +396,8 @@ impl EditorState {
     }
 
     pub fn has_modal(&self) -> bool {
-        self.extra_tools.busy()
+        self.text_extraction.open
+            || self.extra_tools.busy()
             || self.toolbar_customizer
             || self.fill_tool.busy()
             || self.text_dialog.is_some()
@@ -550,6 +555,7 @@ impl EditorState {
         }
         self.poll_extra_tools(ui.ctx(), document, history);
         self.poll_fill(ui.ctx(), document, history);
+        self.poll_text_extraction(document);
         let clipboard_was_busy = self.clipboard_job.is_some();
         self.poll_clipboard(document, history);
         if clipboard_was_busy && self.clipboard_job.is_none() {
@@ -593,6 +599,7 @@ impl EditorState {
         self.preset_dialog(ui.ctx());
         self.text_editor_window(ui.ctx(), document, history);
         self.stamp_designer_window(ui.ctx(), document, history);
+        self.text_extraction_dialog(ui.ctx());
     }
 
     fn workspace_ui(

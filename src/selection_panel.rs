@@ -171,6 +171,7 @@ impl EditorState {
                 }
             });
         });
+        self.extract_text_button(ui, document, history);
         section(ui, "Effects");
         self.privacy_actions(ui, document, history);
         if let Some(i) = self

@@ -258,6 +258,12 @@ A fully selected group counts as one object, preserving its internal layout. Alt
 - Paste keeps the editor enabled while reading the clipboard. If the image changes during that read, it asks you to paste again instead of applying stale placement.
 - Raster clipboard layers are bounded to 64 megapixels and 16 MiB of lossless PNG per layer, with a 32 MiB encoded artwork budget per project. Large pasted layers can be copied as pixels; editable annotation clipboard payloads retain their separate 4 MiB limit.
 
+## Extract text from a selection
+
+Use **Select** to draw a region, then right-click it and choose **Extract text…**. The same action is available in the Selection panel. Recognition runs in the background on the selected visible pixels, including image edits, annotations and selection masks. An editable preview preserves line breaks; choose **Copy text** to copy it, or **Close** to return to the image. Recognition does not modify your project or replace the clipboard automatically.
+
+Text recognition uses Apple Vision on macOS and Windows’ native OCR service on Windows. Processing stays on the computer. Language availability and accuracy depend on the installed operating-system models; the Mac recognizer queries supported languages and enables Turkish and English when available. Windows uses its installed user-language recognizer, with a fallback to an installed language. Install the corresponding OCR language capability in Windows Language options if needed. Microsoft officially supports its OCR API for apps with package identity; the Setup/portable edition attempts the same native API and provides Store/language guidance if Windows rejects it. Very large selections are resized to the native recognition limit. Review text before pasting, especially names, punctuation and complex layouts.
+
 ## Copy and paste annotations
 
 Select annotations or a group in **Edit**, then right-click the image and choose **Copy editable annotations**. Open another image, enter **Edit**, and choose **Paste** or press **Command+V / Ctrl+V**. Text fields retain their usual text copy/paste behavior.

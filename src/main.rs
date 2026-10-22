@@ -33,6 +33,7 @@ mod library;
 mod library_files;
 mod library_panel;
 mod magnify_ui;
+mod ocr;
 mod onboarding;
 mod pdf_export;
 mod pointer_style;

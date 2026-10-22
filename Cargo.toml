@@ -43,9 +43,10 @@ block2 = "0.6"
 objc2-screen-capture-kit = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"
+objc2-vision = { version = "0.3.2", default-features = false, features = ["std", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNObservation", "objc2-core-foundation"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "ApplicationModel", "Win32_Storage_Packaging_Appx", "Win32_System_Registry"] }
+windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "ApplicationModel", "Win32_Storage_Packaging_Appx", "Win32_System_Registry", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Win32_System_WinRT"] }
 
 # Keep local builds compact. Tests inherit these development settings.
 # Retain file/line backtraces for workspace code without full debug metadata.

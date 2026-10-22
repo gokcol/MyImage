@@ -1,9 +1,9 @@
 # MyImage privacy policy
 
-Effective date: 20 October 2026
+Effective date: 22 October 2026
 
 MyImage is a desktop screen-capture and image editor by Orhan Gökçöl.
-This policy describes version 1.2.0 and applies to its GitHub distribution
+This policy describes version 2.0.0 and applies to its GitHub distribution
 and any Microsoft Store edition using this source.
 
 ## On-device processing
@@ -12,6 +12,11 @@ MyImage processes screen captures, images, editable projects, SVG stamps and
 signature artwork on your computer. Screen content can contain personal or
 confidential information. You choose what to capture, open, copy, save or export.
 The app does not upload that content to the developer or a MyImage server.
+Extract text uses the operating system’s on-device text recognition on your
+selected visible pixels. Recognized text is held in memory for review and is
+placed on the clipboard only when you choose Copy text. MyImage does not upload
+the selected pixels or recognized text.
+
 It does not require an account and contains no advertising, analytics or
 automatic crash-report uploads.
 

@@ -188,7 +188,7 @@ impl EditorState {
         }
     }
 
-    fn pixel_area(&self, document: &Document) -> Option<(Rect, Vec<Point>)> {
+    pub(super) fn pixel_area(&self, document: &Document) -> Option<(Rect, Vec<Point>)> {
         self.area.map(|rect| {
             let mask = self
                 .selected
@@ -625,6 +625,9 @@ impl EditorState {
             self.finish_annotation_gesture(document, history);
             self.copy_current(ui.ctx(), document);
             self.focus_canvas = true;
+            ui.close();
+        }
+        if self.extract_text_button(ui, document, history) {
             ui.close();
         }
         if self.selected.is_some() && self.selected_indices(document).iter().all(|&i| !document.annotations[i].kind.is_area_edit() && document.annotations[i].kind != AnnotationKind::Fill) && ui.button("Copy editable annotations").on_hover_text("Copy selected objects and groups with their styles for another MyImage document").clicked() {
