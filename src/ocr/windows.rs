@@ -209,7 +209,7 @@ mod tests {
         let image = crate::svg_stamp::raster(
             r##"<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="260">
                 <rect width="1080" height="260" fill="white"/>
-                <text x="40" y="95" font-family="sans-serif" font-size="64" fill="black">MyImage region OCR</text>
+                <text x="40" y="95" font-family="sans-serif" font-size="64" fill="black">Selected region OCR</text>
                 <text x="40" y="195" font-family="sans-serif" font-size="64" fill="black">Second line 12345</text>
             </svg>"##,
             1080,
@@ -218,7 +218,7 @@ mod tests {
         let text =
             recognize(&image).expect("Windows native OCR should recognize the public fixture");
         let lowercase = text.to_lowercase();
-        assert!(lowercase.contains("myimage region ocr"), "{text:?}");
+        assert!(lowercase.contains("selected region ocr"), "{text:?}");
         assert!(lowercase.contains("second line 12345"), "{text:?}");
         assert!(
             text.lines().count() >= 2,
