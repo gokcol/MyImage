@@ -8,6 +8,8 @@ mod capture_launcher;
 mod capture_output;
 #[path = "capture_session.rs"]
 mod capture_session;
+#[path = "screen_text.rs"]
+mod screen_text;
 use crate::{
     appearance::{self, Icon},
     capture::{self, DisplayInfo},
@@ -151,6 +153,7 @@ pub struct MyImageApp {
     _termination_guard: Option<crate::desktop::TerminationGuard>,
     desktop: Option<DesktopIntegration>,
     capture_launcher: Option<capture_launcher::Launcher>,
+    screen_text: screen_text::State,
     desktop_rx: mpsc::Receiver<DesktopEvent>,
     desktop_tx: mpsc::Sender<DesktopEvent>,
     work_rx: mpsc::Receiver<WorkEvent>,
@@ -283,6 +286,7 @@ impl MyImageApp {
             _termination_guard: None,
             desktop: None,
             capture_launcher: None,
+            screen_text: Default::default(),
             desktop_rx,
             desktop_tx,
             work_rx,
@@ -463,6 +467,7 @@ impl MyImageApp {
             || self.pending_action.is_some()
             || self.export_panel.open
             || self.editor.has_modal()
+            || self.screen_text.open
         {
             return;
         }
@@ -500,7 +505,8 @@ impl MyImageApp {
         let ctx = ctx.clone();
         let delay = self.settings.delay_seconds;
         let demo = self.demo;
-        let pointer = self.settings.include_pointer;
+        let pointer = self.settings.include_pointer
+            && self.settings.capture_mode != capture::CaptureMode::Text;
         let mode = self.settings.capture_mode;
         self.shape = CaptureShape::Rectangle;
         log::info!("Capture requested on display {}", display.id);
@@ -516,6 +522,8 @@ impl MyImageApp {
                 Ok(CapturedFrame {
                     image: if mode == capture::CaptureMode::Scrolling {
                         image::RgbaImage::from_fn(1600, 1000, capture_session::demo_scroll_pixel)
+                    } else if mode == capture::CaptureMode::Text {
+                        screen_text::demo_image()
                     } else {
                         demo_image()
                     },
@@ -689,7 +697,13 @@ impl MyImageApp {
         let Some(selection) = self.selection.take() else {
             return;
         };
-        if self.settings.capture_mode == capture::CaptureMode::Scrolling {
+        if selection.mode == capture::CaptureMode::Text {
+            self.queue_screen_text(ctx, move || {
+                selection::crop_selection(&selection.image, rect, CaptureShape::Rectangle, 0)
+            });
+            return;
+        }
+        if selection.mode == capture::CaptureMode::Scrolling {
             self.start_scroll_session(ctx, selection, rect);
             return;
         }
@@ -1389,6 +1403,9 @@ impl MyImageApp {
     }
 
     fn request_quit(&mut self, ctx: &egui::Context) {
+        if self.screen_text.open {
+            self.close_screen_text(ctx);
+        }
         self.close_capture_launcher(ctx);
         if let Some(session) = &mut self.scroll_session {
             session.message = "Finish or cancel the scrolling capture before quitting.".into();
@@ -1424,7 +1441,7 @@ impl MyImageApp {
             &mut self.shape,
             &self.displays,
             Availability {
-                capture: !self.displays.is_empty() && !self.busy,
+                capture: !self.displays.is_empty() && !self.busy && !self.screen_text.open,
                 background: self.desktop.is_some(),
                 permission_needed: cfg!(target_os = "macos")
                     && !self.demo
@@ -1828,6 +1845,7 @@ impl eframe::App for MyImageApp {
                 crate::capture_panel::menu_summary(&self.settings, self.shape, &self.displays),
                 !self.displays.is_empty()
                     && !self.busy
+                    && !self.screen_text.open
                     && self.pending_capture.is_none()
                     && self.selection.is_none()
                     && !self.guide_open
@@ -1860,6 +1878,7 @@ impl eframe::App for MyImageApp {
         }
         if !self.quitting {
             self.capture_launcher_ui(ctx);
+            self.screen_text_ui(ctx);
         }
         if self.quitting || self.hidden.load(Ordering::Relaxed) {
             return;

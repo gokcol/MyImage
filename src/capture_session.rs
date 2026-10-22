@@ -289,7 +289,12 @@ impl MultiRegions {
 }
 
 fn capture_on_completion(enabled: bool, mode: CaptureMode, completed: bool) -> bool {
-    enabled && completed && matches!(mode, CaptureMode::Region | CaptureMode::Window)
+    enabled
+        && completed
+        && matches!(
+            mode,
+            CaptureMode::Region | CaptureMode::Window | CaptureMode::Text
+        )
 }
 
 pub(super) struct CapturedFrame {
@@ -414,13 +419,39 @@ impl MyImageApp {
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 10.;
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("Capture Now").strong().color(Color32::WHITE));
-                            egui::ComboBox::from_id_salt("capture_mode_live").selected_text(mode.label()).width(110.).show_ui(ui, |ui| {
-                                for choice in [CaptureMode::Region,CaptureMode::MultiRegion,CaptureMode::Window,CaptureMode::Scrolling] {
-                                    ui.selectable_value(&mut mode,choice,choice.label());
-                                }
-                            }).response.on_hover_text("Space switches Region / Window. Click a window or drag a region.");
-                            destination_changed = crate::capture_panel::destination_picker(ui, &mut self.settings.capture_destination);
+                            ui.label(
+                                egui::RichText::new("Capture Now")
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            );
+                            egui::ComboBox::from_id_salt("capture_mode_live")
+                                .selected_text(mode.label())
+                                .width(110.)
+                                .show_ui(ui, |ui| {
+                                    for choice in [
+                                        CaptureMode::Region,
+                                        CaptureMode::MultiRegion,
+                                        CaptureMode::Window,
+                                        CaptureMode::Scrolling,
+                                        CaptureMode::Text,
+                                    ] {
+                                        ui.selectable_value(&mut mode, choice, choice.label());
+                                    }
+                                })
+                                .response
+                                .on_hover_text(
+                                    "Choose a capture type. Space switches Region / Window.",
+                                );
+                            if mode == CaptureMode::Text {
+                                ui.label(
+                                    egui::RichText::new("Text → clipboard").color(Color32::WHITE),
+                                );
+                            } else {
+                                destination_changed = crate::capture_panel::destination_picker(
+                                    ui,
+                                    &mut self.settings.capture_destination,
+                                );
+                            }
                             ui.checkbox(
                                 &mut selection.magnifier,
                                 egui::RichText::new("Magnifier").color(Color32::WHITE),
@@ -434,20 +465,40 @@ impl MyImageApp {
                                 cancel = true;
                             }
                             if mode == CaptureMode::MultiRegion {
-                                ui.label(egui::RichText::new(format!("{}/32", selection.multi.rects.len())).color(Color32::WHITE));
-                                if ui.add_enabled(selection.multi.selected.is_some(), egui::Button::new("Remove")).on_hover_text("Remove selected region · Delete").clicked() {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}/32",
+                                        selection.multi.rects.len()
+                                    ))
+                                    .color(Color32::WHITE),
+                                );
+                                if ui
+                                    .add_enabled(
+                                        selection.multi.selected.is_some(),
+                                        egui::Button::new("Remove"),
+                                    )
+                                    .on_hover_text("Remove selected region · Delete")
+                                    .clicked()
+                                {
                                     selection.multi.remove_selected(&mut selection.drag);
                                 }
                             }
-                            let ready = selection.drag.bounds().is_some() || (mode == CaptureMode::MultiRegion && !selection.multi.rects.is_empty());
+                            let ready = selection.drag.bounds().is_some()
+                                || (mode == CaptureMode::MultiRegion
+                                    && !selection.multi.rects.is_empty());
                             if ui
                                 .add_enabled(
                                     ready,
-                                    appearance::primary(ui.ctx(), if mode == CaptureMode::Scrolling {
-                                        "Start scrolling"
-                                    } else {
-                                        self.settings.capture_destination.capture_label()
-                                    }),
+                                    appearance::primary(
+                                        ui.ctx(),
+                                        if mode == CaptureMode::Scrolling {
+                                            "Start scrolling"
+                                        } else if mode == CaptureMode::Text {
+                                            "Copy text"
+                                        } else {
+                                            self.settings.capture_destination.capture_label()
+                                        },
+                                    ),
                                 )
                                 .clicked()
                             {
@@ -573,6 +624,14 @@ impl MyImageApp {
                         &windows,
                         &mut selection.window_id,
                     );
+                } else if !placing_overlay && selection.pointer_ready && !menu_interaction && mode == CaptureMode::Text {
+                    // Text capture is a free rectangle. A click or modifier must
+                    // not silently snap to a window or become an image capture.
+                    selection.drag.update(
+                        &ctx.input(|i| i.events.clone()),
+                        bounds,
+                        bar,
+                    );
                 } else if !placing_overlay && selection.pointer_ready && !menu_interaction && mode == CaptureMode::Region {
                     let windows: Vec<_> = hovered_window
                         .into_iter()
@@ -596,7 +655,7 @@ impl MyImageApp {
                     && capture_on_completion(self.settings.capture_on_release, mode, selection.drag.completed);
                 let chosen = selection.drag.bounds().map(|r| r.intersect(bounds));
                 let selected = chosen.or_else(|| {
-                    (!selection.drag.active)
+                    (mode != CaptureMode::Text && !selection.drag.active)
                         .then(|| hovered_window.map(|w| window_rect(w).intersect(bounds)))
                         .flatten()
                 });
@@ -725,6 +784,10 @@ impl MyImageApp {
                 }
                 let hint = if mode == CaptureMode::MultiRegion {
                     "Drag to add regions · Drag a region to adjust · Delete removes · Enter captures"
+                } else if mode == CaptureMode::Text && self.settings.capture_on_release {
+                    "Drag and release to copy text · Esc cancels"
+                } else if mode == CaptureMode::Text {
+                    "Drag around text · Adjust edges · Enter copies text · Esc cancels"
                 } else if self.settings.capture_on_release && mode == CaptureMode::Window {
                     "Click a window to capture · Tab cycles overlapping windows · Esc cancels"
                 } else if self.settings.capture_on_release && mode == CaptureMode::Region {
@@ -1276,9 +1339,108 @@ mod tests {
             assert!(!capture_on_completion(true, mode, false));
             assert_eq!(
                 capture_on_completion(true, mode, true),
-                matches!(mode, CaptureMode::Region | CaptureMode::Window)
+                matches!(
+                    mode,
+                    CaptureMode::Region | CaptureMode::Window | CaptureMode::Text
+                )
             );
         }
+    }
+
+    #[test]
+    fn text_capture_stays_a_free_region_with_space_and_command_drag() {
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.settings.capture_mode = CaptureMode::Text;
+        let image = image::RgbaImage::new(800, 600);
+        app.selection = Some(Selection {
+            display: DisplayInfo {
+                id: 1,
+                name: "Test display".into(),
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+                scale_factor: 1.,
+                is_primary: true,
+            },
+            texture: load_texture(&ctx, "text-capture-test", &image),
+            image,
+            captured_at: Local::now(),
+            drag: Default::default(),
+            multi: Default::default(),
+            mode: CaptureMode::Text,
+            return_hidden: true,
+            placement_frames: 4,
+            windows: vec![capture::WindowInfo {
+                id: 9,
+                name: "Underlying window".into(),
+                x: 50,
+                y: 50,
+                width: 600,
+                height: 400,
+            }],
+            window_id: None,
+            hover_cycle: 0,
+            magnifier: false,
+            magnifier_preview: Default::default(),
+            pointer_ready: true,
+        });
+        let mut frame = |events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800., 600.))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.selection_ui(ctx),
+            )
+        };
+        frame(vec![]);
+        let output = frame(vec![egui::Event::Key {
+            key: egui::Key::Space,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"Text → clipboard"));
+        assert!(labels.contains(&"Copy text"));
+        let start = egui::pos2(100., 100.);
+        let end = egui::pos2(300., 220.);
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::COMMAND,
+        };
+        frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
+        frame(vec![egui::Event::PointerMoved(end)]);
+        frame(vec![button(end, false)]);
+        let selection = app
+            .selection
+            .as_ref()
+            .expect("confirmation stays enabled by default");
+        assert_eq!(selection.mode, CaptureMode::Text);
+        assert_eq!(
+            selection.drag.bounds(),
+            Some(Rect::from_min_max(start, end))
+        );
+        assert!(selection.multi.rects.is_empty());
+        assert_eq!(app.settings.capture_mode, CaptureMode::Text);
+        assert_eq!(
+            app.settings.capture_destination,
+            capture::CaptureDestination::Editor
+        );
+        assert!(app.document.is_none());
     }
 
     #[test]

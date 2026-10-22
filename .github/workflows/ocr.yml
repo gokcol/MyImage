@@ -6,6 +6,7 @@ on:
       - 'src/ocr*'
       - 'src/ocr/**'
       - 'src/text_extract.rs'
+      - 'src/screen_text.rs'
       - '.github/workflows/ocr.yml'
 permissions:
   contents: read
@@ -37,5 +38,5 @@ jobs:
       - name: Recognize actual image text through native and selected-region routes
         shell: powershell
         run: |
-          cargo test --locked --bin myimage -- --ignored ocr::windows::tests::windows_native_ocr_reads_both_lines editor::text_extract::tests::selected_region_reads_only_visible_selected_text --nocapture
+          cargo test --locked --bin myimage -- --ignored ocr::windows::tests::windows_native_ocr_reads_both_lines editor::text_extract::tests::selected_region_reads_only_visible_selected_text --nocapture --test-threads=1
           if ($LASTEXITCODE -ne 0) { throw 'Native OCR validation failed.' }

@@ -262,6 +262,10 @@ A fully selected group counts as one object, preserving its internal layout. Alt
 
 Use **Select** to draw a region, then right-click it and choose **Extract text…**. The same action is available in the Selection panel. Recognition runs in the background on the selected visible pixels, including image edits, annotations and selection masks. An editable preview preserves line breaks; choose **Copy text** to copy it, or **Close** to return to the image. Recognition does not modify your project or replace the clipboard automatically.
 
+To copy text directly from another app, open **Capture Now**, choose **Text**, and select a screen region. Choose **Copy text** (or release the selection if capture-on-release is enabled). MyImage recognizes and copies the text directly, without opening the Editor or saving an image/project in the Library. Empty regions, errors and cancellation leave the previous clipboard intact; a clipboard failure offers **Retry copy**. Your normal image-capture destination and pointer preferences are retained.
+
+Both routes can be canceled. A stalled recognition request stops waiting after 30 seconds and offers a retry instead of leaving the interface spinning indefinitely.
+
 Text recognition uses Apple Vision on macOS and Windows’ native OCR service on Windows. Processing stays on the computer. Language availability and accuracy depend on the installed operating-system models; the Mac recognizer queries supported languages and enables Turkish and English when available. Windows uses its installed user-language recognizer, with a fallback to an installed language. Install the corresponding OCR language capability in Windows Language options if needed. Microsoft officially supports its OCR API for apps with package identity; the Setup/portable edition attempts the same native API and provides Store/language guidance if Windows rejects it. Very large selections are resized to the native recognition limit. Review text before pasting, especially names, punctuation and complex layouts.
 
 ## Copy and paste annotations

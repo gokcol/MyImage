@@ -1,7 +1,9 @@
 //! Windows' on-device OCR service. This must run on a worker thread: recognition
 //! blocks while Windows completes its asynchronous operation.
 
+use super::Control;
 use image::RgbaImage;
+use std::time::Duration;
 use windows::{
     Globalization::Language,
     Graphics::Imaging::{BitmapAlphaMode, BitmapPixelFormat, SoftwareBitmap},
@@ -15,7 +17,22 @@ use windows::{
     core::Error,
 };
 
+#[cfg(test)]
 pub(super) fn recognize(image: &RgbaImage) -> Result<String, String> {
+    recognize_cancellable(
+        image,
+        &Control {
+            canceled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            deadline: std::time::Instant::now() + super::JOB_TIMEOUT,
+        },
+    )
+}
+
+pub(super) fn recognize_cancellable(
+    image: &RgbaImage,
+    control: &Control,
+) -> Result<String, String> {
+    control.check()?;
     // A dedicated MTA lets the completion callback run without a UI message pump.
     // Declare this first so every WinRT object is released before uninitializing.
     let _apartment = Apartment::new()?;
@@ -54,10 +71,32 @@ pub(super) fn recognize(image: &RgbaImage) -> Result<String, String> {
     .map_err(|error| native_error("read the selected area", error))?;
 
     let text = (|| {
-        let result = engine
+        control.check()?;
+        let operation = engine
             .RecognizeAsync(&bitmap)
-            .and_then(|operation| operation.get())
             .map_err(|error| native_error("read the text", error))?;
+        loop {
+            if let Err(error) = control.check() {
+                let _ = operation.Cancel();
+                return Err(error);
+            }
+            // AsyncStatus::Started has the stable WinRT ABI value zero. The
+            // windows crate returns this enum from windows-future without
+            // re-exporting its type, so inspect the public enum representation.
+            if operation
+                .Status()
+                .map_err(|error| native_error("check text recognition", error))?
+                .0
+                != 0
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let result = operation
+            .GetResults()
+            .map_err(|error| native_error("read the text", error))?;
+        control.check()?;
         let lines = result
             .Lines()
             .map_err(|error| native_error("read the text lines", error))?;

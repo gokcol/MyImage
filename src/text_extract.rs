@@ -5,6 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc,
 };
+use std::time::Instant;
 
 #[derive(Default)]
 pub(super) struct State {
@@ -23,6 +24,7 @@ struct Job {
     canceled: Arc<AtomicBool>,
     image: Arc<image::RgbaImage>,
     before: EditState,
+    started: Instant,
 }
 impl Drop for Job {
     fn drop(&mut self) {
@@ -86,6 +88,7 @@ impl EditorState {
                 canceled,
                 image: document.image.clone(),
                 before,
+                started: Instant::now(),
             }),
             ..Default::default()
         };
@@ -100,7 +103,7 @@ impl EditorState {
                         if cancel.load(Ordering::Acquire) {
                             return Ok(String::new());
                         }
-                        crate::ocr::recognize(pixels)
+                        crate::ocr::recognize_cancellable(pixels, cancel.clone())
                     });
             if !cancel.load(Ordering::Acquire) {
                 let _ = tx.send(result);
@@ -119,10 +122,13 @@ impl EditorState {
         }
         let result = match job.receiver.try_recv() {
             Ok(result) => result,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(_) => Err(
-                "Text recognition stopped unexpectedly. Close this dialog and try again.".into(),
-            ),
+            Err(mpsc::TryRecvError::Empty) => {
+                if job.started.elapsed() < crate::ocr::JOB_TIMEOUT {
+                    return;
+                }
+                Err("Text recognition took too long. Try again, or select a smaller area.".into())
+            }
+            Err(_) => Err("Text recognition stopped unexpectedly. Please try again.".into()),
         };
         self.text_extraction.job = None;
         match result {
@@ -135,13 +141,19 @@ impl EditorState {
         }
     }
 
-    pub(super) fn text_extraction_dialog(&mut self, ctx: &egui::Context) {
+    pub(super) fn text_extraction_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
         if !self.text_extraction.open {
             return;
         }
         let state = &mut self.text_extraction;
         let running = state.job.is_some();
         let mut close = false;
+        let mut retry = false;
         let response = Dialog::new(
             "Extract text",
             "From your selection · processed on this computer",
@@ -193,6 +205,9 @@ impl EditorState {
                     DialogIcon::Close,
                 )
                 .clicked();
+                if !running && (state.error.is_some() || !state.found_text) {
+                    retry = dialogs::primary(ui, "Try again", DialogIcon::Refresh).clicked();
+                }
                 if dialogs::button(
                     ui,
                     "Copy text",
@@ -221,6 +236,9 @@ impl EditorState {
         if close || response.should_close() {
             self.text_extraction = State::default();
             self.focus_canvas = true;
+        } else if retry {
+            self.text_extraction = State::default();
+            self.start_text_extraction(ctx, document, history);
         }
     }
 }
@@ -267,6 +285,7 @@ mod tests {
                 canceled: Arc::new(AtomicBool::new(false)),
                 image: document.image.clone(),
                 before: document.edit_state(),
+                started: Instant::now(),
             }),
             ..Default::default()
         };
@@ -336,9 +355,153 @@ mod tests {
     }
 
     #[test]
+    fn a_worker_that_never_replies_times_out_and_releases_its_pending_receiver() {
+        let document = document();
+        let before = document.edit_state();
+        let mut editor = EditorState {
+            area: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(200., 100.))),
+            ..Default::default()
+        };
+        let selection = editor.area;
+        let tx = pending(&mut editor, &document);
+        let job = editor.text_extraction.job.as_mut().unwrap();
+        let canceled = job.canceled.clone();
+        job.started = Instant::now() - crate::ocr::JOB_TIMEOUT;
+
+        editor.poll_text_extraction(&document);
+
+        assert!(editor.text_extraction.open);
+        assert!(editor.text_extraction.job.is_none());
+        assert!(
+            editor
+                .text_extraction
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("took too long")
+        );
+        assert!(canceled.load(Ordering::Acquire));
+        assert!(
+            tx.send(Ok("Late text must not replace the timeout".into()))
+                .is_err()
+        );
+        assert_eq!(editor.area, selection);
+        assert_eq!(document.edit_state(), before);
+        assert!(!editor.text_extraction.copied);
+    }
+
+    #[test]
+    fn a_queued_result_is_kept_when_the_next_ui_frame_arrives_after_the_deadline() {
+        let document = document();
+        let before = document.edit_state();
+        let mut editor = EditorState::default();
+        let tx = pending(&mut editor, &document);
+        let text = "A recognized line\n".repeat(200);
+        tx.send(Ok(text.clone())).unwrap();
+        editor.text_extraction.job.as_mut().unwrap().started =
+            Instant::now() - crate::ocr::JOB_TIMEOUT;
+
+        editor.poll_text_extraction(&document);
+        editor.poll_text_extraction(&document);
+
+        assert_eq!(editor.text_extraction.text, text);
+        assert!(editor.text_extraction.error.is_none());
+        assert!(editor.text_extraction.found_text);
+        assert!(!editor.text_extraction.copied);
+        assert_eq!(document.edit_state(), before);
+    }
+
+    #[test]
+    fn timed_out_and_empty_results_offer_retry_without_dismissing_the_selection() {
+        for error in [Some("Text recognition took too long.".to_string()), None] {
+            let ctx = egui::Context::default();
+            crate::appearance::apply(&ctx);
+            let mut document = document();
+            let before = document.edit_state();
+            let mut history = EditHistory::new(before.clone());
+            let mut editor = EditorState {
+                area: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(200., 100.))),
+                text_extraction: State {
+                    open: true,
+                    error,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let selection = editor.area;
+            let mut retry_visible = false;
+            for _ in 0..3 {
+                let frame = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(560., 360.))),
+                        ..Default::default()
+                    },
+                    |ctx| editor.text_extraction_dialog(ctx, &mut document, &mut history),
+                );
+                retry_visible |= frame.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Try again")
+                });
+            }
+            assert!(retry_visible);
+            assert!(editor.text_extraction.open);
+            assert_eq!(editor.area, selection);
+            assert_eq!(document.edit_state(), before);
+            assert!(!history.can_undo());
+        }
+    }
+
+    #[test]
+    fn escape_cancels_a_pending_worker_and_rejects_late_results() {
+        let ctx = egui::Context::default();
+        crate::appearance::apply(&ctx);
+        let mut document = document();
+        let before = document.edit_state();
+        let mut history = EditHistory::new(before.clone());
+        let mut editor = EditorState {
+            area: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(200., 100.))),
+            ..Default::default()
+        };
+        let selection = editor.area;
+        let tx = pending(&mut editor, &document);
+        let canceled = editor
+            .text_extraction
+            .job
+            .as_ref()
+            .unwrap()
+            .canceled
+            .clone();
+        for frame in 0..4 {
+            let mut input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(700., 460.))),
+                ..Default::default()
+            };
+            if frame == 3 {
+                input.events.push(egui::Event::Key {
+                    key: Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: Modifiers::NONE,
+                });
+            }
+            let _ = ctx.run(input, |ctx| {
+                editor.text_extraction_dialog(ctx, &mut document, &mut history)
+            });
+        }
+        assert!(!editor.text_extraction.open);
+        assert!(canceled.load(Ordering::Acquire));
+        assert!(tx.send(Ok("Canceled text".into())).is_err());
+        assert_eq!(editor.area, selection);
+        assert_eq!(document.edit_state(), before);
+        assert!(!history.can_undo());
+    }
+
+    #[test]
     fn review_fits_small_windows_and_escape_preserves_selected_pixels() {
         let ctx = egui::Context::default();
         crate::appearance::apply(&ctx);
+        let mut document = document();
+        let mut history = EditHistory::new(document.edit_state());
         let mut editor = EditorState {
             area: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(200., 100.))),
             text_extraction: State {
@@ -364,7 +527,9 @@ mod tests {
                     modifiers: Modifiers::NONE,
                 });
             }
-            let _ = ctx.run(input, |ctx| editor.text_extraction_dialog(ctx));
+            let _ = ctx.run(input, |ctx| {
+                editor.text_extraction_dialog(ctx, &mut document, &mut history)
+            });
         }
         assert!(!editor.text_extraction.open);
         assert_eq!(editor.area, selection);

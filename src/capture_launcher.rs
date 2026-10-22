@@ -106,6 +106,7 @@ impl MyImageApp {
         if self.selection.is_some()
             || self.scroll_session.is_some()
             || self.pending_capture.is_some()
+            || self.screen_text.open
         {
             return;
         }
@@ -142,6 +143,7 @@ impl MyImageApp {
             && self.file_dialog.is_none()
             && !self.export_panel.open
             && !self.editor.has_modal();
+        let enabled = enabled && !self.screen_text.open;
         let builder = egui::ViewportBuilder::default()
             .with_title("MyImage Capture Now")
             .with_inner_size(SIZE)
@@ -466,7 +468,7 @@ fn launcher_content(
         action = Some(Action::Close);
     }
 
-    // Five modes share one recessed track instead of five heavy cards.
+    // Capture modes share one recessed track.
     let mode_track = at(14., 44., 532., 56.);
     ui.painter().rect_filled(mode_track, 10, p.navy);
     let mut modes = ui.new_child(
@@ -481,7 +483,7 @@ fn launcher_content(
             &mut modes,
             mode,
             settings.capture_mode == mode,
-            (524. - 16.) / 5.,
+            (524. - 4. * (CaptureMode::ALL.len() - 1) as f32) / CaptureMode::ALL.len() as f32,
             p,
         )
         .clicked()
@@ -541,33 +543,54 @@ fn launcher_content(
         Stroke::new(1., p.border),
         egui::StrokeKind::Inside,
     );
-    for (i, dest) in CaptureDestination::ALL.into_iter().enumerate() {
-        if pearl_button(
-            ui,
-            at(79. + i as f32 * 146., 147., 144., 26.),
-            dest.label(),
-            Some(if dest == CaptureDestination::Editor {
-                Icon::Edit
-            } else {
-                Icon::Copy
-            }),
-            settings.capture_destination == dest,
-        )
-        .on_hover_text(dest.hint())
-        .clicked()
-        {
-            changed |= settings.capture_destination != dest;
-            settings.capture_destination = dest;
+    if settings.capture_mode == CaptureMode::Text {
+        appearance::icon(
+            ui.painter(),
+            at(90., 151., 20., 18.).center(),
+            Icon::TextSize,
+            p.ginger,
+            17.,
+        );
+        ui.painter().text(
+            at(116., 147., 250., 26.).left_center(),
+            egui::Align2::LEFT_CENTER,
+            "Text → clipboard · no image saved",
+            egui::FontId::proportional(12.),
+            p.ink,
+        );
+    } else {
+        for (i, dest) in CaptureDestination::ALL.into_iter().enumerate() {
+            if pearl_button(
+                ui,
+                at(79. + i as f32 * 146., 147., 144., 26.),
+                dest.label(),
+                Some(if dest == CaptureDestination::Editor {
+                    Icon::Edit
+                } else {
+                    Icon::Copy
+                }),
+                settings.capture_destination == dest,
+            )
+            .on_hover_text(dest.hint())
+            .clicked()
+            {
+                changed |= settings.capture_destination != dest;
+                settings.capture_destination = dest;
+            }
         }
     }
 
-    changed |= switch(
-        ui,
-        at(18., 182., 150., 28.),
-        &mut settings.include_pointer,
-        "Include pointer",
-        "Include the mouse pointer in your capture.",
-    );
+    changed |= ui
+        .add_enabled_ui(settings.capture_mode != CaptureMode::Text, |ui| {
+            switch(
+                ui,
+                at(18., 182., 150., 28.),
+                &mut settings.include_pointer,
+                "Include pointer",
+                "Include the mouse pointer in your capture.",
+            )
+        })
+        .inner;
     changed |= switch(
         ui,
         at(190., 182., 182., 28.),
@@ -630,7 +653,15 @@ fn launcher_content(
                 egui::Sense::click(),
             );
             response.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Capture now")
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    if settings.capture_mode == CaptureMode::Text {
+                        "Select region to copy text"
+                    } else {
+                        "Capture now"
+                    },
+                )
             });
             if ui.is_enabled() {
                 appearance::satin_with_palette(
@@ -670,14 +701,22 @@ fn launcher_content(
             appearance::icon(
                 ui.painter(),
                 capture_rect.center() - Vec2::new(0., 15.),
-                Icon::Capture,
+                if settings.capture_mode == CaptureMode::Text {
+                    Icon::TextSize
+                } else {
+                    Icon::Capture
+                },
                 color,
                 26.,
             );
             ui.painter().text(
                 capture_rect.center() + Vec2::new(0., 17.),
                 egui::Align2::CENTER_CENTER,
-                "Capture",
+                if settings.capture_mode == CaptureMode::Text {
+                    "Copy text"
+                } else {
+                    "Capture"
+                },
                 egui::FontId::proportional(15.),
                 color,
             );
@@ -878,6 +917,44 @@ mod tests {
             appearance::palette(&ctx).paper,
             appearance::GuiFinish::CobaltSatin.palette().paper
         );
+    }
+
+    #[test]
+    fn text_capture_is_available_without_image_destination_controls() {
+        let ctx = egui::Context::default();
+        let mut settings = Settings {
+            capture_mode: CaptureMode::Text,
+            capture_destination: CaptureDestination::Editor,
+            include_pointer: true,
+            ..Default::default()
+        };
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SIZE)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        launcher_content(ui, &mut settings, &[], true);
+                    });
+            },
+        );
+        let labels: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert!(labels.contains(&"Text"));
+        assert!(labels.contains(&"Text → clipboard · no image saved"));
+        assert!(labels.contains(&"Copy text"));
+        assert!(!labels.contains(&"Clipboard"));
+        assert_eq!(settings.capture_destination, CaptureDestination::Editor);
+        assert!(settings.include_pointer);
     }
 
     #[test]

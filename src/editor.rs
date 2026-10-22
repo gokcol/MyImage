@@ -599,7 +599,7 @@ impl EditorState {
         self.preset_dialog(ui.ctx());
         self.text_editor_window(ui.ctx(), document, history);
         self.stamp_designer_window(ui.ctx(), document, history);
-        self.text_extraction_dialog(ui.ctx());
+        self.text_extraction_dialog(ui.ctx(), document, history);
     }
 
     fn workspace_ui(

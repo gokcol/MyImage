@@ -56,14 +56,16 @@ pub enum CaptureMode {
     Window,
     FullScreen,
     Scrolling,
+    Text,
 }
 impl CaptureMode {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Region,
         Self::MultiRegion,
         Self::Window,
         Self::FullScreen,
         Self::Scrolling,
+        Self::Text,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -72,6 +74,7 @@ impl CaptureMode {
             Self::Window => "Window",
             Self::FullScreen => "Full screen",
             Self::Scrolling => "Scrolling",
+            Self::Text => "Text",
         }
     }
     pub fn hint(self) -> &'static str {
@@ -84,6 +87,9 @@ impl CaptureMode {
             Self::FullScreen => "Capture the entire selected display.",
             Self::Scrolling => {
                 "Click a window or select part of it. Scroll down, then finish. Sections are collected automatically."
+            }
+            Self::Text => {
+                "Select a screen region and copy its text. No image or project is created."
             }
         }
     }

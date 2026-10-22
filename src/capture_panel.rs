@@ -95,7 +95,7 @@ pub fn ui(
                     });
                 });
                 ui.horizontal(|ui| {
-                    let tile_width = (width - 40.) / 5.;
+                    let tile_width = (width - 10. * (CaptureMode::ALL.len() - 1) as f32) / CaptureMode::ALL.len() as f32;
                     for mode in CaptureMode::ALL {
                         if mode_tile(ui, mode, settings.capture_mode == mode, tile_width).clicked() {
                             result.changed |= settings.capture_mode != mode;
@@ -131,11 +131,14 @@ pub fn ui(
                                         if seconds == 0 { "Off".into() } else { format!("{seconds}s") }).changed();
                                 }
                             });
-                            result.changed |= ui.checkbox(&mut settings.include_pointer, "Include pointer")
-                                .on_hover_text("Show the mouse pointer in the saved capture. Turn off for a clean image.").changed();
+                            result.changed |= ui.add_enabled_ui(settings.capture_mode != CaptureMode::Text, |ui| ui.checkbox(&mut settings.include_pointer, "Include pointer")
+                                .on_hover_text("Show the mouse pointer in the saved capture. Turn off for a clean image.").changed()).inner;
                             result.changed |= ui.checkbox(&mut settings.capture_on_release, "Capture immediately after selection")
                                 .on_hover_text("Off by default: adjust the selection, then click Capture. When enabled, releasing a region or clicking a window captures immediately. Multiple regions still wait for Capture or Enter.").changed();
                             ui.strong("After capture");
+                            if settings.capture_mode == CaptureMode::Text {
+                                ui.label("Copy text to clipboard · no image saved");
+                            } else {
                             ui.horizontal(|ui| {
                                 for destination in CaptureDestination::ALL {
                                     if appearance::action_button(
@@ -157,6 +160,7 @@ pub fn ui(
                             ui.add(egui::Label::new(egui::RichText::new(settings.output_dir.display().to_string()).small().color(appearance::palette(ui.ctx()).muted)).truncate())
                                 .on_hover_text(settings.output_dir.display().to_string());
                             ui.small("PNG · Organized by year / month / day");
+                            }
                         });
                     });
                     egui::Frame::new().fill(appearance::palette(ui.ctx()).navy).corner_radius(8).inner_margin(16).show(ui, |ui| {
@@ -172,7 +176,7 @@ pub fn ui(
                         ui.label(egui::RichText::new("Ctrl + Shift + .").strong().color(Color32::WHITE));
                         ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Also Command + Shift + ." } else { "Available from any app" }).size(12.).color(Color32::from_rgb(224, 213, 197)));
                         ui.separator();
-                        ui.label(egui::RichText::new(settings.capture_destination.hint()).size(12.).color(Color32::from_rgb(224, 213, 197)));
+                        ui.label(egui::RichText::new(if settings.capture_mode == CaptureMode::Text { "Text is copied directly. Your editor and Library stay unchanged." } else { settings.capture_destination.hint() }).size(12.).color(Color32::from_rgb(224, 213, 197)));
                         });
                     });
                 });
@@ -228,6 +232,13 @@ pub(super) fn mode_icon(painter: &egui::Painter, mode: CaptureMode, rect: Rect, 
     );
     let stroke = Stroke::new(crate::icon_style::current(painter.ctx()).width(), color);
     match mode {
+        CaptureMode::Text => appearance::icon(
+            painter,
+            rect.center(),
+            appearance::Icon::TextSize,
+            color,
+            rect.height(),
+        ),
         CaptureMode::Region => appearance::icon(
             painter,
             rect.center(),
