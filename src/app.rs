@@ -839,6 +839,7 @@ impl MyImageApp {
                 .to_owned();
             let tx = self.work_tx.clone();
             let ctx = ctx.clone();
+            self.project_session.saving = true;
             self.busy = true;
             self.status = "Creating editable project…".into();
             std::thread::spawn(move || {
@@ -888,6 +889,7 @@ impl MyImageApp {
         let document = self.document.as_ref().unwrap().clone();
         let tx = self.work_tx.clone();
         let ctx = ctx.clone();
+        self.project_session.saving = true;
         self.busy = true;
         self.status = "Saving editable project…".into();
         std::thread::spawn(move || {
@@ -1323,7 +1325,7 @@ impl MyImageApp {
                     self.busy = false;
                     match result {
                         Ok(()) => {
-                            self.library.refresh();
+                            self.library.file_saved(&path);
                             self.history.mark_saved(&saved_state);
                             self.project_saved(&path);
                             self.error = None;
@@ -2160,8 +2162,7 @@ impl eframe::App for MyImageApp {
                 .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(4))
                 .show(ctx, |ui| {
                     ui.spacing_mut().item_spacing.y = 3.;
-                    let enabled = !self.busy
-                        && !self.guide_open
+                    let unobscured = !self.guide_open
                         && !self.about_open
                         && !self.appearance_open
                         && !self.recovery.prompt
@@ -2169,6 +2170,12 @@ impl eframe::App for MyImageApp {
                         && self.file_dialog.is_none()
                         && !self.export_panel.open
                         && !self.editor.has_modal();
+                    let enabled = !self.busy && unobscured;
+                    if self.project_session.saving && unobscured {
+                        // Saving still blocks input, but should not flash the
+                        // entire thumbnail strip between normal and dimmed.
+                        ui.visuals_mut().disabled_alpha = 1.;
+                    }
                     let was_open = self.settings.recents_open;
                     let mut chosen = self.library.recents_header(
                         ui,

@@ -4,6 +4,7 @@ use std::time::Instant;
 
 #[derive(Default)]
 pub(super) struct ProjectSession {
+    pub(super) saving: bool,
     revision: u64,
     due: Option<Instant>,
     failed_revision: Option<u64>,
@@ -117,6 +118,7 @@ impl MyImageApp {
     }
 
     pub(super) fn project_save_failed(&mut self) {
+        self.project_session.saving = false;
         self.project_session.failed_revision = Some(self.history.revision());
         self.project_session.due = None;
     }
@@ -170,6 +172,7 @@ mod tests {
         app.last_path = Some(source.clone());
         app.settings.recent_files = vec![source.clone()];
         app.autosave_project(&ctx);
+        assert!(app.project_session.saving);
         finish(&mut app, &ctx);
         let project = app.project_path.clone().unwrap();
         assert_eq!(app.settings.recent_files, vec![project.clone()]);
@@ -185,6 +188,7 @@ mod tests {
         assert!(!app.busy, "changes are debounced");
         app.project_session.due = Some(Instant::now());
         app.autosave_project(&ctx);
+        assert!(app.project_session.saving);
         finish(&mut app, &ctx);
         assert!(
             document::load_project(&project)
@@ -193,6 +197,7 @@ mod tests {
                 .flip_horizontal
         );
         assert!(!app.has_unsaved_edits());
+        assert!(!app.project_session.saving);
         assert_eq!(app.settings.recent_files, vec![project.clone()]);
         // Undo remains editable, and its result is flushed when switching away.
         assert!(app.history.undo(app.document.as_mut().unwrap()));
@@ -218,6 +223,77 @@ mod tests {
         assert!(source.is_file());
     }
     #[test]
+    fn canvas_resize_autosave_keeps_recent_thumbnails_visible() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        app.autosave_project(&ctx);
+        finish(&mut app, &ctx);
+        let project = app.project_path.clone().unwrap();
+        let other = dir.path().join("other.myimage");
+        document::save_project(app.document.as_ref().unwrap(), &other).unwrap();
+        app.settings.recent_files.push(other.clone());
+
+        let draw_recents = |app: &mut MyImageApp| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.library.recents_ui(
+                        ui,
+                        &app.settings.output_dir,
+                        &app.settings.recent_files,
+                        app.project_path.as_deref(),
+                        false,
+                    );
+                });
+            });
+        };
+        let thumbnails = || {
+            ctx.tex_manager()
+                .read()
+                .allocated()
+                .filter(|(_, meta)| meta.name.starts_with("library-"))
+                .map(|(id, meta)| (meta.name.clone(), *id))
+                .collect::<std::collections::HashMap<_, _>>()
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while thumbnails().len() < 2 && Instant::now() < deadline {
+            draw_recents(&mut app);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let before = thumbnails();
+        assert_eq!(
+            before.len(),
+            2,
+            "both previews must be warm before resizing"
+        );
+
+        let doc = app.document.as_mut().unwrap();
+        let state = doc.edit_state();
+        doc.geometry.resize = Some([60, 20]);
+        app.history.commit(state, doc);
+        app.autosave_project(&ctx);
+        app.project_session.due = Some(Instant::now());
+        app.autosave_project(&ctx);
+        finish(&mut app, &ctx);
+        assert_eq!(
+            document::load_project(&project).unwrap().output_size(),
+            [60, 20]
+        );
+        assert!(!app.has_unsaved_edits());
+        assert_eq!(
+            thumbnails(),
+            before,
+            "saving must not clear the Recents strip"
+        );
+
+        draw_recents(&mut app);
+        let other_name = before
+            .keys()
+            .find(|name| name.ends_with(other.to_str().unwrap()))
+            .unwrap();
+        assert_eq!(thumbnails().get(other_name), before.get(other_name));
+    }
+
+    #[test]
     fn failed_autosave_preserves_document_and_stops_retries_until_edit_or_manual_save() {
         let dir = tempfile::tempdir().unwrap();
         let blocked = dir.path().join("file");
@@ -227,6 +303,7 @@ mod tests {
         finish(&mut app, &ctx);
         assert!(app.has_unsaved_edits());
         assert!(app.error.is_some());
+        assert!(!app.project_session.saving);
         assert!(app.project_path.is_none());
         app.autosave_project(&ctx);
         assert!(!app.busy);

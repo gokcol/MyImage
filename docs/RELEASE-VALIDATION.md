@@ -1,5 +1,11 @@
 # Release validation — MyImage
 
+## Version 2.1 — build 73
+
+Canvas-resize autosaves no longer clear and reload the whole Recents thumbnail strip. Saves retain existing previews while replacing only the edited project's thumbnail, reject outdated asynchronous replies, and preserve Library selection and scroll during metadata updates. Recents retains its normal appearance while a project save blocks input. Public app version remains 2.1.0; Mac build is 73 and MSIX advances to 2.1.1.0 for ordered Store upgrades.
+
+Validation: 508 application tests and 15 packaging tests passed, including a real resize/autosave regression with warm Recents textures, targeted thumbnail replacement, consecutive saves, and stale-reply rejection. Formatting, whitespace checks and strict workspace/all-targets Clippy passed. Platform release and signing results are recorded with the release artifacts.
+
 ## Version 2.1 — build 72
 
 Extract text now works on the whole visible image when there is no pixel selection, and on the selected region when there is one. The editable review identifies its scope and only copies when requested. This release also includes the first-use recognition fix, cancellation and timeout handling, Capture Now’s direct screen-to-text clipboard mode, and the PDF scrolling-capture fix. Public version is 2.1.0 and the Store package version is 2.1.0.0; the existing Store identity is retained.

@@ -183,6 +183,8 @@ pub struct LibraryPanel {
     selection: FileSelection,
     recent_selection: FileSelection,
     pending: HashSet<PathBuf>,
+    outdated_previews: HashSet<PathBuf>,
+    preserve_scan_scroll: bool,
     checked_paths: HashMap<PathBuf, std::time::Instant>,
     missing_paths: HashSet<PathBuf>,
     previews: HashMap<PathBuf, CachedPreview>,
@@ -215,6 +217,8 @@ impl Default for LibraryPanel {
             selection: FileSelection::default(),
             recent_selection: FileSelection::default(),
             pending: HashSet::new(),
+            outdated_previews: HashSet::new(),
+            preserve_scan_scroll: false,
             checked_paths: HashMap::new(),
             missing_paths: HashSet::new(),
             previews: HashMap::new(),
@@ -412,6 +416,9 @@ impl LibraryPanel {
                             rect.min + Vec2::splat(3.),
                             rect.max - Vec2::new(3., 16.),
                         );
+                        if ui.is_enabled() {
+                            self.request_preview(entry);
+                        }
                         if let Some(cache) = self.previews.get_mut(&entry.path) {
                             cache.used = self.frame;
                             match &cache.preview {
@@ -438,9 +445,6 @@ impl LibraryPanel {
                                 }
                             }
                         } else {
-                            if ui.is_enabled() {
-                                self.request_preview(entry);
-                            }
                             appearance::icon(
                                 ui.painter(),
                                 image_rect.center(),
@@ -509,11 +513,31 @@ impl LibraryPanel {
         self.filtered.clear();
         self.filter_dirty = true;
         self.pending.clear();
+        self.outdated_previews.clear();
+        self.preserve_scan_scroll = false;
         self.checked_paths.clear();
         self.previews.clear();
         self.preview_bytes = 0;
         self.error = None;
         self.warnings.clear();
+    }
+
+    /// A completed save changes one preview, not every visible library item.
+    /// Keep the previous thumbnail on screen while its replacement is prepared.
+    pub fn file_saved(&mut self, path: &Path) {
+        // Replies queued before the atomic save must not replace its new preview
+        // or index. Other cached textures remain valid across this generation.
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.needs_scan = true;
+        self.scanning = false;
+        self.pending.clear();
+        if self.previews.contains_key(path) {
+            self.outdated_previews.insert(path.to_owned());
+        }
+        self.preserve_scan_scroll = true;
+        self.checked_paths.remove(path);
+        self.missing_paths.remove(path);
+        self.error = None;
     }
 
     pub fn release_textures(&mut self) {
@@ -550,6 +574,11 @@ impl LibraryPanel {
                             self.entries = index.entries;
                             self.warnings = index.warnings;
                             self.filter_dirty = true;
+                            if std::mem::take(&mut self.preserve_scan_scroll) {
+                                let reset_scroll = self.reset_scroll;
+                                self.update_filter();
+                                self.reset_scroll = reset_scroll;
+                            }
                         }
                         Err(error) => self.error = Some(error),
                     }
@@ -558,6 +587,17 @@ impl LibraryPanel {
                     if version == generation && !self.missing_paths.contains(&path) =>
                 {
                     self.pending.remove(&path);
+                    self.outdated_previews.remove(&path);
+                    // A temporary decode failure should not blank an existing
+                    // thumbnail while the saved project itself remains intact.
+                    if result.is_err()
+                        && self
+                            .previews
+                            .get(&path)
+                            .is_some_and(|cached| matches!(cached.preview, Preview::Ready { .. }))
+                    {
+                        continue;
+                    }
                     let (preview, bytes) = match result {
                         Ok(thumbnail) => {
                             let bytes = thumbnail.image.pixels.len() * 4;
@@ -612,6 +652,7 @@ impl LibraryPanel {
             };
             if let Some(preview) = self.previews.remove(&path) {
                 self.preview_bytes -= preview.bytes;
+                self.outdated_previews.remove(&path);
             }
         }
     }
@@ -652,7 +693,8 @@ impl LibraryPanel {
         if self.scanning
             || self.pending.len() >= MAX_PENDING
             || self.pending.contains(&entry.path)
-            || self.previews.contains_key(&entry.path)
+            || (self.previews.contains_key(&entry.path)
+                && !self.outdated_previews.contains(&entry.path))
         {
             return;
         }
@@ -946,6 +988,151 @@ mod tests {
         assert!(
             matches!(&panel.previews[&path].preview, Preview::Failed(message) if message == "current failure")
         );
+    }
+
+    fn cached_texture(
+        panel: &mut LibraryPanel,
+        ctx: &egui::Context,
+        path: &Path,
+    ) -> egui::TextureId {
+        let texture = ctx.load_texture(
+            path.display().to_string(),
+            egui::ColorImage::filled([4, 4], Color32::WHITE),
+            egui::TextureOptions::LINEAR,
+        );
+        let id = texture.id();
+        panel.previews.insert(
+            path.to_owned(),
+            CachedPreview {
+                preview: Preview::Ready {
+                    texture,
+                    original_size: [64, 64],
+                },
+                bytes: 64,
+                used: 0,
+            },
+        );
+        panel.preview_bytes += 64;
+        id
+    }
+
+    fn texture_id(panel: &LibraryPanel, path: &Path) -> egui::TextureId {
+        match &panel.previews[path].preview {
+            Preview::Ready { texture, .. } => texture.id(),
+            Preview::Failed(error) => panic!("Expected a cached thumbnail: {error}"),
+        }
+    }
+
+    #[test]
+    fn saving_one_project_keeps_the_strip_until_only_its_thumbnail_is_replaced() {
+        let ctx = egui::Context::default();
+        let mut panel = LibraryPanel::default();
+        let saved = entry("saved.myimage", 2026, 10, 17);
+        let other = entry("other.myimage", 2026, 10, 16);
+        panel.entries = vec![saved.clone(), other.clone()];
+        panel.update_filter();
+        panel.reset_scroll = false;
+        panel.selection.paths.insert(other.path.clone());
+        panel.recent_selection.paths.insert(saved.path.clone());
+        let saved_texture = cached_texture(&mut panel, &ctx, &saved.path);
+        let other_texture = cached_texture(&mut panel, &ctx, &other.path);
+        let (requests, receiver) = mpsc::sync_channel(MAX_PENDING + 1);
+        let (sender, replies) = mpsc::channel();
+        panel.worker = Some(Worker { requests, replies });
+        let old_generation = panel.generation.load(Ordering::Relaxed);
+        panel.pending.insert(saved.path.clone());
+
+        panel.file_saved(&saved.path);
+        let generation = panel.generation.load(Ordering::Relaxed);
+        assert_ne!(generation, old_generation);
+        assert_eq!(panel.entries, [saved.clone(), other.clone()]);
+        assert_eq!(texture_id(&panel, &saved.path), saved_texture);
+        assert_eq!(texture_id(&panel, &other.path), other_texture);
+        assert!(panel.pending.is_empty());
+        assert!(panel.outdated_previews.contains(&saved.path));
+
+        // A pre-save decode cannot put the old image back into the cache.
+        sender
+            .send(Reply::Thumbnail(
+                old_generation,
+                saved.path.clone(),
+                Ok(PreparedThumbnail {
+                    image: egui::ColorImage::filled([8, 8], Color32::RED),
+                    original_size: [80, 80],
+                }),
+            ))
+            .unwrap();
+        sender
+            .send(Reply::Scan(
+                generation,
+                Ok(LibraryIndex {
+                    entries: vec![saved.clone(), other.clone()],
+                    warnings: vec![],
+                }),
+            ))
+            .unwrap();
+        panel.receive(&ctx);
+        assert!(!panel.reset_scroll);
+        assert!(panel.selection.paths.contains(&other.path));
+        assert!(panel.recent_selection.paths.contains(&saved.path));
+        assert_eq!(texture_id(&panel, &saved.path), saved_texture);
+        panel.request_preview(&saved);
+        panel.request_preview(&other);
+        let jobs: Vec<_> = receiver.try_iter().collect();
+        assert_eq!(jobs.len(), 1);
+        assert!(matches!(&jobs[0], Request::Thumbnail(version, entry)
+            if *version == generation && entry.path == saved.path));
+
+        sender
+            .send(Reply::Thumbnail(
+                generation,
+                saved.path.clone(),
+                Ok(PreparedThumbnail {
+                    image: egui::ColorImage::filled([8, 8], Color32::GREEN),
+                    original_size: [80, 80],
+                }),
+            ))
+            .unwrap();
+        panel.receive(&ctx);
+        assert_ne!(texture_id(&panel, &saved.path), saved_texture);
+        assert_eq!(texture_id(&panel, &other.path), other_texture);
+        assert!(!panel.outdated_previews.contains(&saved.path));
+        assert!(panel.pending.is_empty());
+        assert_eq!(panel.preview_bytes, 8 * 8 * 4 + 4 * 4 * 4);
+    }
+
+    #[test]
+    fn consecutive_saves_keep_each_pending_preview_refresh_and_reject_old_replies() {
+        let ctx = egui::Context::default();
+        let mut panel = LibraryPanel::default();
+        let first = entry("first.myimage", 2026, 10, 17);
+        let second = entry("second.myimage", 2026, 10, 17);
+        let first_texture = cached_texture(&mut panel, &ctx, &first.path);
+        let second_texture = cached_texture(&mut panel, &ctx, &second.path);
+        let (requests, _receiver) = mpsc::sync_channel(MAX_PENDING + 1);
+        let (sender, replies) = mpsc::channel();
+        panel.worker = Some(Worker { requests, replies });
+        panel.file_saved(&first.path);
+        panel.request_preview(&first);
+        let old_generation = panel.generation.load(Ordering::Relaxed);
+        panel.file_saved(&second.path);
+        assert!(panel.outdated_previews.contains(&first.path));
+        assert!(panel.outdated_previews.contains(&second.path));
+        panel.request_preview(&first);
+        panel.request_preview(&second);
+        assert_eq!(panel.pending.len(), 2);
+        sender
+            .send(Reply::Thumbnail(
+                old_generation,
+                first.path.clone(),
+                Err("pre-save result".into()),
+            ))
+            .unwrap();
+        panel.receive(&ctx);
+        assert_eq!(texture_id(&panel, &first.path), first_texture);
+        assert_eq!(texture_id(&panel, &second.path), second_texture);
+        assert!(panel.pending.contains(&first.path));
+        assert!(panel.outdated_previews.contains(&first.path));
     }
 
     #[test]

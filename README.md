@@ -37,7 +37,7 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 2.1 uses MSIX version 2.1.0.0, which preserves upgrade ordering
+[privacy policy](PRIVACY.md). MyImage 2.1 uses MSIX version 2.1.1.0, which preserves upgrade ordering
 after earlier 1.x Store packages.
 
 ## Run

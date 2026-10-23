@@ -443,7 +443,7 @@ impl LibraryPanel {
             self.filter_dirty = true;
             self.update_filter();
         }
-        if self.scanning || self.needs_scan {
+        if (self.scanning || self.needs_scan) && self.entries.is_empty() {
             empty_state(
                 ui,
                 "Opening your library",

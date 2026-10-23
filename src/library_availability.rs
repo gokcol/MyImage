@@ -49,6 +49,7 @@ impl LibraryPanel {
         self.filter_dirty = true;
         for path in paths {
             self.pending.remove(path);
+            self.outdated_previews.remove(path);
             if let Some(preview) = self.previews.remove(path) {
                 self.preview_bytes -= preview.bytes;
             }
