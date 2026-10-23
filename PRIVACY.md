@@ -1,9 +1,9 @@
 # MyImage privacy policy
 
-Effective date: 22 October 2026
+Effective date: 23 October 2026
 
 MyImage is a desktop screen-capture and image editor by Orhan Gökçöl.
-This policy describes version 2.0.0 and applies to its GitHub distribution
+This policy describes version 2.1.0 and applies to its GitHub distribution
 and any Microsoft Store edition using this source.
 
 ## On-device processing

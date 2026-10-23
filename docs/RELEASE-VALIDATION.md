@@ -1,5 +1,11 @@
 # Release validation — MyImage
 
+## Version 2.1 — build 72
+
+Extract text now works on the whole visible image when there is no pixel selection, and on the selected region when there is one. The editable review identifies its scope and only copies when requested. This release also includes the first-use recognition fix, cancellation and timeout handling, Capture Now’s direct screen-to-text clipboard mode, and the PDF scrolling-capture fix. Public version is 2.1.0 and the Store package version is 2.1.0.0; the existing Store identity is retained.
+
+Validation: the native macOS OCR regression recognized both the selected region and the full image, including text outside that region. The eight text-extraction tests, formatting, whitespace checks and strict workspace/all-targets Clippy passed. The prior native check verified first-use extraction in 714 ms. Release signing, installer and Windows CI results are recorded with the release artifacts.
+
 ## Version 2.0 — build 68
 
 The floating arrow and shape properties bars now show only essential icon controls: color, stroke weight, line pattern, and start/end caps or fill/outline. Pen selections retain color and weight. Weight uses a slim vertical slider with an accessible value. Bars use their measured size; popups choose available space around the selected drawing and stay still while weight changes its bounds. Advanced properties remain in the right inspector. App version stays 2.0.0; Mac build advances to 68 and MSIX to 2.0.1.0 for an ordered update to the published build 67.
