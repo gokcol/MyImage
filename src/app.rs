@@ -518,6 +518,29 @@ impl MyImageApp {
                 return;
             }
             let at = Local::now();
+            // Mirroring, docking or changing resolution can replace the display
+            // ID and bounds while Capture Now is open (or during its delay).
+            // Refresh at capture time, but only follow a verified mirror alias.
+            let current_display = if demo {
+                Ok(display.clone())
+            } else {
+                capture::displays().and_then(|displays| {
+                    let target = capture::resolve_display(display.id, &displays);
+                    let _ = tx.send(WorkEvent::Displays(Ok(displays)));
+                    target
+                })
+            };
+            let display = match current_display {
+                Ok(display) => display,
+                Err(error) => {
+                    let _ = tx.send(WorkEvent::Captured(generation, display, at, Err(error)));
+                    ctx.request_repaint();
+                    return;
+                }
+            };
+            if cancel.load(Ordering::Acquire) {
+                return;
+            }
             let result = if demo {
                 Ok(CapturedFrame {
                     image: if mode == capture::CaptureMode::Scrolling {

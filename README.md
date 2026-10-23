@@ -37,7 +37,7 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 2.1 uses MSIX version 2.1.1.0, which preserves upgrade ordering
+[privacy policy](PRIVACY.md). MyImage 2.1 uses MSIX version 2.1.2.0, which preserves upgrade ordering
 after earlier 1.x Store packages.
 
 ## Run
@@ -388,6 +388,8 @@ tccutil reset ScreenCapture com.myimage.app
 Reopen `/Applications/MyImage.app`, explicitly request capture, grant permission in macOS, and restart if requested. This command targets MyImage for the current user; it needs no `sudo`. Permission resets must never run automatically during startup, builds, or packaging. See Apple's [resetting access to protected resources documentation](https://developer.apple.com/documentation/xcode/resetting-access-to-protected-resources-in-macos).
 
 macOS capture uses **ScreenCaptureKit's `SCScreenshotManager`**, which requires macOS 14 or later. Windows uses **GDI `BitBlt` through `xcap 0.9.8`**. `xcap` also supplies display metadata on both platforms. There is no legacy CoreGraphics screenshot fallback on macOS, and Windows Graphics Capture is not implemented. Capture errors are reported; permission failures do not produce substitute blank images. Secure/protected content and HDR fidelity are not guaranteed by this milestone.
+
+On macOS, mirrored displays are matched automatically as the same desktop; no monitor-name selection is needed. Capture refreshes display IDs and bounds after any timer delay so changes made while Capture Now is open are reflected in the selection overlay. A disconnected unrelated display still produces an error rather than capturing a different desktop.
 
 ## Development and validation
 

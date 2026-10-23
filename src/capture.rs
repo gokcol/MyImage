@@ -185,6 +185,58 @@ pub struct DisplayInfo {
     pub is_primary: bool,
 }
 
+/// Resolve a selection against freshly enumerated geometry. macOS can replace
+/// a mirrored display's runtime ID with its source display; only that explicit
+/// relationship is eligible for fallback. Never choose an unrelated display.
+pub fn resolve_display(id: u32, displays: &[DisplayInfo]) -> Result<DisplayInfo, String> {
+    let ids: Vec<_> = displays.iter().map(|display| display.id).collect();
+    let resolved = resolve_display_id(id, &ids, display_mirror_source);
+    displays
+        .iter()
+        .find(|display| Some(display.id) == resolved)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "Display {id} is no longer available. Refresh the display list and select a connected display."
+            )
+        })
+}
+
+fn display_mirror_source(id: u32) -> u32 {
+    #[cfg(target_os = "macos")]
+    {
+        objc2_core_graphics::CGDisplayMirrorsDisplay(id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Windows monitor handles must match exactly.
+        let _ = id;
+        0
+    }
+}
+
+fn resolve_display_id(
+    requested: u32,
+    available: &[u32],
+    mirror_source: impl Fn(u32) -> u32,
+) -> Option<u32> {
+    if requested == 0 {
+        return None;
+    }
+    if available.contains(&requested) {
+        return Some(requested);
+    }
+    let canonical = |id| match mirror_source(id) {
+        0 => id,
+        source => source,
+    };
+    let source = canonical(requested);
+    available
+        .iter()
+        .copied()
+        .find(|&id| id != 0 && canonical(id) == source)
+}
+
 /// Enumerate displays without capturing pixels or requesting permission.
 pub fn displays() -> Result<Vec<DisplayInfo>, String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -443,10 +495,17 @@ mod macos {
                     .ok_or("The selected window is no longer available.")?;
                 SCContentFilter::initWithDesktopIndependentWindow(SCContentFilter::alloc(), &window)
             } else {
-                let display = content
-                    .displays()
+                let displays = content.displays();
+                let ids: Vec<_> = displays.iter().map(|display| display.displayID()).collect();
+                // CoreGraphics and ScreenCaptureKit may expose different
+                // members of one mirrored desktop. Resolve only that verified
+                // mirror family, never an arbitrary remaining display.
+                let display_id =
+                    super::resolve_display_id(target_id, &ids, super::display_mirror_source)
+                        .ok_or("The selected display is no longer available.")?;
+                let display = displays
                     .iter()
-                    .find(|d| d.displayID() == target_id)
+                    .find(|d| d.displayID() == display_id)
                     .ok_or("The selected display is no longer available.")?;
                 SCContentFilter::initWithDisplay_excludingWindows(
                     SCContentFilter::alloc(),
@@ -617,5 +676,98 @@ mod macos {
             assert!(copy_bgra(&bytes[..8], 1, 2, 8, false, false).is_err());
             assert!(copy_bgra(&bytes, 2, 1, 4, false, false).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::{DisplayInfo, resolve_display, resolve_display_id};
+
+    fn mirror_source(id: u32) -> u32 {
+        match id {
+            11 | 12 => 22,
+            33 => 44,
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn exact_display_wins_over_other_mirror_members() {
+        assert_eq!(
+            resolve_display_id(11, &[22, 12, 11], mirror_source),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn mirrored_selection_resolves_only_within_its_family() {
+        assert_eq!(resolve_display_id(11, &[33, 22], mirror_source), Some(22));
+        assert_eq!(resolve_display_id(22, &[33, 11], mirror_source), Some(11));
+        assert_eq!(resolve_display_id(11, &[12], mirror_source), Some(12));
+    }
+
+    #[test]
+    fn unrelated_or_missing_displays_do_not_fall_back() {
+        assert_eq!(resolve_display_id(11, &[33], mirror_source), None);
+        assert_eq!(resolve_display_id(55, &[22, 44], mirror_source), None);
+        assert_eq!(resolve_display_id(11, &[], mirror_source), None);
+        assert_eq!(resolve_display_id(11, &[22], |_| 0), None);
+    }
+
+    #[test]
+    fn zero_is_never_a_display_or_mirror_match() {
+        assert_eq!(resolve_display_id(0, &[0, 22], mirror_source), None);
+        assert_eq!(resolve_display_id(11, &[0], |_| 22), None);
+    }
+
+    #[test]
+    fn refreshed_display_geometry_is_returned_in_full() {
+        let display = DisplayInfo {
+            id: 22,
+            name: "Fresh display".into(),
+            x: -1920,
+            y: 100,
+            width: 1920,
+            height: 1080,
+            scale_factor: 2.0,
+            is_primary: false,
+        };
+        let resolved = resolve_display(22, &[display]).unwrap();
+        assert_eq!(resolved.name, "Fresh display");
+        assert_eq!((resolved.x, resolved.y), (-1920, 100));
+        assert_eq!((resolved.width, resolved.height), (1920, 1080));
+        assert_eq!(resolved.scale_factor, 2.0);
+        assert!(!resolved.is_primary);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires a connected mirrored display and native display-service access"]
+    fn native_mirror_members_resolve_to_the_current_desktop_without_capturing_pixels() {
+        use objc2_core_graphics::{CGDisplayMirrorsDisplay, CGError, CGGetOnlineDisplayList};
+
+        let displays = super::displays().unwrap();
+        let mut ids = [0; 32];
+        let mut count = 0;
+        // SAFETY: The output buffers remain valid for the synchronous query.
+        let error =
+            unsafe { CGGetOnlineDisplayList(ids.len() as u32, ids.as_mut_ptr(), &mut count) };
+        assert_eq!(error, CGError::Success);
+        let mut mirrors = 0;
+        for &id in &ids[..count as usize] {
+            let source = CGDisplayMirrorsDisplay(id);
+            if source == 0 {
+                continue;
+            }
+            let resolved = resolve_display(id, &displays).unwrap();
+            assert!(resolved.id == id || resolved.id == source);
+            assert!(resolved.width > 0 && resolved.height > 0);
+            println!(
+                "Mirror {id} -> desktop {} at {}, {} ({} x {})",
+                resolved.id, resolved.x, resolved.y, resolved.width, resolved.height
+            );
+            mirrors += 1;
+        }
+        assert!(mirrors > 0, "this diagnostic requires an active mirror set");
     }
 }

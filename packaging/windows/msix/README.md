@@ -46,7 +46,7 @@ These public values are configured as GitHub Actions variables. The product's
 reserved display name is configured separately in `MSIX_DISPLAY_NAME`; it must
 match Partner Center exactly, including punctuation.
 
-Public app version is **2.1.0**; the independent MSIX version is **2.1.1.0**.
+Public app version is **2.1.0**; the independent MSIX version is **2.1.2.0**.
 This preserves increasing package order after the earlier 1.x packages.
 Increase `version.txt` for subsequent Store releases. Revision (fourth field)
 must remain zero; each component must fit 16 bits.

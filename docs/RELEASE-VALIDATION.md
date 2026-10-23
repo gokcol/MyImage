@@ -1,5 +1,11 @@
 # Release validation — MyImage
 
+## Version 2.1 — build 74
+
+macOS capture now resolves equivalent mirrored-display IDs automatically between CoreGraphics and ScreenCaptureKit. No monitor-name selection is required. Every capture refreshes display IDs and geometry after its timer delay, so the overlay uses current bounds after mirroring, docking or resolution changes. Windows still requires the exact selected monitor; disconnected unrelated displays never fall back to another desktop. App version remains 2.1.0, Mac build advances to 74, and MSIX advances to 2.1.2.0.
+
+Validation: 513 application tests and 15 packaging tests passed, with formatting, whitespace checks and strict workspace/all-targets Clippy. Mirror regressions cover exact selection, forward/reverse/sibling aliases, refusal of unrelated or zero IDs, and fresh geometry. A native metadata-only check on the connected mirrored setup resolved internal display 1 to the current external desktop 2 at 2560 × 1440, without capturing pixels. Release signing, installer and end-to-end capture results are recorded with the release artifacts.
+
 ## Version 2.1 — build 73
 
 Canvas-resize autosaves no longer clear and reload the whole Recents thumbnail strip. Saves retain existing previews while replacing only the edited project's thumbnail, reject outdated asynchronous replies, and preserve Library selection and scroll during metadata updates. Recents retains its normal appearance while a project save blocks input. Public app version remains 2.1.0; Mac build is 73 and MSIX advances to 2.1.1.0 for ordered Store upgrades.
