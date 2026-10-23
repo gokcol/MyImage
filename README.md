@@ -258,9 +258,9 @@ A fully selected group counts as one object, preserving its internal layout. Alt
 - Paste keeps the editor enabled while reading the clipboard. If the image changes during that read, it asks you to paste again instead of applying stale placement.
 - Raster clipboard layers are bounded to 64 megapixels and 16 MiB of lossless PNG per layer, with a 32 MiB encoded artwork budget per project. Large pasted layers can be copied as pixels; editable annotation clipboard payloads retain their separate 4 MiB limit.
 
-## Extract text from a selection
+## Extract text from an image or selection
 
-Use **Select** to draw a region, then right-click it and choose **Extract text…**. The same action is available in the Selection panel. Recognition runs in the background on the selected visible pixels, including image edits, annotations and selection masks. An editable preview preserves line breaks; choose **Copy text** to copy it, or **Close** to return to the image. Recognition does not modify your project or replace the clipboard automatically.
+Right-click the image and choose **Extract text…**, or use the same action in the Selection panel. With no pixel selection, it reads the whole visible image. To read only part of the image, use **Select** to draw a region first. Recognition runs in the background on visible pixels, including image edits, annotations and any selection masks. The review dialog identifies whether it is reading the whole image or a selection. An editable preview preserves line breaks; choose **Copy text** to copy it, or **Close** to return to the image. Recognition does not modify your project or replace the clipboard automatically.
 
 To copy text directly from another app, open **Capture Now**, choose **Text**, and select a screen region. Choose **Copy text** (or release the selection if capture-on-release is enabled). MyImage recognizes and copies the text directly, without opening the Editor or saving an image/project in the Library. Empty regions, errors and cancellation leave the previous clipboard intact; a clipboard failure offers **Retry copy**. Your normal image-capture destination and pointer preferences are retained.
 

@@ -1,4 +1,4 @@
-//! Read-only OCR of the visible selection; the clipboard changes only on Copy.
+//! Read-only OCR of selected visible pixels, or the whole image without a selection.
 use super::*;
 use std::sync::{
     Arc,
@@ -17,6 +17,7 @@ pub(super) struct State {
     copy_error: Option<String>,
     found_text: bool,
     focus: bool,
+    whole_image: bool,
 }
 
 struct Job {
@@ -34,7 +35,7 @@ impl Drop for Job {
 
 impl EditorState {
     fn can_extract_text(&self) -> bool {
-        self.area.is_some() && self.clipboard_job.is_none() && !self.text_extraction.open
+        self.clipboard_job.is_none() && !self.text_extraction.open
     }
 
     pub(super) fn extract_text_button(
@@ -50,7 +51,11 @@ impl EditorState {
             self.can_extract_text(),
             false,
         )
-        .on_hover_text("Recognize text in the selected visible pixels, then review and copy it")
+        .on_hover_text(if self.area.is_some() {
+            "Read text in the selected area, then review and copy it"
+        } else {
+            "Read text in the whole visible image. Select an area to read only that region."
+        })
         .clicked();
         if clicked {
             self.start_text_extraction(ui.ctx(), document, history);
@@ -68,14 +73,16 @@ impl EditorState {
             return;
         }
         self.finish_gesture(document, history);
-        let Some(area) = self.pixel_area(document) else {
-            return;
+        let area = self.pixel_area(document);
+        let whole_image = area.is_none();
+        let pixel_mask = if whole_image {
+            None
+        } else {
+            self.selected
+                .and_then(|i| document.annotations.get(i))
+                .map(|a| a.pixel_mask.clone())
+                .unwrap_or_else(|| self.pixel_mask.clone())
         };
-        let pixel_mask = self
-            .selected
-            .and_then(|i| document.annotations.get(i))
-            .map(|a| a.pixel_mask.clone())
-            .unwrap_or_else(|| self.pixel_mask.clone());
         let before = document.edit_state();
         let snapshot = document.clone();
         let canceled = Arc::new(AtomicBool::new(false));
@@ -83,6 +90,7 @@ impl EditorState {
         let (tx, receiver) = mpsc::channel();
         self.text_extraction = State {
             open: true,
+            whole_image,
             job: Some(Job {
                 receiver,
                 canceled,
@@ -97,14 +105,13 @@ impl EditorState {
             if cancel.load(Ordering::Acquire) {
                 return;
             }
-            let result =
-                crate::image_clipboard::copy_pixels_masked(&snapshot, Some(area), pixel_mask)
-                    .and_then(|pixels| {
-                        if cancel.load(Ordering::Acquire) {
-                            return Ok(String::new());
-                        }
-                        crate::ocr::recognize_cancellable(pixels, cancel.clone())
-                    });
+            let result = crate::image_clipboard::copy_pixels_masked(&snapshot, area, pixel_mask)
+                .and_then(|pixels| {
+                    if cancel.load(Ordering::Acquire) {
+                        return Ok(String::new());
+                    }
+                    crate::ocr::recognize_cancellable(pixels, cancel.clone())
+                });
             if !cancel.load(Ordering::Acquire) {
                 let _ = tx.send(result);
                 ctx.request_repaint();
@@ -156,7 +163,11 @@ impl EditorState {
         let mut retry = false;
         let response = Dialog::new(
             "Extract text",
-            "From your selection · processed on this computer",
+            if state.whole_image {
+                "Whole image · processed on this computer"
+            } else {
+                "From your selection · processed on this computer"
+            },
             DialogIcon::TextSize,
             520.,
         )
@@ -164,13 +175,21 @@ impl EditorState {
             if running {
                 ui.horizontal(|ui| {
                     ui.spinner();
-                    ui.label("Reading text in your selection…");
+                    ui.label(if state.whole_image {
+                        "Reading text in the image…"
+                    } else {
+                        "Reading text in your selection…"
+                    });
                 });
                 ctx.request_repaint_after(std::time::Duration::from_millis(100));
             } else if let Some(error) = &state.error {
                 ui.colored_label(dialogs::DANGER, error);
             } else if !state.found_text {
-                ui.label("No text found in this selection.");
+                ui.label(if state.whole_image {
+                    "No text found in this image."
+                } else {
+                    "No text found in this selection."
+                });
                 ui.weak("Try selecting a larger, sharper area containing upright text.");
             } else {
                 ui.weak("Review or edit the recognized text before copying.");
@@ -591,5 +610,35 @@ mod tests {
         assert_eq!(document.edit_state(), before);
         assert!(!history.can_undo());
         eprintln!("Selected-region OCR result: {text:?}");
+
+        // Clearing the marquee must read all visible pixels without requiring
+        // Select all, while retaining edits and leaving the clipboard untouched.
+        editor.text_extraction = State::default();
+        editor.deselect_pixels();
+        assert!(editor.can_extract_text());
+        editor.start_text_extraction(&ctx, &mut document, &mut history);
+        assert!(editor.text_extraction.whole_image);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while editor.text_extraction.job.is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Whole-image OCR timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            editor.poll_text_extraction(&document);
+        }
+        assert!(
+            editor.text_extraction.error.is_none(),
+            "{:?}",
+            editor.text_extraction.error
+        );
+        let text = &editor.text_extraction.text;
+        assert!(text.contains("Selected region text"), "{text:?}");
+        assert!(text.contains("Second line 12345"), "{text:?}");
+        assert!(text.contains("Outside selection"), "{text:?}");
+        assert!(!editor.text_extraction.copied);
+        assert_eq!(document.edit_state(), before);
+        assert!(!history.can_undo());
+        eprintln!("Whole-image OCR result: {text:?}");
     }
 }

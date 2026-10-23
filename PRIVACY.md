@@ -13,7 +13,8 @@ signature artwork on your computer. Screen content can contain personal or
 confidential information. You choose what to capture, open, copy, save or export.
 The app does not upload that content to the developer or a MyImage server.
 Extract text uses the operating system’s on-device text recognition on your
-selected visible pixels. Recognized text is held in memory for review and is
+selected region, or the whole visible image when no region is selected.
+Recognized text is held in memory for review and is
 placed on the clipboard only when you choose Copy text. Capture Now’s Text mode
 copies recognized text directly after your screen-region capture action, without
 saving an image or project. MyImage does not upload the selected pixels or
