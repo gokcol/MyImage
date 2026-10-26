@@ -1801,6 +1801,35 @@ impl MyImageApp {
             });
     }
 
+    fn workspace_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let unobscured = !self.guide_open
+            && !self.about_open
+            && !self.appearance_open
+            && !self.recovery.prompt
+            && self.pending_action.is_none()
+            && self.file_dialog.is_none()
+            && !self.export_panel.open;
+        ui.scope(|ui| {
+            if self.project_session.saving && unobscured {
+                // Saving blocks edits, but must not fade the image after every
+                // annotation change. Other busy states and dialogs still dim.
+                ui.visuals_mut().disabled_alpha = 1.;
+            }
+            ui.add_enabled_ui(!self.busy && unobscured, |ui| match self.view {
+                View::Home => self.home_ui(ui, ctx),
+                View::Capture => self.capture_ui(ui, ctx),
+                View::Library => self.library_ui(ui, ctx),
+                View::Viewer => self.viewer_ui(ui, ctx),
+                View::Editor => self.editor_ui(ui, ctx),
+                View::Create => {
+                    if let Some(spec) = self.create_panel.ui(ui) {
+                        self.create_image(ctx, spec);
+                    }
+                }
+            });
+        });
+    }
+
     fn editor_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if self.document.is_none() && ui.is_enabled() && !self.busy {
             let paste = ui.input_mut(|i| {
@@ -2275,28 +2304,7 @@ impl eframe::App for MyImageApp {
                     let _ = desktop.retry_hotkey();
                 }
             }
-            ui.add_enabled_ui(
-                !self.busy
-                    && !self.guide_open
-                    && !self.about_open
-                    && !self.appearance_open
-                    && !self.recovery.prompt
-                    && self.pending_action.is_none()
-                    && self.file_dialog.is_none()
-                    && !self.export_panel.open,
-                |ui| match self.view {
-                    View::Home => self.home_ui(ui, ctx),
-                    View::Capture => self.capture_ui(ui, ctx),
-                    View::Library => self.library_ui(ui, ctx),
-                    View::Viewer => self.viewer_ui(ui, ctx),
-                    View::Editor => self.editor_ui(ui, ctx),
-                    View::Create => {
-                        if let Some(spec) = self.create_panel.ui(ui) {
-                            self.create_image(ctx, spec);
-                        }
-                    }
-                },
-            );
+            self.workspace_ui(ui, ctx);
         });
         if let Some(document) = &self.document {
             let size = document.output_size();

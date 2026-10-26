@@ -293,6 +293,138 @@ mod tests {
         assert_eq!(thumbnails().get(other_name), before.get(other_name));
     }
 
+    fn workspace_canvas(
+        app: &mut MyImageApp,
+        ctx: &egui::Context,
+        texture: egui::TextureId,
+        events: Vec<egui::Event>,
+    ) -> egui::Mesh {
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900., 700.))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.workspace_ui(ui, ctx));
+            },
+        );
+        ctx.tessellate(output.shapes, output.pixels_per_point)
+            .into_iter()
+            .find_map(|primitive| match primitive.primitive {
+                egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture => Some(mesh),
+                _ => None,
+            })
+            .expect("the original image stays painted")
+    }
+
+    #[test]
+    fn project_save_keeps_canvas_appearance_and_blocks_editing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        app.guide_open = false;
+        app.view = View::Editor;
+        app.install_document(
+            Document {
+                image: Arc::new(image::RgbaImage::from_pixel(
+                    320,
+                    240,
+                    image::Rgba([60, 130, 210, 255]),
+                )),
+                annotations: vec![
+                    serde_json::from_value(serde_json::json!({
+                        "kind": "Arrow",
+                        "start": {"x": 80., "y": 80.},
+                        "end": {"x": 240., "y": 160.},
+                        "color": [240, 40, 30, 255],
+                        "stroke_width": 4.,
+                        "fill": false,
+                        "text": "",
+                        "font_size": 24.
+                    }))
+                    .unwrap(),
+                ],
+                geometry: Default::default(),
+            },
+            None,
+        );
+        let source = load_texture(&ctx, "save canvas", &app.document.as_ref().unwrap().image);
+        app.last_texture = Some(source.clone());
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let shaft_point = |mesh: &egui::Mesh| {
+            let bounds = mesh.vertices.iter().fold(Rect::NOTHING, |rect, vertex| {
+                rect.union(Rect::from_min_max(vertex.pos, vertex.pos))
+            });
+            // Source point (120, 100) is a quarter along the arrow shaft,
+            // away from its endpoint and middle bend handles.
+            bounds.min + bounds.size() * egui::vec2(120. / 320., 100. / 240.)
+        };
+        let initial = workspace_canvas(&mut app, &ctx, source.id(), vec![]);
+        let select = shaft_point(&initial);
+        // Select first: dragging an unselected object in Select mode creates a
+        // pixel marquee. The saved baseline includes the selected inspector.
+        for events in [
+            vec![egui::Event::PointerMoved(select), button(select, true)],
+            vec![button(select, false)],
+        ] {
+            let _ = workspace_canvas(&mut app, &ctx, source.id(), events);
+        }
+        let normal = workspace_canvas(&mut app, &ctx, source.id(), vec![]);
+        assert!(normal.vertices.iter().all(|v| v.color == Color32::WHITE));
+        let start = shaft_point(&normal);
+        let end = start + egui::vec2(24., 16.);
+        let before = app.document.as_ref().unwrap().edit_state();
+        app.busy = true;
+        app.project_session.saving = true;
+        for events in [
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            vec![egui::Event::PointerMoved(end)],
+            vec![button(end, false)],
+        ] {
+            assert_eq!(
+                workspace_canvas(&mut app, &ctx, source.id(), events),
+                normal
+            );
+            assert_eq!(app.document.as_ref().unwrap().edit_state(), before);
+        }
+        app.busy = false;
+        app.project_session.saving = false;
+        assert_eq!(
+            workspace_canvas(&mut app, &ctx, source.id(), vec![]),
+            normal
+        );
+
+        // Unrelated work and a dialog overlapping a save retain their visual lock.
+        for saving in [false, true] {
+            app.busy = true;
+            app.project_session.saving = saving;
+            app.about_open = saving;
+            let locked = workspace_canvas(&mut app, &ctx, source.id(), vec![]);
+            assert!(locked.vertices.iter().all(|v| v.color.a() < 255));
+        }
+        app.busy = false;
+        app.project_session.saving = false;
+        app.about_open = false;
+
+        // The same pointer sequence really moves the arrow once saving finishes.
+        for events in [
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            vec![egui::Event::PointerMoved(end)],
+            vec![button(end, false)],
+        ] {
+            let _ = workspace_canvas(&mut app, &ctx, source.id(), events);
+        }
+        assert_ne!(
+            app.document.as_ref().unwrap().annotations[0].start,
+            before.annotations[0].start
+        );
+    }
+
     #[test]
     fn failed_autosave_preserves_document_and_stops_retries_until_edit_or_manual_save() {
         let dir = tempfile::tempdir().unwrap();

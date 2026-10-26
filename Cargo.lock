@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "myimage"
-version = "2.1.1"
+version = "2.1.2"
 dependencies = [
  "arboard",
  "base64",

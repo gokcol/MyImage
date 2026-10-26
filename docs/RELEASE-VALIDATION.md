@@ -279,3 +279,15 @@ Drawing tools remember their explicitly chosen styles and colors independently, 
 Local validation of the final source: formatting, strict workspace Clippy and all-target workspace tests passed: **524 application tests and 15 packaging tests**, with **23 explicitly ignored** diagnostics/integration tests. New coverage verifies independent and relocated shortcut characters, partial registration and retry, per-tool properties/color, settings round trips, old settings, invalid stored values, selection isolation, new-arrow geometry, inline text commit/cancel/content-only edits, and fill persistence. Independent source reviews found no actionable correctness issues. Windows interactive capture/clipboard/device validation remains pending.
 
 Release version is **2.1.1 build 75**; the separate Store package version is **2.1.3.0**. Signing, notarization, installation, exact-source Windows workflow results and publication/submission status are recorded in the release validation JSON attached to the release.
+
+## Build 76 — 2.1.2 annotation canvas stability (2026-10-26)
+
+Reproduction: capture a window, add an arrow, then move/reshape it or change its color, width or style. Two independent rendering transitions affected the main canvas. Contained object gestures unnecessarily reserved an expanded canvas, replacing the original screenshot texture with a reduced interactive composite until release. Canonical project autosave also disabled the workspace with the normal faded appearance, briefly changing the screenshot’s brightness after property edits.
+
+Contained object edits now keep the original source texture. A retained sampling frame starts only when annotation bounds require canvas expansion and remains fixed for the rest of that gesture, including returning exactly to the starting position. Project saves retain the workspace’s normal appearance while the existing input lock stays active. Unrelated work and obscuring dialogs keep their prior disabled appearance. Privacy compositions and their stale-result protections are unchanged.
+
+Persistent-frame regressions cover arrow drawing, moving, endpoint resizing, curve bending, and color/width/pattern edits; they compare the source texture and sampling coordinates through each frame. Boundary-crossing coverage verifies retained-frame lifetime. The save regression compares image meshes before/during/after saving, blocks pointer edits during the save, and verifies editing afterward. Independent reviews of both production changes found no actionable correctness issues.
+
+Final local validation passed: formatting, strict workspace Clippy, and **527 application + 15 packaging tests (542 total)**; **23 diagnostics/integration tests were explicitly ignored**.
+
+Release app version is **2.1.2 build 76**, with separate Store package version **2.1.4.0**. Final checks, signing, installation, workflow and publication/submission evidence are recorded in the build-76 release validation report.

@@ -84,9 +84,6 @@ impl EditorState {
         viewport: Rect,
     ) -> Result<Option<(Document, Rect)>, String> {
         let indices = self.object_preview_indices(document);
-        if indices.is_empty() {
-            return Ok(None);
-        }
         let Some(gesture) = self.gesture.as_mut() else {
             return Ok(None);
         };
@@ -94,6 +91,13 @@ impl EditorState {
         if let Some(geometry) = gesture.preview_geometry {
             source.geometry = geometry;
         } else {
+            // In-bounds annotation edits must keep the original image texture.
+            // Reserving a larger canvas here would unnecessarily replace the
+            // whole image with a reduced composition until the drag ends.
+            if indices.is_empty() || !crate::canvas::extend_for_annotations(&mut source, &indices)?
+            {
+                return Ok(None);
+            }
             // Reserve the workspace plus an object-sized margin once. A fixed
             // sampling grid avoids shimmering as the visible canvas grows.
             let padding =
@@ -172,6 +176,243 @@ mod tests {
                 });
             },
         )
+    }
+
+    // Keep both caches alive across frames: rebuilding the fixture texture or
+    // preview every frame would hide a source/composition/source transition.
+    fn persistent_frame(
+        ctx: &egui::Context,
+        editor: &mut EditorState,
+        document: &mut Document,
+        history: &mut EditHistory,
+        texture: &egui::TextureHandle,
+        preview: &mut crate::privacy_preview::PrivacyPreview,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1200., 900.))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    editor.canvas(ui, document, history, texture, preview);
+                });
+            },
+        )
+    }
+
+    fn source_quad(
+        ctx: &egui::Context,
+        output: &egui::FullOutput,
+        source: egui::TextureId,
+    ) -> Vec<(Pos2, Pos2)> {
+        let meshes: Vec<_> = ctx
+            .tessellate(output.shapes.clone(), output.pixels_per_point)
+            .into_iter()
+            .filter_map(|primitive| match primitive.primitive {
+                egui::epaint::Primitive::Mesh(mesh)
+                    if mesh.texture_id != egui::TextureId::default() =>
+                {
+                    Some(mesh)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            meshes.len(),
+            1,
+            "one unchanged source image, no reduced composition"
+        );
+        assert_eq!(
+            meshes[0].texture_id, source,
+            "the screenshot texture must not flicker"
+        );
+        meshes[0]
+            .vertices
+            .iter()
+            .map(|vertex| (vertex.pos, vertex.uv))
+            .collect()
+    }
+
+    #[test]
+    fn in_bounds_arrow_edits_keep_the_same_source_texture_and_sampling() {
+        let ctx = egui::Context::default();
+        let mut document = document();
+        document.image = Arc::new(image::RgbaImage::from_fn(1600, 1000, |x, y| {
+            // Fine detail makes the old 768-pixel fallback observably different.
+            let value = if (x / 3 + y / 3) % 2 == 0 { 235 } else { 35 };
+            image::Rgba([value, value, value, 255])
+        }));
+        let original = document.image.clone();
+        let original_geometry = document.geometry;
+        let texture = ctx.load_texture(
+            "persistent captured window",
+            crate::image_loading::color_image(&document.image),
+            egui::TextureOptions::LINEAR,
+        );
+        let mut preview = crate::privacy_preview::PrivacyPreview::default();
+        let mut history = EditHistory::new(document.edit_state());
+        let mut editor = EditorState {
+            tool: Tool::Arrow,
+            fit: false,
+            zoom: 0.5,
+            snapping: false,
+            ..Default::default()
+        };
+        let output = persistent_frame(
+            &ctx,
+            &mut editor,
+            &mut document,
+            &mut history,
+            &texture,
+            &mut preview,
+            vec![],
+        );
+        let expected = source_quad(&ctx, &output, texture.id());
+        let rect = expected.iter().fold(Rect::NOTHING, |rect, (pos, _)| {
+            rect.union(Rect::from_min_max(*pos, *pos))
+        });
+        let check = |output: &egui::FullOutput| {
+            assert_eq!(source_quad(&ctx, output, texture.id()), expected);
+        };
+        let start = rect.min + egui::vec2(100., 90.);
+        let end = rect.min + egui::vec2(360., 230.);
+        for events in [
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+            vec![egui::Event::PointerMoved(end)],
+            vec![button(end, false)],
+        ] {
+            check(&persistent_frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                &texture,
+                &mut preview,
+                events,
+            ));
+        }
+        assert_eq!(document.annotations.len(), 1);
+        assert_eq!(document.geometry, original_geometry);
+        for handle in [None, Some(Handle::ArrowEnd), Some(Handle::ArrowBend)] {
+            editor.select(Some(0), &document);
+            let original_arrow = document.annotations[0].clone();
+            let point = match handle {
+                None => crate::arrow_style::curve_point(&original_arrow, 0.25),
+                Some(Handle::ArrowEnd) => point(original_arrow.end),
+                _ => crate::arrow_style::curve_point(&original_arrow, 0.5),
+            };
+            let press = rect.min + point.to_vec2() * 0.5;
+            let destination = press
+                + if handle == Some(Handle::ArrowBend) {
+                    egui::vec2(0., 60.)
+                } else {
+                    egui::vec2(35., 20.)
+                };
+            check(&persistent_frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                &texture,
+                &mut preview,
+                vec![egui::Event::PointerMoved(press), button(press, true)],
+            ));
+            assert!(editor.gesture.is_some());
+            check(&persistent_frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                &texture,
+                &mut preview,
+                vec![egui::Event::PointerMoved(destination)],
+            ));
+            assert_ne!(document.annotations[0], original_arrow);
+            assert!(editor.gesture.as_ref().unwrap().preview_geometry.is_none());
+            check(&persistent_frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                &texture,
+                &mut preview,
+                vec![button(destination, false)],
+            ));
+            assert_eq!(document.geometry, original_geometry);
+        }
+        assert!(document.annotations[0].arrow.curve.is_some());
+        editor.select(Some(0), &document);
+        editor.color = [20, 100, 230, 180];
+        editor.stroke_width = 12.;
+        editor.arrow.pattern = crate::arrow_style::Pattern::Dashed;
+        editor.apply_inspector(&mut document, &mut history);
+        check(&persistent_frame(
+            &ctx,
+            &mut editor,
+            &mut document,
+            &mut history,
+            &texture,
+            &mut preview,
+            vec![],
+        ));
+        assert_eq!(document.annotations[0].color, [20, 100, 230, 180]);
+        assert_eq!(document.annotations[0].stroke_width, 12.);
+        assert!(Arc::ptr_eq(&document.image, &original));
+        assert_eq!(document.geometry, original_geometry);
+    }
+
+    #[test]
+    fn retained_sampling_frame_starts_only_at_the_edge_and_lasts_until_release() {
+        let mut document = document();
+        let mut editor = EditorState::default();
+        let mut arrow = editor.new_annotation(AnnotationKind::Arrow, Point { x: 40., y: 40. });
+        arrow.end = Point { x: 120., y: 80. };
+        document.annotations.push(arrow);
+        let before = document.edit_state();
+        let mut history = EditHistory::new(before.clone());
+        editor.gesture = Some(Gesture {
+            kind: GestureKind::Move(0),
+            before: before.clone(),
+            origin: Point { x: 40., y: 40. },
+            preview_geometry: None,
+        });
+        let rect = Rect::from_min_size(egui::pos2(150., 130.), egui::vec2(200., 140.));
+        let viewport = Rect::from_min_size(Pos2::ZERO, egui::vec2(500., 400.));
+        document.annotations[0].end.x = 150.;
+        assert!(
+            editor
+                .object_canvas_texture_frame(&document, rect, 1., viewport)
+                .unwrap()
+                .is_none()
+        );
+        assert!(editor.gesture.as_ref().unwrap().preview_geometry.is_none());
+        document.annotations[0].end.x = 240.;
+        let (outside, _) = editor
+            .object_canvas_texture_frame(&document, rect, 1., viewport)
+            .unwrap()
+            .unwrap();
+        assert!(outside.geometry.canvas.is_some());
+        // Return exactly to the initial arrow: changed_objects is empty, but
+        // abandoning the established sampling frame mid-drag would shimmer.
+        document.annotations = before.annotations.clone();
+        let (inside, _) = editor
+            .object_canvas_texture_frame(&document, rect, 1., viewport)
+            .unwrap()
+            .unwrap();
+        assert_eq!(inside.geometry, outside.geometry);
+        assert_eq!(document.geometry, before.geometry);
+        editor.finish_annotation_gesture(&mut document, &mut history);
+        assert!(
+            editor
+                .object_canvas_texture_frame(&document, rect, 1., viewport)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(document.edit_state(), before);
+        assert!(!history.can_undo());
     }
 
     #[test]
