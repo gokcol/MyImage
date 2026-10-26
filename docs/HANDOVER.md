@@ -17,9 +17,9 @@ Project: `/Users/gokcol/SWPROJECTS/Utility/MyImage`, branch `main`. The old work
 | Mac | `/Applications/MyImage.app` updated and reopened; source, installed app, ZIP and DMG payloads match |
 | Mac signing | Developer ID signed, Apple notarized, stapled, Gatekeeper accepted for app and DMG; build 75 rollback retained |
 | Windows | x64 Setup and portable ZIP published; unsigned; installer lifecycle passed |
-| Store package | New **2.1.4.0** verified, ready for upload |
-| Store submission | **Not yet updated to build 76**: saved/Validated **2.1.3.0** remains In draft; the Mac screen locked before the new upload |
-| Remaining work | User asked to unlock Mac; then upload 2.1.4.0, save prepared listing/reviewer notes and submit for certification |
+| Store package | **2.1.4.0** uploaded, saved and **Validated**; 2.1.3.0 removed |
+| Store submission | Build-76 notes saved and verified; **Submit for certification was activated**, but the Mac locked before the resulting status was verified |
+| Remaining work | User asked to unlock Mac for one final overview/status read. **Do not submit again without checking the existing result.** |
 
 The user reproduced main-canvas flicker by capturing a window, adding an arrow, and both dragging/reshaping it and changing color/width/style. Contained gestures now retain the original screenshot texture; canonical autosave preserves workspace brightness while input remains blocked. Real canvas expansion retains its fixed sampling frame until release. Build 76 also includes build 75's **Ctrl+Shift+C** capture shortcut on macOS/Windows and remembered per-tool styles/colors across reselection, images and restarts. Existing capture shortcuts remain.
 
@@ -32,9 +32,11 @@ Current evidence:
 - `dist/release-v2.1.2-build76/release-validation.json`, `macos-validation.json`, release notes, signing/notarization/install/check logs.
 - `dist/windows-v2.1.2-build76/windows-validation.json` and artifacts.
 - `dist/msix-v2.1.2-build76/artifact-validation.json` and **MyImage-2.1.4.0-store-x64.msix** (SHA-256 `3634301a5fd4a7a8573e6931dd40479054eda77b12717dcc5087a87060d26619`).
-- Store text prepared in `dist/release-v2.1.2-build76/store-whats-new.txt` and `store-reviewer-notes.txt`. Existing relevant reviewer instructions are preserved in the merged text. Read/recheck live state before resuming.
+- Store text in `dist/release-v2.1.2-build76/store-whats-new.txt` and `store-reviewer-notes.txt` was saved and verified exactly after reloading. Existing relevant reviewer instructions are preserved. Evidence: `store-listing-saved.txt`, `store-reviewer-saved.txt`, `store-options.txt`, `store-draft-saved.txt`, and `store-submission.json`.
 
 Store update/final submission is already authorized. Product **9PL3HWB23J38**, submission **1152921505702179656**, identity `OrhanGkl.MyImageOG`, publisher `CN=A9F0208B-CC43-472D-AE82-9FE4556DC935`. Preserve pricing/markets/ratings/capabilities/startup and publish-after-approval preferences. Firefox native UI automation cannot operate while the Mac screen is locked; do not alter security settings. If the upload link cannot open the chooser, the user previously opened it manually, after which exact-path selection worked. Do not claim Microsoft signing or availability before certification. Update published `release-validation.json` with the final observed Store state after submission.
+
+On 26 October, the user unlocked the Mac and build 76 was uploaded/saved. The overview showed only 2.1.4.0 as Validated. Both notes were saved and verified after reload; the existing automatic publish-after-certification radio was confirmed selected. The Submit for certification button was activated, then the screen locked before Microsoft’s response could be read. This is the only remaining verification. The guarded native helpers in `/private/tmp/myimage-partnercenter-*.applescript` now discover the page container in either Firefox window layout. Reviewer notes save via the **Save description** link; the listing uses **Save**. A separate Firefox window holds MyImage’s overview.
 
 Build 75 remains a historical public release. Its **2.1.3.0** package replaced 2.1.2.0, but was held In draft for this flicker fix. Do not overwrite prior release tags or binaries. The unrelated deletion `assets/branding/myimage-calico-logo-v1.png` remains deliberately unstaged.
 
