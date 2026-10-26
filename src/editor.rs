@@ -54,7 +54,10 @@ mod stamp_panel;
 mod text_editor;
 #[path = "text_extract.rs"]
 mod text_extract;
+#[path = "tool_appearance.rs"]
+mod tool_appearance;
 use annotation_selection::*;
+pub use tool_appearance::ToolPreferences;
 
 use eframe::egui::{
     self, Color32, CursorIcon, Key, Modifiers, PointerButton, Pos2, Rect, Sense, Stroke,
@@ -212,6 +215,8 @@ pub struct EditorState {
     extra_tools: editor_tools::State,
     toolbar_pins: Vec<String>,
     toolbar_changed: bool,
+    tool_preferences: ToolPreferences,
+    tool_preferences_changed: bool,
     toolbar_customizer: bool,
     lasso: bool,
     area_drag: Option<area_selection::AreaDrag>,
@@ -233,13 +238,6 @@ pub struct EditorState {
     step_number: u32,
     step_diameter: f32,
     text_color: [u8; 4],
-    shape_color: [u8; 4],
-    step_color: [u8; 4],
-    callout_color: [u8; 4],
-    highlighter_color: [u8; 4],
-    pen_color: [u8; 4],
-    pen_width: f32,
-    shape_width: f32,
     eraser_diameter: f32,
     plain_text: String,
     callout_text: String,
@@ -287,6 +285,8 @@ impl Default for EditorState {
             extra_tools: Default::default(),
             toolbar_pins: default_toolbar(),
             toolbar_changed: false,
+            tool_preferences: Default::default(),
+            tool_preferences_changed: false,
             toolbar_customizer: false,
 
             lasso: false,
@@ -308,13 +308,6 @@ impl Default for EditorState {
             step_number: 1,
             step_diameter: 48.0,
             text_color: [255; 4],
-            shape_color: [230, 66, 55, 255],
-            step_color: [230, 66, 55, 255],
-            callout_color: [16, 119, 108, 255],
-            highlighter_color: [255, 220, 0, 80],
-            pen_color: [35, 112, 225, 255],
-            pen_width: 8.0,
-            shape_width: 4.0,
             eraser_diameter: 32.0,
             plain_text: "Text".into(),
             callout_text: "Callout".into(),
@@ -363,6 +356,8 @@ impl EditorState {
     }
 
     pub fn reset(&mut self) {
+        let preferences = std::mem::take(&mut self.tool_preferences);
+        let preferences_changed = self.tool_preferences_changed;
         let pins = std::mem::take(&mut self.toolbar_pins);
         let stamps = std::mem::take(&mut self.stamps);
         let mut presets = std::mem::take(&mut self.presets);
@@ -374,6 +369,8 @@ impl EditorState {
         self.presets = presets;
         self.stamps = stamps;
         self.toolbar_pins = pins;
+        self.set_tool_preferences(preferences);
+        self.tool_preferences_changed = preferences_changed;
     }
 
     /// Complete annotation gestures and discard unapplied image-tool previews
@@ -458,47 +455,12 @@ impl EditorState {
         }
     }
 
-    fn remember_appearance(&mut self, kind: AnnotationKind) {
-        match kind {
-            AnnotationKind::Step => self.step_color = self.color,
-            AnnotationKind::Callout => {
-                self.callout_color = self.color;
-                self.callout_text.clone_from(&self.text);
-            }
-            AnnotationKind::Highlighter => self.highlighter_color = self.color,
-            AnnotationKind::Freehand => {
-                self.pen_color = self.color;
-                self.pen_width = self.stroke_width;
-            }
-            AnnotationKind::Blur | AnnotationKind::Pixelate => {}
-            _ => {
-                self.shape_color = self.color;
-                self.shape_width = self.stroke_width;
-                if kind == AnnotationKind::Text {
-                    self.plain_text.clone_from(&self.text);
-                }
-            }
-        }
-    }
-
     fn activate_tool(&mut self, tool: Tool) {
         self.effects_open = false;
         self.tool = tool;
-        self.color = match tool {
-            Tool::Step => self.step_color,
-            Tool::Callout => self.callout_color,
-            Tool::Highlighter => self.highlighter_color,
-            Tool::Pen => self.pen_color,
-            Tool::Select | Tool::Area | Tool::Crop | Tool::Blur | Tool::Pixelate | Tool::Eraser => {
-                self.color
-            }
-            _ => self.shape_color,
-        };
-        self.stroke_width = if tool == Tool::Pen {
-            self.pen_width
-        } else {
-            self.shape_width
-        };
+        if let Some(kind) = tool.kind() {
+            self.restore_appearance(kind);
+        }
         match tool {
             Tool::Callout => self.text.clone_from(&self.callout_text),
             Tool::Text => self.text.clone_from(&self.plain_text),
@@ -1228,13 +1190,15 @@ impl EditorState {
             ui.small("Drag to move together. Drag a corner to resize.");
         } else if self.tool == Tool::Eraser && self.selected.is_none() {
             ui.strong("Eraser");
-            object_properties::slider(
+            if object_properties::slider(
                 ui,
                 &mut self.eraser_diameter,
                 1.0..=512.0,
                 "Diameter",
                 " px",
-            );
+            ) {
+                self.remember_eraser_diameter();
+            }
             ui.small("Erase pen strokes. Original pixels stay intact.");
         } else if let Some(kind) = self.style_kind(document) {
             ui.horizontal(|ui| {
@@ -2227,6 +2191,11 @@ impl EditorState {
             return;
         }
         self.image_error = None;
+        if self.selected.is_some()
+            && let Some(kind) = self.tool.kind()
+        {
+            self.restore_appearance(kind);
+        }
         let before = document.edit_state();
         let kind = if self.tool == Tool::Eraser {
             self.clear_selection();
@@ -2485,6 +2454,7 @@ impl EditorState {
     }
 
     fn select(&mut self, index: Option<usize>, document: &Document) {
+        let had_selection = self.selected.is_some();
         self.layer_target = None;
         self.additional.clear();
         if self.selected != index
@@ -2526,7 +2496,12 @@ impl EditorState {
                 self.step_diameter = interaction_bounds(annotation).width().max(1.0);
             }
             self.text_color = annotation.text_color;
-            self.remember_appearance(annotation.kind);
+            self.remember_text_content(annotation.kind);
+        } else if had_selection && let Some(kind) = self.tool.kind() {
+            self.restore_appearance(kind);
+            if kind == AnnotationKind::Fill {
+                self.restore_fill_preferences();
+            }
         }
     }
 

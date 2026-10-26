@@ -407,11 +407,14 @@ impl EditorState {
                 }
             },
         );
-        if changed && let Some(i) = index.filter(|&i| !document.annotations[i].locked()) {
-            document.annotations[i].studio = self.studio.clone();
-            document.annotations[i].color = self.color;
-            document.annotations[i].stroke_width = self.stroke_width;
-            self.record_properties(before, document, history);
+        if changed {
+            self.remember_appearance(kind);
+            if let Some(i) = index.filter(|&i| !document.annotations[i].locked()) {
+                document.annotations[i].studio = self.studio.clone();
+                document.annotations[i].color = self.color;
+                document.annotations[i].stroke_width = self.stroke_width;
+                self.record_properties(before, document, history);
+            }
         }
     }
     fn area_inspector_actions(

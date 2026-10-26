@@ -40,6 +40,7 @@ impl EditorState {
             return;
         };
         let mut removed = false;
+        let mut remember_style = false;
         if apply {
             // Empty text is not an invisible object; cancel a new blank annotation.
             removed = document
@@ -55,6 +56,26 @@ impl EditorState {
                 document.geometry = draft.before.geometry;
                 self.image_error = Some(error);
             } else {
+                // Opening old text or changing only its words must not replace
+                // the drawing defaults. Persist formatting only after a valid
+                // commit; canceled drafts never affect the next annotation.
+                remember_style = !removed
+                    && document
+                        .annotations
+                        .get(draft.index)
+                        .is_some_and(|annotation| {
+                            draft
+                                .before
+                                .annotations
+                                .get(draft.index)
+                                .is_none_or(|before| {
+                                    annotation.color != before.color
+                                        || annotation.text_color != before.text_color
+                                        || annotation.font_size != before.font_size
+                                        || annotation.text_style != before.text_style
+                                        || annotation.callout_style != before.callout_style
+                                })
+                        });
                 history.commit(draft.before, document);
             }
         } else {
@@ -66,6 +87,9 @@ impl EditorState {
             (!removed && draft.index < document.annotations.len()).then_some(draft.index),
             document,
         );
+        if remember_style && let Some(annotation) = document.annotations.get(draft.index) {
+            self.remember_appearance(annotation.kind);
+        }
         self.focus_canvas = true;
     }
     pub(super) fn text_editor_window(
@@ -522,6 +546,82 @@ mod tests {
         e.finish_text_editor(&mut d, &mut h, false);
         assert_eq!(d.annotations[0].text, "Applied");
     }
+    #[test]
+    fn committed_inline_formatting_becomes_the_next_text_or_callout_style() {
+        for (tool, kind) in [
+            (Tool::Text, AnnotationKind::Text),
+            (Tool::Callout, AnnotationKind::Callout),
+        ] {
+            let mut editor = EditorState::default();
+            editor.activate_tool(tool);
+            let mut document = document();
+            let mut annotation = editor.new_annotation(kind, Point { x: 20., y: 20. });
+            annotation.end = Point { x: 180., y: 150. };
+            annotation.text = "Example".into();
+            document.annotations.push(annotation);
+            let before = document.edit_state();
+            let mut history = EditHistory::new(before.clone());
+            editor.open_text_editor(0, before, &document);
+            document.annotations[0].color = [17, 88, 140, 190];
+            document.annotations[0].text_color = [245, 220, 130, 255];
+            document.annotations[0].font_size = 27.;
+            document.annotations[0].text_style.monospace = true;
+            document.annotations[0].text_style.italic = true;
+            document.annotations[0].text_style.alignment = Alignment::Center;
+            if kind == AnnotationKind::Callout {
+                document.annotations[0].callout_style = crate::callout_style::CalloutStyle::Note;
+            }
+            editor.finish_text_editor(&mut document, &mut history, true);
+            let committed = document.annotations[0].clone();
+            editor.activate_tool(Tool::Arrow);
+            editor.activate_tool(tool);
+            let next = editor.new_annotation(kind, Point { x: 5., y: 7. });
+            assert_eq!(next.color, committed.color);
+            assert_eq!(next.text_color, committed.text_color);
+            assert_eq!(next.font_size, committed.font_size);
+            assert_eq!(next.text_style, committed.text_style);
+            assert_eq!(next.callout_style, committed.callout_style);
+            assert_eq!(next.start, Point { x: 5., y: 7. });
+            assert_eq!(next.end, next.start);
+            assert!(history.can_undo());
+        }
+    }
+
+    #[test]
+    fn content_only_and_canceled_inline_edits_preserve_chosen_drawing_style() {
+        for (apply, change_style) in [(true, false), (false, true)] {
+            let mut editor = EditorState::default();
+            editor.activate_tool(Tool::Text);
+            editor.color = [20, 100, 200, 220];
+            editor.font_size = 42.;
+            editor.text_style.underline = true;
+            editor.remember_appearance(AnnotationKind::Text);
+            let chosen = editor.new_annotation(AnnotationKind::Text, Point { x: 1., y: 1. });
+            let mut old = chosen.clone();
+            old.color = [200, 40, 20, 255];
+            old.font_size = 18.;
+            old.text_style = Default::default();
+            old.text = "Old text".into();
+            let mut document = document();
+            document.annotations.push(old);
+            let before = document.edit_state();
+            let mut history = EditHistory::new(before.clone());
+            editor.open_text_editor(0, before, &document);
+            document.annotations[0].text = "New words".into();
+            if change_style {
+                document.annotations[0].color = [0, 180, 80, 255];
+                document.annotations[0].font_size = 55.;
+                document.annotations[0].text_style.italic = true;
+            }
+            editor.finish_text_editor(&mut document, &mut history, apply);
+            editor.activate_tool(Tool::Text);
+            let next = editor.new_annotation(AnnotationKind::Text, Point { x: 5., y: 7. });
+            assert_eq!(next.color, chosen.color);
+            assert_eq!(next.font_size, chosen.font_size);
+            assert_eq!(next.text_style, chosen.text_style);
+        }
+    }
+
     #[test]
     fn deleting_empty_text_does_not_reveal_an_unrelated_off_canvas_layer() {
         let mut e = EditorState::default();

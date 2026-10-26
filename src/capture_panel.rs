@@ -173,8 +173,8 @@ pub fn ui(
                         if ui.add_enabled(available.capture, egui::Button::new(egui::RichText::new("Capture Now").strong().color(appearance::palette(ui.ctx()).ink)).fill(appearance::palette(ui.ctx()).ginger).min_size(Vec2::new(222., 36.))).clicked() {
                             result.action = Some(Action::Capture);
                         }
-                        ui.label(egui::RichText::new("Ctrl + Shift + .").strong().color(Color32::WHITE));
-                        ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Also Command + Shift + ." } else { "Available from any app" }).size(12.).color(Color32::from_rgb(224, 213, 197)));
+                        ui.label(egui::RichText::new("Ctrl + Shift + C").strong().color(Color32::WHITE));
+                        ui.label(egui::RichText::new(if cfg!(target_os="macos") { "Also ⌃⇧. / ⌘⇧." } else { "Also Ctrl + Shift + ." }).size(12.).color(Color32::from_rgb(224, 213, 197)));
                         ui.separator();
                         ui.label(egui::RichText::new(if settings.capture_mode == CaptureMode::Text { "Text is copied directly. Your editor and Library stay unchanged." } else { settings.capture_destination.hint() }).size(12.).color(Color32::from_rgb(224, 213, 197)));
                         });

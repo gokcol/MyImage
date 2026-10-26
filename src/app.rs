@@ -270,6 +270,7 @@ impl MyImageApp {
         );
         let library = LibraryPanel::with_preferences(settings.library.clone());
         let mut editor = EditorState::with_presets(storage::preset_library_path(demo));
+        editor.set_tool_preferences(settings.editor_tools.clone());
         editor.set_toolbar(
             settings.editor_toolbar.clone(),
             settings.toolbar_layout_version == 0,
@@ -393,6 +394,9 @@ impl MyImageApp {
     }
 
     fn persist_settings(&mut self) {
+        if let Some(preferences) = self.editor.take_tool_preferences_change() {
+            self.settings.editor_tools = preferences;
+        }
         if self.demo {
             return;
         }
@@ -823,6 +827,10 @@ impl MyImageApp {
     fn finish_edit(&mut self) {
         if let Some(document) = &mut self.document {
             self.editor.finish_gesture(document, &mut self.history);
+        }
+        if let Some(preferences) = self.editor.take_tool_preferences_change() {
+            self.settings.editor_tools = preferences;
+            self.persist_settings();
         }
     }
 
@@ -2349,6 +2357,12 @@ impl eframe::App for MyImageApp {
             if prompt.should_close() {
                 self.pending_action = None;
             }
+        }
+        if !ctx.input(|input| input.pointer.any_down())
+            && let Some(preferences) = self.editor.take_tool_preferences_change()
+        {
+            self.settings.editor_tools = preferences;
+            self.persist_settings();
         }
         self.promote_edited_recent(ctx);
         self.autosave_project(ctx);

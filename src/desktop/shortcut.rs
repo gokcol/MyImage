@@ -1,11 +1,11 @@
-//! Resolve the capture shortcut once during desktop initialization.
+//! Resolve capture shortcuts once during desktop initialization.
 //!
 //! macOS registers physical virtual keys, so the US `Code::Period` position is
 //! not necessarily the key labeled '.' on the active layout. Resolve the
-//! unmodified character first, then register Control + Shift and Command + Shift
-//! with that same key.
+//! unmodified characters first, then register Control + Shift + C and the
+//! Control/Command + Shift + period shortcuts with their respective keys.
 //! Restart MyImage after changing keyboard layouts. Windows continues to use
-//! global-hotkey's `Code::Period` mapping to `VK_OEM_PERIOD`.
+//! global-hotkey's `Code::Period` / `Code::KeyC` mappings to `VK_OEM_PERIOD` / `VK_C`.
 
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 
@@ -14,34 +14,60 @@ pub(super) struct CaptureHotkey {
     pub hotkey: HotKey,
 }
 
-/// Call on the main UI thread; Apple's keyboard-layout APIs are not thread safe.
-/// If layout resolution fails, the caller exposes the error and keeps Capture
-/// available in the window/tray instead of registering an unrelated fallback.
-pub(super) fn capture_hotkeys() -> Result<Vec<CaptureHotkey>, String> {
-    #[cfg(target_os = "macos")]
-    let key = macos::period_key()?;
-    #[cfg(not(target_os = "macos"))]
-    let key = Code::Period;
+pub(super) struct CaptureHotkeys {
+    pub hotkeys: Vec<CaptureHotkey>,
+    pub errors: Vec<String>,
+}
 
-    // CONTROL deliberately means Control on macOS, not Command.
-    let control = CaptureHotkey {
-        label: "Ctrl+Shift+.",
-        hotkey: HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), key),
-    };
+/// Call on the main UI thread; Apple's keyboard-layout APIs are not thread safe.
+/// Resolve the two characters independently so an unavailable key does not
+/// prevent the other shortcuts from registering.
+pub(super) fn capture_hotkeys() -> CaptureHotkeys {
     #[cfg(target_os = "macos")]
-    {
-        Ok(vec![
-            control,
-            CaptureHotkey {
-                label: "Cmd+Shift+.",
-                hotkey: HotKey::new(Some(Modifiers::SUPER | Modifiers::SHIFT), key),
-            },
-        ])
-    }
+    let keys = (macos::character_key(b'.'), macos::character_key(b'c'));
     #[cfg(not(target_os = "macos"))]
-    {
-        Ok(vec![control])
+    let keys = (Ok(Code::Period), Ok(Code::KeyC));
+
+    capture_hotkeys_for_keys(keys.0, keys.1, cfg!(target_os = "macos"))
+}
+
+fn capture_hotkeys_for_keys(
+    period: Result<Code, String>,
+    letter_c: Result<Code, String>,
+    include_command: bool,
+) -> CaptureHotkeys {
+    let mut result = CaptureHotkeys {
+        hotkeys: Vec::new(),
+        errors: Vec::new(),
+    };
+    // CONTROL deliberately means Control on macOS, not Command.
+    match letter_c {
+        Ok(key) => result.hotkeys.push(CaptureHotkey {
+            label: "Ctrl+Shift+C",
+            hotkey: HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), key),
+        }),
+        Err(error) => result
+            .errors
+            .push(format!("Ctrl+Shift+C unavailable: {error}")),
     }
+    match period {
+        Ok(key) => {
+            result.hotkeys.push(CaptureHotkey {
+                label: "Ctrl+Shift+.",
+                hotkey: HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), key),
+            });
+            if include_command {
+                result.hotkeys.push(CaptureHotkey {
+                    label: "Cmd+Shift+.",
+                    hotkey: HotKey::new(Some(Modifiers::SUPER | Modifiers::SHIFT), key),
+                });
+            }
+        }
+        Err(error) => result
+            .errors
+            .push(format!("Period capture shortcuts unavailable: {error}")),
+    }
+    result
 }
 
 /// These are the main typing keys supported by global-hotkey 0.8's macOS
@@ -102,15 +128,16 @@ fn code_for_macos_key(virtual_key: u16) -> Option<Code> {
 }
 
 #[cfg(any(target_os = "macos", test))]
-fn resolve_period_key(
+fn resolve_character_key(
+    character: u8,
     mut translate_unmodified: impl FnMut(u16) -> Option<Vec<u16>>,
 ) -> Result<(Code, u16), String> {
-    let mut unsupported_period = None;
+    let mut unsupported_key = None;
     for virtual_key in 0..128 {
         let Some(characters) = translate_unmodified(virtual_key) else {
             continue;
         };
-        if characters.as_slice() != [u16::from(b'.')] {
+        if characters.as_slice() != [u16::from(character)] {
             continue;
         }
         if let Some(code) = code_for_macos_key(virtual_key) {
@@ -118,25 +145,25 @@ fn resolve_period_key(
         }
         // A numeric keypad decimal is not a substitute for the typing key.
         if virtual_key != 0x41 {
-            unsupported_period = Some(virtual_key);
+            unsupported_key = Some(virtual_key);
         }
     }
-    match unsupported_period {
+    let character = char::from(character);
+    match unsupported_key {
         Some(key) => Err(format!(
-            "The current keyboard layout places '.' on unsupported macOS key 0x{key:02x}. \
-             No fallback shortcut was registered"
+            "The current keyboard layout places '{character}' on unsupported macOS key 0x{key:02x}. \
+             No substitute key was selected"
         )),
-        None => Err(
-            "The current keyboard layout has no supported typing key that produces '.' without modifiers. \
-             No fallback shortcut was registered"
-                .to_owned(),
-        ),
+        None => Err(format!(
+            "The current keyboard layout has no supported typing key that produces '{character}' without modifiers. \
+             No substitute key was selected"
+        )),
     }
 }
 
 #[cfg(target_os = "macos")]
 mod macos {
-    use super::{Code, resolve_period_key};
+    use super::{Code, resolve_character_key};
     use std::{
         ffi::{c_long, c_ulong, c_void},
         ptr::NonNull,
@@ -193,11 +220,11 @@ mod macos {
         }
     }
 
-    pub(super) fn period_key() -> Result<Code, String> {
+    pub(super) fn character_key(character: u8) -> Result<Code, String> {
         // SAFETY: Called on the UI main thread. No app keyboard state is changed.
         let source = InputSource(
             NonNull::new(unsafe { TISCopyCurrentKeyboardLayoutInputSource() }).ok_or(
-                "macOS did not provide the current keyboard layout. No fallback shortcut was registered",
+                "macOS did not provide the current keyboard layout. Restart MyImage after selecting a keyboard layout",
             )?,
         );
         // SAFETY: This property is documented as borrowed CFData. Retaining the
@@ -208,14 +235,14 @@ mod macos {
         if data.is_null() {
             return Err(
                 "The current keyboard input source has no Unicode layout data. \
-                 Select a keyboard layout and restart MyImage; no fallback shortcut was registered"
+                 Select a keyboard layout and restart MyImage; no substitute key was selected"
                     .to_owned(),
             );
         }
         // SAFETY: A non-null Get-rule CF object may be queried for its type.
         if unsafe { CFGetTypeID(data) != CFDataGetTypeID() || CFDataGetLength(data) <= 0 } {
             return Err(
-                "macOS returned invalid keyboard layout data. No fallback shortcut was registered"
+                "macOS returned invalid keyboard layout data. No substitute key was selected"
                     .to_owned(),
             );
         }
@@ -223,13 +250,13 @@ mod macos {
         let layout = unsafe { CFDataGetBytePtr(data) };
         if layout.is_null() {
             return Err(
-                "macOS returned an empty keyboard layout. No fallback shortcut was registered"
+                "macOS returned an empty keyboard layout. No substitute key was selected"
                     .to_owned(),
             );
         }
         // SAFETY: Main-thread call to the system's current keyboard type query.
         let keyboard_type = u32::from(unsafe { LMGetKbdType() });
-        let (code, virtual_key) = resolve_period_key(|key| {
+        let (code, virtual_key) = resolve_character_key(character, |key| {
             let mut characters = [0_u16; 255];
             let mut length = 0 as c_ulong;
             let mut dead_key_state = 0_u32;
@@ -256,8 +283,9 @@ mod macos {
             Some(characters[..length as usize].to_vec())
         })?;
         log::info!(
-            "Capture shortcuts: Control+Shift+'.' and Command+Shift+'.' map to macOS virtual key \
-             0x{virtual_key:02x} ({code:?}); restart MyImage after changing layouts"
+            "Capture shortcut character '{}' maps to macOS virtual key \
+             0x{virtual_key:02x} ({code:?}); restart MyImage after changing layouts",
+            char::from(character)
         );
         Ok(code)
     }
@@ -268,12 +296,80 @@ mod tests {
     use super::*;
 
     fn resolve(entries: &[(u16, &str)]) -> Result<(Code, u16), String> {
-        resolve_period_key(|key| {
+        resolve_key(b'.', entries)
+    }
+
+    fn resolve_key(character: u8, entries: &[(u16, &str)]) -> Result<(Code, u16), String> {
+        resolve_character_key(character, |key| {
             entries
                 .iter()
                 .find(|entry| entry.0 == key)
                 .map(|(_, text)| text.encode_utf16().collect())
         })
+    }
+
+    #[test]
+    fn capture_chords_include_control_c_and_preserve_platform_alternatives() {
+        for include_command in [false, true] {
+            let plan = capture_hotkeys_for_keys(Ok(Code::Period), Ok(Code::KeyC), include_command);
+            assert!(plan.errors.is_empty());
+            let mut expected = vec![
+                ("Ctrl+Shift+C", Modifiers::CONTROL, Code::KeyC),
+                ("Ctrl+Shift+.", Modifiers::CONTROL, Code::Period),
+            ];
+            if include_command {
+                expected.push(("Cmd+Shift+.", Modifiers::SUPER, Code::Period));
+            }
+            assert_eq!(plan.hotkeys.len(), expected.len());
+            for (actual, (label, modifier, code)) in plan.hotkeys.iter().zip(expected) {
+                assert_eq!(actual.label, label);
+                assert_eq!(
+                    actual.hotkey.id(),
+                    HotKey::new(Some(modifier | Modifiers::SHIFT), code).id()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn letter_c_uses_its_layout_key_and_rejects_missing_or_composed_characters() {
+        assert_eq!(
+            resolve_key(b'c', &[(0x08, "c")]).unwrap(),
+            (Code::KeyC, 0x08)
+        );
+        let relocated = resolve_key(b'c', &[(0x08, "j"), (0x22, "c")]).unwrap();
+        assert_eq!(relocated, (Code::KeyI, 0x22));
+        let plan = capture_hotkeys_for_keys(Ok(Code::Slash), Ok(relocated.0), true);
+        assert_eq!(
+            plan.hotkeys[0].hotkey.id(),
+            HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::KeyI).id()
+        );
+        assert_eq!(
+            plan.hotkeys[1].hotkey.id(),
+            HotKey::new(Some(Modifiers::CONTROL | Modifiers::SHIFT), Code::Slash).id()
+        );
+        assert!(resolve_key(b'c', &[]).is_err());
+        assert!(resolve_key(b'c', &[(0x08, "ç")]).is_err());
+        assert!(resolve_key(b'c', &[(0x08, "cx")]).is_err());
+    }
+
+    #[test]
+    fn unavailable_layout_character_keeps_other_capture_chords_available() {
+        let plan = capture_hotkeys_for_keys(Err("missing period".into()), Ok(Code::KeyC), true);
+        assert_eq!(plan.hotkeys.len(), 1);
+        assert_eq!(plan.hotkeys[0].label, "Ctrl+Shift+C");
+        assert!(plan.errors[0].contains("missing period"));
+
+        let plan = capture_hotkeys_for_keys(Ok(Code::Period), Err("missing c".into()), true);
+        assert_eq!(plan.hotkeys.len(), 2);
+        assert_eq!(plan.hotkeys[0].label, "Ctrl+Shift+.");
+        assert_eq!(plan.hotkeys[1].label, "Cmd+Shift+.");
+        assert!(plan.errors[0].contains("missing c"));
+
+        let plan =
+            capture_hotkeys_for_keys(Err("missing period".into()), Err("missing c".into()), true);
+        assert!(plan.hotkeys.is_empty());
+        assert_eq!(plan.errors.len(), 2);
     }
 
     #[test]

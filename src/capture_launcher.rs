@@ -732,9 +732,9 @@ fn launcher_content(
         })
         .inner
         .on_hover_text(if cfg!(target_os = "macos") {
-            "Capture now · Control/Command + Shift + ."
+            "Capture now · Ctrl + Shift + C · Control/Command + Shift + ."
         } else {
-            "Capture now · Ctrl + Shift + ."
+            "Capture now · Ctrl + Shift + C or Ctrl + Shift + ."
         })
         .on_disabled_hover_text(
             "Open Editor to finish the current task before starting another capture.",
@@ -746,9 +746,9 @@ fn launcher_content(
         bounds.min + Vec2::new(468., 236.),
         egui::Align2::CENTER_CENTER,
         if cfg!(target_os = "macos") {
-            "⌃ ⇧ ."
+            "⌃ ⇧ C"
         } else {
-            "Ctrl + Shift + ."
+            "Ctrl + Shift + C"
         },
         egui::FontId::proportional(11.),
         p.muted,

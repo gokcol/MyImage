@@ -112,10 +112,6 @@ impl EditorState {
         self.finish_gesture(document, history);
         self.layers_open = false;
         self.presets_open = false;
-        if tool == Tool::Simplify {
-            self.studio.ellipse = false;
-            self.color = [161, 175, 190, 255];
-        }
         // Area-based effects can immediately use a current selection.
         let area = self.selection_region(document);
         if let Some(kind) = tool.kind().filter(|k| k.is_studio() || k.is_effect())
@@ -130,10 +126,6 @@ impl EditorState {
         self.area_mask.clear();
         self.pixel_mask = None;
         self.activate_tool(tool);
-        if tool == Tool::Simplify {
-            self.studio.ellipse = false;
-            self.color = [161, 175, 190, 255];
-        }
         if tool == Tool::Crop {
             self.crop = Some(CropDraft {
                 rect: document.geometry.crop_rect(original_size(document)),

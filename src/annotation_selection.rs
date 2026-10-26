@@ -16,9 +16,16 @@ impl EditorState {
     }
 
     pub(super) fn clear_selection(&mut self) {
+        let had_selection = self.selected.is_some();
         self.layer_target = None;
         self.selected = None;
         self.additional.clear();
+        if had_selection && let Some(kind) = self.tool.kind() {
+            self.restore_appearance(kind);
+            if kind == AnnotationKind::Fill {
+                self.restore_fill_preferences();
+            }
+        }
     }
 
     pub(super) fn set_selection(&mut self, mut indices: Vec<usize>, document: &Document) {

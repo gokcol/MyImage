@@ -635,6 +635,9 @@ impl EditorState {
             document.annotations[index].kind = kind;
             index
         } else {
+            if kind.is_effect() || kind.is_studio() {
+                self.restore_appearance(kind);
+            }
             let mut a = self.new_annotation(kind, from_pos(rect.min));
             a.end = from_pos(rect.max);
             a.area_mask = if self.selected.is_none() {

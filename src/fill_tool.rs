@@ -80,6 +80,25 @@ impl FillState {
     }
 }
 impl EditorState {
+    pub(super) fn restore_fill_preferences(&mut self) {
+        let preferences = &self.tool_preferences.fill;
+        self.fill_tool.color = preferences.color;
+        self.fill_tool.tolerance = preferences.tolerance;
+        self.fill_tool.global = preferences.global;
+    }
+
+    fn remember_fill_preferences(&mut self) {
+        let preferences = tool_appearance::FillPreferences {
+            color: self.fill_tool.color,
+            tolerance: self.fill_tool.tolerance,
+            global: self.fill_tool.global,
+        };
+        if self.tool_preferences.fill != preferences {
+            self.tool_preferences.fill = preferences;
+            self.tool_preferences_changed = true;
+        }
+    }
+
     pub(super) fn paint_fill_cursor(&self, ctx: &egui::Context, tip: Pos2) {
         crate::pointer_style::custom_tool(ctx, tip + Vec2::new(26., -10.));
         // Screen-space artwork stays legible at every image zoom. The droplet's
@@ -160,6 +179,9 @@ impl EditorState {
             self.clear_selection();
         }
         self.tool = Tool::Fill;
+        if self.selected.is_none() {
+            self.restore_fill_preferences();
+        }
         self.fill_tool.error = None;
         self.layers_open = false;
         self.effects_open = false;
@@ -271,6 +293,9 @@ impl EditorState {
         });
     }
     pub(super) fn place_fill(&mut self, ctx: &egui::Context, at: Point, document: &Document) {
+        if self.selected.is_some() {
+            self.restore_fill_preferences();
+        }
         let crop = document.geometry.canvas_rect(original_size(document));
         let canvas = Rect::from_min_size(
             egui::pos2(crop.x as f32, crop.y as f32),
@@ -327,6 +352,7 @@ impl EditorState {
         ui.heading("Fill");
         ui.weak("Quick colors");
         ui.add_enabled_ui(enabled,|ui| {
+            let previous = (self.fill_tool.color, self.fill_tool.tolerance, self.fill_tool.global);
             let old_color=self.fill_tool.color;
             ui.horizontal_wrapped(|ui| {
                 for (name,color) in [("Red",[225,62,61,255]),("Blue",[46,137,221,255]),("Teal",[0,137,137,255]),("Yellow",[255,215,45,255]),("White",[255;4]),("Black",[27,35,48,255]),("Transparent",[0;4])] {
@@ -353,6 +379,9 @@ impl EditorState {
             ui.weak("Lower values protect edges. Higher values include more similar colors.");
             ui.checkbox(&mut self.fill_tool.global,"Global fill").on_hover_text("Fill matching colors in disconnected regions too, within the selected area or canvas.");
             if self.fill_tool.global {ui.weak("Matches colors across separate regions.");} else {ui.weak("Stops at boundaries around the clicked region.");}
+            if previous != (self.fill_tool.color, self.fill_tool.tolerance, self.fill_tool.global) {
+                self.remember_fill_preferences();
+            }
             if let Some(index)=selected {
                 let annotation=&document.annotations[index];let region=annotation.fill_region.as_ref().unwrap();
                 if ui.button("Update fill region").on_hover_text("Recalculate from the image and visible layers below this fill, using the current tolerance and Global fill setting.").clicked() {
@@ -514,5 +543,38 @@ mod tests {
         let refreshed = crate::render::flatten(&d).unwrap();
         assert_eq!(refreshed.get_pixel(12, 20), &image::Rgba([255; 4]));
         assert_eq!(refreshed.get_pixel(20, 20), &image::Rgba(e.fill_tool.color));
+    }
+
+    #[test]
+    fn chosen_fill_color_and_options_survive_selection_reset_and_settings_round_trip() {
+        let mut editor = EditorState::default();
+        editor.fill_tool.color = [80, 140, 220, 120];
+        editor.fill_tool.tolerance = 42;
+        editor.fill_tool.global = true;
+        editor.remember_fill_preferences();
+        let preferences = editor.take_tool_preferences_change().unwrap();
+        let json = serde_json::to_string(&preferences).unwrap();
+        let mut old = editor.new_annotation(AnnotationKind::Fill, Point { x: 0., y: 0. });
+        old.color = [255, 0, 0, 255];
+        old.fill_region = Some(crate::fill::FillRegion {
+            seed: Point { x: 0., y: 0. },
+            tolerance: 15,
+            global: false,
+            width: 1,
+            height: 1,
+            runs: std::sync::Arc::new(vec![[0, 0, 1]]),
+        });
+        editor.sync_fill_selection(&old);
+        assert_eq!(editor.fill_tool.color, old.color);
+        assert!(editor.take_tool_preferences_change().is_none());
+        editor.reset();
+        assert_eq!(editor.fill_tool.color, [80, 140, 220, 120]);
+        assert_eq!(editor.fill_tool.tolerance, 42);
+        assert!(editor.fill_tool.global);
+        let mut reopened = EditorState::default();
+        reopened.set_tool_preferences(serde_json::from_str(&json).unwrap());
+        assert_eq!(reopened.fill_tool.color, [80, 140, 220, 120]);
+        assert_eq!(reopened.fill_tool.tolerance, 42);
+        assert!(reopened.fill_tool.global);
     }
 }

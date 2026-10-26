@@ -125,7 +125,7 @@ fn install_callbacks() {
                         .cloned()
                 });
                 // Wait for release so key-repeat never opens multiple captures
-                // and the selection overlay does not inherit the period press.
+                // and the selection overlay does not inherit the shortcut press.
                 if hotkey.is_some_and(|hotkey| hotkey.capture_on_event(event.state)) {
                     sink.send(DesktopEvent::Capture);
                 }
@@ -157,6 +157,7 @@ pub struct DesktopIntegration {
     menu_enabled: bool,
     manager: Option<GlobalHotKeyManager>,
     hotkeys: Vec<Arc<RegisteredHotkey>>,
+    hotkey_resolution_errors: Vec<String>,
     hotkey_error: Option<String>,
     sink: Arc<EventSink>,
 }
@@ -177,9 +178,9 @@ impl DesktopIntegration {
         // A label, rather than a second local accelerator, avoids dispatching
         // both a menu event and a global-hotkey event for the same keypress.
         let capture_label = if cfg!(target_os = "macos") {
-            "Capture now    ⌃⇧. / ⌘⇧."
+            "Capture now    ⌃⇧C / ⌃⇧. / ⌘⇧."
         } else {
-            "Capture now    Ctrl+Shift+."
+            "Capture now    Ctrl+Shift+C / Ctrl+Shift+."
         };
         let capture = MenuItem::with_id(CAPTURE_ID, capture_label, true, None);
         let panel = MenuItem::with_id(PANEL_ID, "Capture panel…", true, None);
@@ -206,9 +207,9 @@ impl DesktopIntegration {
         let tray = TrayIconBuilder::new()
             .with_id("myimage.tray")
             .with_tooltip(if cfg!(target_os = "macos") {
-                "MyImage — Capture: Ctrl+Shift+. / Cmd+Shift+."
+                "MyImage — Capture: Ctrl+Shift+C / Ctrl+Shift+. / Cmd+Shift+."
             } else {
-                "MyImage — Capture: Ctrl+Shift+."
+                "MyImage — Capture: Ctrl+Shift+C / Ctrl+Shift+."
             })
             .with_icon(camera_icon()?)
             .with_icon_as_template(cfg!(target_os = "macos"))
@@ -235,6 +236,7 @@ impl DesktopIntegration {
             menu_enabled: true,
             manager: None,
             hotkeys: Vec::new(),
+            hotkey_resolution_errors: Vec::new(),
             hotkey_error: None,
             sink,
         };
@@ -320,7 +322,10 @@ impl DesktopIntegration {
 
     fn register_hotkeys(&mut self) -> Result<(), String> {
         if self.hotkeys.is_empty() {
-            let hotkeys: Vec<_> = shortcut::capture_hotkeys()?
+            let resolved = shortcut::capture_hotkeys();
+            self.hotkey_resolution_errors = resolved.errors;
+            let hotkeys: Vec<_> = resolved
+                .hotkeys
                 .into_iter()
                 .map(|shortcut| Arc::new(RegisteredHotkey::new(shortcut)))
                 .collect();
@@ -338,7 +343,7 @@ impl DesktopIntegration {
             .manager
             .as_ref()
             .ok_or("The operating system did not provide a shortcut manager")?;
-        register_missing_hotkeys(&self.hotkeys, |hotkey| {
+        register_missing_hotkeys(&self.hotkeys, &self.hotkey_resolution_errors, |hotkey| {
             manager.register(hotkey).map_err(|error| error.to_string())
         })
     }
@@ -346,9 +351,10 @@ impl DesktopIntegration {
 
 fn register_missing_hotkeys(
     hotkeys: &[Arc<RegisteredHotkey>],
+    resolution_errors: &[String],
     mut register: impl FnMut(HotKey) -> Result<(), String>,
 ) -> Result<(), String> {
-    let mut errors = Vec::new();
+    let mut errors = resolution_errors.to_vec();
     for hotkey in hotkeys {
         if hotkey.registered.load(Ordering::Acquire) {
             continue;
@@ -441,16 +447,17 @@ mod tests {
     use super::*;
     use global_hotkey::hotkey::{Code, Modifiers};
 
-    fn two_shortcuts() -> Vec<Arc<RegisteredHotkey>> {
+    fn three_shortcuts() -> Vec<Arc<RegisteredHotkey>> {
         [
-            ("Ctrl+Shift+.", Modifiers::CONTROL),
-            ("Cmd+Shift+.", Modifiers::SUPER),
+            ("Ctrl+Shift+C", Modifiers::CONTROL, Code::KeyC),
+            ("Ctrl+Shift+.", Modifiers::CONTROL, Code::Period),
+            ("Cmd+Shift+.", Modifiers::SUPER, Code::Period),
         ]
         .into_iter()
-        .map(|(label, modifier)| {
+        .map(|(label, modifier, key)| {
             Arc::new(RegisteredHotkey::new(shortcut::CaptureHotkey {
                 label,
-                hotkey: HotKey::new(Some(modifier | Modifiers::SHIFT), Code::Period),
+                hotkey: HotKey::new(Some(modifier | Modifiers::SHIFT), key),
             }))
         })
         .collect()
@@ -470,32 +477,38 @@ mod tests {
     }
 
     #[test]
-    fn both_shortcuts_keep_independent_press_state() {
-        let hotkeys = two_shortcuts();
-        register_missing_hotkeys(&hotkeys, |_| Ok(())).unwrap();
-        assert_ne!(
-            hotkeys[0].shortcut.hotkey.id(),
-            hotkeys[1].shortcut.hotkey.id()
-        );
+    fn all_capture_shortcuts_keep_independent_press_state() {
+        let hotkeys = three_shortcuts();
+        register_missing_hotkeys(&hotkeys, &[], |_| Ok(())).unwrap();
+        let ids: std::collections::HashSet<_> = hotkeys
+            .iter()
+            .map(|hotkey| hotkey.shortcut.hotkey.id())
+            .collect();
+        assert_eq!(ids.len(), hotkeys.len());
         for hotkey in &hotkeys {
             assert!(!hotkey.capture_on_event(HotKeyState::Released));
             for _ in 0..8 {
                 assert!(!hotkey.capture_on_event(HotKeyState::Pressed));
             }
         }
-        assert!(hotkeys[0].capture_on_event(HotKeyState::Released));
-        assert!(!hotkeys[0].capture_on_event(HotKeyState::Released));
-        assert!(hotkeys[1].capture_on_event(HotKeyState::Released));
-        assert!(!hotkeys[1].capture_on_event(HotKeyState::Released));
+        for hotkey in &hotkeys {
+            assert!(hotkey.capture_on_event(HotKeyState::Released));
+            assert!(!hotkey.capture_on_event(HotKeyState::Released));
+        }
     }
 
     #[test]
     fn partial_registration_keeps_working_shortcut_and_retries_only_failure() {
-        for failed_index in 0..2 {
-            let hotkeys = two_shortcuts();
+        for failed_index in 0..3 {
+            let hotkeys = three_shortcuts();
             let failed = &hotkeys[failed_index];
-            let working = &hotkeys[1 - failed_index];
-            let error = register_missing_hotkeys(&hotkeys, |hotkey| {
+            let working: Vec<_> = hotkeys
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| *index != failed_index)
+                .map(|(_, hotkey)| hotkey)
+                .collect();
+            let error = register_missing_hotkeys(&hotkeys, &[], |hotkey| {
                 if hotkey.id() == failed.shortcut.hotkey.id() {
                     Err("already registered by another application".to_owned())
                 } else {
@@ -507,28 +520,53 @@ mod tests {
                 "{} could not be registered",
                 failed.shortcut.label
             )));
-            assert!(error.contains(&format!("Still available: {}", working.shortcut.label)));
+            let working_labels: Vec<_> =
+                working.iter().map(|hotkey| hotkey.shortcut.label).collect();
+            assert!(error.contains(&format!("Still available: {}", working_labels.join(", "))));
             assert!(!failed.capture_on_event(HotKeyState::Pressed));
             assert!(!failed.capture_on_event(HotKeyState::Released));
-            assert!(!working.capture_on_event(HotKeyState::Pressed));
+            for hotkey in &working {
+                assert!(!hotkey.capture_on_event(HotKeyState::Pressed));
+            }
 
             let mut retried = Vec::new();
-            register_missing_hotkeys(&hotkeys, |hotkey| {
+            register_missing_hotkeys(&hotkeys, &[], |hotkey| {
                 retried.push(hotkey.id());
                 Ok(())
             })
             .unwrap();
             assert_eq!(retried, vec![failed.shortcut.hotkey.id()]);
             // Retrying the failed chord must not reset a held working chord.
-            assert!(working.capture_on_event(HotKeyState::Released));
-            assert!(!working.capture_on_event(HotKeyState::Released));
+            for hotkey in &working {
+                assert!(hotkey.capture_on_event(HotKeyState::Released));
+                assert!(!hotkey.capture_on_event(HotKeyState::Released));
+            }
             assert!(!failed.capture_on_event(HotKeyState::Released));
             assert!(!failed.capture_on_event(HotKeyState::Pressed));
             assert!(failed.capture_on_event(HotKeyState::Released));
-            register_missing_hotkeys(&hotkeys, |_| {
+            register_missing_hotkeys(&hotkeys, &[], |_| {
                 panic!("registered shortcuts must not be registered again")
             })
             .unwrap();
         }
+    }
+
+    #[test]
+    fn unresolved_period_does_not_disable_c_or_lose_its_error_on_retry() {
+        let hotkeys = vec![three_shortcuts().remove(0)];
+        let errors = vec!["Period capture shortcuts unavailable: missing period key".to_owned()];
+        let error = register_missing_hotkeys(&hotkeys, &errors, |_| Ok(())).unwrap_err();
+        assert!(error.contains(&errors[0]));
+        assert!(error.contains("Still available: Ctrl+Shift+C"));
+        assert!(!hotkeys[0].capture_on_event(HotKeyState::Pressed));
+        assert_eq!(
+            register_missing_hotkeys(&hotkeys, &errors, |_| panic!(
+                "working shortcut must not be registered again"
+            ))
+            .unwrap_err(),
+            error
+        );
+        assert!(hotkeys[0].capture_on_event(HotKeyState::Released));
+        assert!(!hotkeys[0].capture_on_event(HotKeyState::Released));
     }
 }

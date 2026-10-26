@@ -62,6 +62,7 @@ pub struct Settings {
     pub managed_image_sources: std::collections::BTreeSet<PathBuf>,
     pub library: crate::library::BrowserPreferences,
     pub editor_toolbar: Vec<String>,
+    pub editor_tools: crate::editor::ToolPreferences,
     #[serde(default)]
     pub toolbar_layout_version: u8,
 }
@@ -93,6 +94,7 @@ impl Default for Settings {
             managed_image_sources: Default::default(),
             library: Default::default(),
             editor_toolbar: crate::editor::default_toolbar(),
+            editor_tools: Default::default(),
             toolbar_layout_version: 1,
         }
     }

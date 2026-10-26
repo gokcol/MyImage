@@ -2,13 +2,15 @@
 
 Prepared 24 October 2026 (Europe/Istanbul); added to Git at the user's request on 25 October 2026. The user requested this file before deleting the previous chat. Read it as historical project context; inspect current files, Git state and UI before taking new actions. Do not repeat the completed release or cancel certification merely because those operations are described here.
 
+Project root updated on 26 October 2026 (Europe/Istanbul) to `/Users/gokcol/SWPROJECTS/Utility/MyImage`. Use this directory for subsequent work; release evidence may retain historical workspace paths.
+
 ## Current outcome
 
 The latest requested work is complete: the mirrored-display capture fix was committed, pushed, released for macOS and Windows, installed on the Mac, and submitted to Microsoft Store.
 
 | Item | Last verified state |
 | --- | --- |
-| Repository | `/Users/gokcol/Works/MyImage`, branch `main`, `gokcol/MyImage` |
+| Repository | `/Users/gokcol/SWPROJECTS/Utility/MyImage`, branch `main`, `gokcol/MyImage` |
 | Released source | `a6c95c0ec2ddc255cfa570b7aec8192582182fec` — `Resolve mirrored displays automatically during capture` |
 | App version | **2.1.0**, **build 74** |
 | GitHub release | **Public**, tag `v2.1-build74`, marked latest |
@@ -230,4 +232,4 @@ Use the current available CUA tool/documentation for UI work. The old chat's Jav
 
 ## Suggested first message in the new chat
 
-> Continue MyImage in `/Users/gokcol/Works/MyImage`. Read `docs/HANDOVER.md` first, then inspect the current Git status. Build 74 is already released and installed; Store 2.1.2.0 was submitted and awaiting certification. Preserve the existing deleted branding PNG. My next task is: …
+> Continue MyImage in `/Users/gokcol/SWPROJECTS/Utility/MyImage`. Read `docs/HANDOVER.md` first, then inspect the current Git status. Build 74 is already released and installed; Store 2.1.2.0 was submitted and awaiting certification. Preserve the existing deleted branding PNG. My next task is: …

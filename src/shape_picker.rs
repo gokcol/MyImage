@@ -28,6 +28,7 @@ impl EditorState {
         }
         self.finish_gesture(document, history);
         self.shape_kind = kind;
+        self.remember_shape_choice();
         self.shapes_3d = kind.is_3d();
         if let Some(index) = self.selected {
             let before = document.edit_state();

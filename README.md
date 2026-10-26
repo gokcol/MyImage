@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 2.0](https://github.com/gokcol/MyImage/releases/tag/v2.0-build68) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending; the Microsoft Store submission is in certification.
+[Download MyImage 2.1.1](https://github.com/gokcol/MyImage/releases/tag/v2.1.1-build75) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending. Microsoft Store packages are submitted separately for certification.
 
 MyImage opens in **Home**, with **Editor**, **Library**, **Capture**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -10,7 +10,13 @@ MyImage automatically creates and saves **`.myimage` projects**, keeping each or
 
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
 
-## New in 2.0
+## New in 2.1.1
+
+**Ctrl + Shift + C** starts capture on both macOS and Windows. The existing **Ctrl + Shift + .** shortcut remains available; macOS also supports **Command + Shift + .**.
+
+Drawing tools remember their last-used styles and colors independently, including arrow endpoints, line patterns and text appearance, when switching tools, opening another image and restarting MyImage. Selecting existing artwork does not replace your drawing defaults.
+
+## Interface and editing
 
 Arrow and shape selections have a light, icon-only shortcut strip: color, vertical stroke-weight slider, line pattern, and either arrow endpoints or shape fill/outline. Popups use available space around the selection; advanced properties remain in the right inspector.
 
@@ -37,7 +43,7 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 2.1 uses MSIX version 2.1.2.0, which preserves upgrade ordering
+[privacy policy](PRIVACY.md). MyImage 2.1.1 uses MSIX version 2.1.3.0, which preserves upgrade ordering
 after earlier 1.x Store packages.
 
 ## Run
@@ -101,7 +107,7 @@ Failed builds/signing/packaging do not trigger cleanup. A failed backup stops cl
 
 Capture home has visual **Region**, **Multi-region**, **Window**, **Full screen**, and **Scrolling** cards, a display selector, **Off / 3s / 5s / 10s** timer chips, an **Include pointer** toggle, and a prominent **Capture Now** panel. Rounded and elliptical region choices are no longer shown. Settings persist between launches.
 
-The built-in **Capture Now** is also available from the menu bar/system tray, **Ctrl + Shift + .**, and on macOS **Command + Shift + .**. Click the menu-bar/tray icon to open the 560 × 292 Pearl Compact panel: a shared mode selector above display, Editor/Clipboard destination, pointer, capture-on-release and delay controls grouped on the left, with a large red circular Capture button on the right. Its lighter graphite shell and violet controls match the Pearl Compact design independently of the editor theme. Escape or clicking outside dismisses the panel. **Open Editor**, **Library**, and the **More settings** icon provide direct navigation. Right-click retains the native menu; keyboard capture shortcuts still start capture directly. **Keep ready in background** hides the app while these entry points remain available. The header retains **Open…** and **Open project…**; Editor provides **Save as…**, **Export…**, and **Save project**.
+The built-in **Capture Now** is also available from the menu bar/system tray, **Ctrl + Shift + C**, **Ctrl + Shift + .**, and on macOS **Command + Shift + .**. Click the menu-bar/tray icon to open the 560 × 292 Pearl Compact panel: a shared mode selector above display, Editor/Clipboard destination, pointer, capture-on-release and delay controls grouped on the left, with a large red circular Capture button on the right. Its lighter graphite shell and violet controls match the Pearl Compact design independently of the editor theme. Escape or clicking outside dismisses the panel. **Open Editor**, **Library**, and the **More settings** icon provide direct navigation. Right-click retains the native menu; keyboard capture shortcuts still start capture directly. **Keep ready in background** hides the app while these entry points remain available. The header retains **Open…** and **Open project…**; Editor provides **Save as…**, **Export…**, and **Save project**.
 
 Choose **After capture → Editor / Clipboard** in Capture settings, or change **To: Editor / Clipboard** in the Capture Now controls. **Clipboard** copies full-resolution pixels for pasting into another app, saves a PNG in Library, and closes the capture overlay without opening or replacing the Editor. Your existing document, unsaved edits and undo history stay intact. This also works for full-screen, window and scrolling captures; scrolling finishes with **Finish & copy**. The destination is remembered for later captures and hotkeys. Completion appears in MyImage's status bar and tray tooltip; clipboard failure retains the image and offers **Retry copy** or **Open capture in Editor**. The Editor destination asks about unsaved work before replacing it with the completed capture.
 
@@ -111,7 +117,7 @@ Choose **After capture → Editor / Clipboard** in Capture settings, or change *
 4. **Scrolling:** click a window or select its scrolling area, then choose **Start scrolling**. Scroll down yourself in small steps, keeping at least half the previous content visible; MyImage collects the overlapping sections automatically. For multi-page PDFs, enable the viewer's **continuous scrolling** mode rather than jumping between pages. The controller shows a preview and section count, **Pause / Resume**, **Finish & edit**, and **Cancel**. Selected areas retain their width; fixed top/bottom bars are included once instead of blocking the join. Whole-window captures trim fixed chrome. If alignment fails, scroll back a little and Resume; accepted sections remain intact. If no extra section was captured, Finish explains this and offers **Resume** or **Keep visible area** instead of silently saving the first screen. Keep the window size and zoom unchanged. Vertical scrolling is supported; MyImage does not scroll the target for you, and horizontal scrolling is not implemented.
 5. Captures save as PNG in the dated library and go to the chosen destination: Editor or Clipboard. Include pointer uses the native cursor with its hotspot; turn it off for clean screenshots. Scrolling capture omits the pointer to keep it out of stitched content. Scrolling captures are bounded to 32,768 pixels per side and 100 megapixels.
 
-On macOS, MyImage finds the typing key that produces `.` without modifiers in the layout active at startup and registers both shortcut combinations. Windows uses Control + Shift with `VK_OEM_PERIOD`. Shortcuts trigger on key release to avoid repeat captures.
+On macOS, MyImage finds the typing keys that produce `c` and `.` without modifiers in the layout active at startup. Control + Shift + C uses the C key; Control + Shift + . and Command + Shift + . use the period key. Windows uses Control + Shift with `VK_C` or `VK_OEM_PERIOD`. Shortcuts trigger on key release to avoid repeat captures.
 
 The chosen display is used for shortcut captures, independently of the mouse position. If it is unavailable when displays are refreshed, MyImage selects the primary display or the first available display. Use **Refresh displays** after changing your monitor setup.
 
@@ -375,7 +381,7 @@ Closing the main window or selecting **Background** keeps MyImage running in the
 
 If another application owns a capture shortcut, MyImage identifies the unavailable chord. Any successfully registered shortcut keeps working, as do the button and tray menu. Free the conflicting shortcut in the other application and select **Retry unavailable shortcuts**; this only retries failed registrations.
 
-On macOS, restart MyImage after changing keyboard layouts. If the active layout has no supported unmodified period key or supplies no readable layout data, MyImage reports that the shortcut is unavailable; it does not register an extra fallback chord. The button and tray menu remain available.
+On macOS, restart MyImage after changing keyboard layouts. Each shortcut character is resolved independently: if the layout has no supported unmodified C or period key, MyImage reports the affected shortcuts as unavailable while keeping the other resolved shortcuts active. It never substitutes an unrelated physical key. The button and tray menu remain available even when the layout provides no readable key data.
 
 On macOS, an explicit capture action lets ScreenCaptureKit perform its authorization check and may open a system consent dialog. **Allow screen capture…**, when shown, also requests access. Enable MyImage under **System Settings → Privacy & Security → Screen & System Audio Recording** (called **Screen Recording** on some releases), then quit and reopen the same app bundle if macOS requests it. Running through `cargo run` can associate access with the terminal or launcher; use the app bundle for normal testing. Startup and display enumeration do not request permission. The permission indicator is a hint; a successful capture is the end-to-end check.
 
