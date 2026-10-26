@@ -4,7 +4,44 @@ Prepared 24 October 2026 (Europe/Istanbul); added to Git at the user's request o
 
 Project root updated on 26 October 2026 (Europe/Istanbul) to `/Users/gokcol/SWPROJECTS/Utility/MyImage`. Use this directory for subsequent work; release evidence may retain historical workspace paths.
 
-## Current outcome
+<!-- CURRENT_RELEASE_START -->
+## Current outcome — 26 October 2026
+
+Project: `/Users/gokcol/SWPROJECTS/Utility/MyImage`, branch `main`. The old workspace path is stale; pass the new directory explicitly to shell commands.
+
+| Item | Latest verified state |
+| --- | --- |
+| Released source | `b1e07218b2f14cf388c4ac28754a0b047bfe2514` |
+| App | **2.1.2 build 76** |
+| GitHub | Public and latest, [v2.1.2-build76](https://github.com/gokcol/MyImage/releases/tag/v2.1.2-build76), published 26 October 2026 at 20:23 Istanbul |
+| Mac | `/Applications/MyImage.app` updated and reopened; source, installed app, ZIP and DMG payloads match |
+| Mac signing | Developer ID signed, Apple notarized, stapled, Gatekeeper accepted for app and DMG; build 75 rollback retained |
+| Windows | x64 Setup and portable ZIP published; unsigned; installer lifecycle passed |
+| Store package | New **2.1.4.0** verified, ready for upload |
+| Store submission | **Not yet updated to build 76**: saved/Validated **2.1.3.0** remains In draft; the Mac screen locked before the new upload |
+| Remaining work | User asked to unlock Mac; then upload 2.1.4.0, save prepared listing/reviewer notes and submit for certification |
+
+The user reproduced main-canvas flicker by capturing a window, adding an arrow, and both dragging/reshaping it and changing color/width/style. Contained gestures now retain the original screenshot texture; canonical autosave preserves workspace brightness while input remains blocked. Real canvas expansion retains its fixed sampling frame until release. Build 76 also includes build 75's **Ctrl+Shift+C** capture shortcut on macOS/Windows and remembered per-tool styles/colors across reselection, images and restarts. Existing capture shortcuts remain.
+
+Formatting, strict Clippy and **542 tests** passed (**527 application + 15 packaging; 23 ignored**). Persistent-frame regressions cover arrow draw/move/resize/bend/style, boundary crossing, saving appearance and blocked/resumed edits. Independent code and artifact reviews passed. All four exact-source workflows passed: native macOS `40365679103`, Windows installer `40366073789`, real Store `40366078963`, test MSIX lifecycle `40365679085`. Interactive Windows capture/clipboard/device validation remains pending.
+
+Mac notarization IDs: app `9a0c4f67-c62e-44c7-91fa-f370064a6178`, DMG `ee9a8141-47a9-47d0-be7b-0a95e04f8e68`, both Accepted. The existing **MyPDF** Keychain profile initially returned a transient lookup failure, then authenticated and completed both submissions without credential changes. Reuse it; no replacement credentials were created.
+
+Current evidence:
+
+- `dist/release-v2.1.2-build76/release-validation.json`, `macos-validation.json`, release notes, signing/notarization/install/check logs.
+- `dist/windows-v2.1.2-build76/windows-validation.json` and artifacts.
+- `dist/msix-v2.1.2-build76/artifact-validation.json` and **MyImage-2.1.4.0-store-x64.msix** (SHA-256 `3634301a5fd4a7a8573e6931dd40479054eda77b12717dcc5087a87060d26619`).
+- Store text prepared in `dist/release-v2.1.2-build76/store-whats-new.txt` and `store-reviewer-notes.txt`. Existing relevant reviewer instructions are preserved in the merged text. Read/recheck live state before resuming.
+
+Store update/final submission is already authorized. Product **9PL3HWB23J38**, submission **1152921505702179656**, identity `OrhanGkl.MyImageOG`, publisher `CN=A9F0208B-CC43-472D-AE82-9FE4556DC935`. Preserve pricing/markets/ratings/capabilities/startup and publish-after-approval preferences. Firefox native UI automation cannot operate while the Mac screen is locked; do not alter security settings. If the upload link cannot open the chooser, the user previously opened it manually, after which exact-path selection worked. Do not claim Microsoft signing or availability before certification. Update published `release-validation.json` with the final observed Store state after submission.
+
+Build 75 remains a historical public release. Its **2.1.3.0** package replaced 2.1.2.0, but was held In draft for this flicker fix. Do not overwrite prior release tags or binaries. The unrelated deletion `assets/branding/myimage-calico-logo-v1.png` remains deliberately unstaged.
+
+The sections below retain historical build-74 details and operating procedures. Use this current block and release reports for current versions and status.
+<!-- CURRENT_RELEASE_END -->
+
+## Historical build 74 outcome
 
 The latest requested work is complete: the mirrored-display capture fix was committed, pushed, released for macOS and Windows, installed on the Mac, and submitted to Microsoft Store.
 
