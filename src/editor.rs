@@ -1045,10 +1045,22 @@ impl EditorState {
             if ui.checkbox(&mut draft.locked, "Lock aspect ratio").changed() && draft.locked {
                 draft.ratio = draft.size[0] as f64 / draft.size[1] as f64;
             }
-            if ui.small_button("Use unscaled size").clicked() {
-                draft.size = document.geometry.rotated_size(original);
-                draft.ratio = draft.size[0] as f64 / draft.size[1] as f64;
-            }
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Presets:");
+                for percent in [25, 50, 125, 150, 100] {
+                    let label = if percent == 100 { "Set to original".to_owned() } else { format!("{percent}%") };
+                    let size = canvas_menu::scaled_size(document, percent, false);
+                    let mut geometry = document.geometry;
+                    geometry.resize = Some(size);
+                    if ui.add_enabled(geometry.validate(original).is_ok(), egui::Button::new(label))
+                        .on_hover_text("Percentage of the unscaled image; keeps the current crop and rotation. Apply resize to confirm.")
+                        .clicked() {
+                        draft.size = size;
+                        draft.ratio = size[0] as f64 / size[1] as f64;
+                    }
+                }
+            });
             candidate.resize = (draft.size != candidate.rotated_size(original)).then_some(draft.size);
             let validation = candidate.validate(original);
             ui.add_space(14.0);

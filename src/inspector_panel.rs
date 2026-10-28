@@ -482,7 +482,7 @@ pub(super) fn dock<R>(
 mod tests {
     use super::*;
     use crate::{
-        document::{Document, EditHistory},
+        document::{AnnotationKind, Document, EditHistory},
         editor::{EditorState, Tool},
     };
     use egui::Color32;
@@ -1198,15 +1198,66 @@ mod tests {
             ("Set to original", [1200, 800]),
         ] {
             open_menu(&mut w);
-            w.click("Resize presets");
+            let menu = w.settle();
+            assert!(
+                !menu
+                    .platform_output
+                    .accesskit_update
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("Resize presets"))
+            );
+            w.click("Resize image…");
+            let before = w.document.edit_state();
             w.click(label);
+            assert_eq!(w.editor.resize.as_ref().unwrap().size, size);
+            assert_eq!(w.document.edit_state(), before);
+            w.click("Apply resize");
+            assert!(w.editor.resize.is_none());
             assert_eq!(w.document.output_size(), size);
         }
         open_menu(&mut w);
         w.click("Resize image…");
         assert!(w.editor.resize.is_some());
+        let before_cancel = w.document.edit_state();
+        w.click("25%");
         w.click("Cancel");
         assert!(w.editor.resize.is_none());
+        assert_eq!(w.document.edit_state(), before_cancel);
+        // The icon groups share rows and retain their original actions.
+        open_menu(&mut w);
+        let output = w.settle();
+        let nodes = output.platform_output.accesskit_update.unwrap().nodes;
+        let bounds = |label| {
+            nodes
+                .iter()
+                .find_map(|(_, n)| (n.label() == Some(label)).then(|| n.bounds()).flatten())
+                .unwrap()
+        };
+        for labels in [
+            vec!["Rotate left", "Rotate right", "Rotate 180°"],
+            vec!["Flip horizontal", "Flip vertical"],
+            vec!["Select all", "Select all annotations", "Deselect"],
+        ] {
+            let row = bounds(labels[0]);
+            for label in &labels[1..] {
+                assert!((bounds(label).y0 - row.y0).abs() < 1.0);
+            }
+        }
+        for (label, turns) in [("Rotate left", 3), ("Rotate right", 0), ("Rotate 180°", 2)] {
+            open_menu(&mut w);
+            w.click(label);
+            assert_eq!(w.document.geometry.quarter_turns, turns);
+        }
+        for label in ["Flip horizontal", "Flip vertical"] {
+            open_menu(&mut w);
+            let before = w.document.geometry;
+            w.click(label);
+            assert_ne!(w.document.geometry, before);
+            assert!(w.history.undo(&mut w.document));
+            assert_eq!(w.document.geometry, before);
+        }
         let quad = w.source_quad();
         let rect = quad.iter().fold(Rect::NOTHING, |r, (p, _)| {
             r.union(Rect::from_min_max(*p, *p))
@@ -1228,5 +1279,25 @@ mod tests {
         }]);
         assert!(w.editor.resize.is_some());
         assert_eq!(w.document.edit_state(), before);
+        w.click("Cancel");
+        w.document.annotations = vec![
+            crate::markup_tests::object(AnnotationKind::Rectangle, [10., 10.], [60., 60.]),
+            crate::markup_tests::object(AnnotationKind::Arrow, [80., 80.], [180., 160.]),
+        ];
+        w.history = EditHistory::new(w.document.edit_state());
+        let before_selection = w.document.edit_state();
+        open_menu(&mut w);
+        w.click("Select all");
+        assert!(w.editor.area.is_some());
+        open_menu(&mut w);
+        w.click("Select all annotations");
+        assert_eq!(w.editor.selected_indices(&w.document), vec![0, 1]);
+        assert!(w.editor.area.is_none());
+        open_menu(&mut w);
+        w.click("Deselect");
+        assert!(w.editor.selected_indices(&w.document).is_empty());
+        assert!(w.editor.area.is_none());
+        assert_eq!(w.document.edit_state(), before_selection);
+        assert!(!w.history.can_undo());
     }
 }

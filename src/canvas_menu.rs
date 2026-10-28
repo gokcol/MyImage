@@ -9,6 +9,7 @@ pub(super) enum MenuIcon {
     Rotate(bool),
     Flip(bool),
     Paste,
+    Annotations,
 }
 fn paint(ui: &egui::Ui, center: Pos2, icon: MenuIcon, color: Color32) {
     let p = ui.painter();
@@ -51,6 +52,27 @@ fn paint(ui: &egui::Ui, center: Pos2, icon: MenuIcon, color: Color32) {
                     stroke,
                 ));
             }
+        }
+        MenuIcon::Annotations => {
+            inspector_widgets::paint_glyph(
+                p,
+                center,
+                inspector_widgets::Glyph::Rectangle,
+                color,
+                18.,
+            );
+            let opacity = if ui.is_enabled() { 1. } else { 0.35 };
+            let palette = crate::appearance::palette(ui.ctx());
+            p.rect_filled(
+                Rect::from_center_size(center + Vec2::new(-3., -1.), Vec2::splat(5.)),
+                1.,
+                palette.accent.gamma_multiply(opacity),
+            );
+            p.circle_filled(
+                center + Vec2::new(3., 1.5),
+                2.5,
+                palette.ginger.gamma_multiply(opacity),
+            );
         }
         MenuIcon::Paste => {
             p.rect_stroke(
@@ -103,7 +125,15 @@ pub(super) fn item(
     })
     .inner
 }
-fn scaled_size(document: &Document, percent: u32, relative: bool) -> [u32; 2] {
+fn icon_item(ui: &mut egui::Ui, label: &str, icon: MenuIcon) -> egui::Response {
+    let response = ui.add_sized([28., 24.], egui::Button::new(""));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    paint(ui, response.rect.center(), icon, ui.visuals().text_color());
+    response.on_hover_text(label)
+}
+pub(super) fn scaled_size(document: &Document, percent: u32, relative: bool) -> [u32; 2] {
     let base = if relative {
         document.output_size()
     } else {
@@ -177,56 +207,6 @@ impl EditorState {
                 }
             }
         });
-        let menu = ui.menu_button("     Resize presets", |ui| {
-            for percent in [25, 50, 125, 150, 100] {
-                let label = if percent == 100 {
-                    "Set to original".to_owned()
-                } else {
-                    format!("{percent}%")
-                };
-                let geometry = resize_geometry(document, scaled_size(document, percent, false));
-                if item(
-                    ui,
-                    &label,
-                    MenuIcon::App(if percent == 100 {
-                        DialogIcon::Refresh
-                    } else {
-                        DialogIcon::Resize
-                    }),
-                    geometry.validate(original_size(document)).is_ok(),
-                )
-                .on_hover_text(
-                    "Percentage of the unscaled image; keeps the current crop and rotation",
-                )
-                .clicked()
-                {
-                    self.quick_resize(document, history, percent, false);
-                    ui.close();
-                }
-            }
-            ui.separator();
-            if item(
-                ui,
-                "Detailed resize…",
-                MenuIcon::App(DialogIcon::Settings),
-                true,
-            )
-            .on_hover_text("Command/Ctrl + Shift + R")
-            .clicked()
-            {
-                self.open_resize(document, history);
-                ui.close();
-            }
-        });
-        menu.response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Resize presets")
-        });
-        paint(
-            ui,
-            menu.response.rect.left_center() + Vec2::new(13., 0.),
-            MenuIcon::App(DialogIcon::Resize),
-            ui.visuals().text_color(),
-        );
     }
     pub fn image_menu(
         &mut self,
@@ -261,30 +241,33 @@ impl EditorState {
             });
         }
         self.quick_resize_menu(ui, document, history);
-        if item(ui, "Rotate left", MenuIcon::Rotate(false), true).clicked() {
-            ui.close();
-            self.rotate(document, history, false);
-        }
-        if item(ui, "Rotate right", MenuIcon::Rotate(true), true).clicked() {
-            ui.close();
-            self.rotate(document, history, true);
-        }
-        if item(ui, "Rotate 180°", MenuIcon::App(DialogIcon::Refresh), true).clicked() {
-            self.finish_gesture(document, history);
-            let mut geometry = document.geometry;
-            geometry.quarter_turns = (geometry.quarter_turns + 2) % 4;
-            self.apply_geometry(document, history, geometry);
-            ui.close();
-        }
-        ui.separator();
-        if item(ui, "Flip horizontal", MenuIcon::Flip(true), true).clicked() {
-            self.flip(document, history, true);
-            ui.close();
-        }
-        if item(ui, "Flip vertical", MenuIcon::Flip(false), true).clicked() {
-            self.flip(document, history, false);
-            ui.close();
-        }
+        ui.horizontal(|ui| {
+            ui.label("Rotate:");
+            if icon_item(ui, "Rotate left", MenuIcon::Rotate(false)).clicked() {
+                self.rotate(document, history, false);
+                ui.close();
+            }
+            if icon_item(ui, "Rotate right", MenuIcon::Rotate(true)).clicked() {
+                self.rotate(document, history, true);
+                ui.close();
+            }
+            if icon_item(ui, "Rotate 180°", MenuIcon::App(DialogIcon::Refresh)).clicked() {
+                self.finish_gesture(document, history);
+                let mut geometry = document.geometry;
+                geometry.quarter_turns = (geometry.quarter_turns + 2) % 4;
+                self.apply_geometry(document, history, geometry);
+                ui.close();
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Flip:");
+            for (horizontal, label) in [(true, "Flip horizontal"), (false, "Flip vertical")] {
+                if icon_item(ui, label, MenuIcon::Flip(horizontal)).clicked() {
+                    self.flip(document, history, horizontal);
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
         if item(
             ui,
@@ -353,22 +336,49 @@ impl EditorState {
         self.image_menu(ui, document, history);
         ui.separator();
         self.edit_actions(ui, document, history);
-        self.pixel_selection_commands(ui, document, history);
-        if item(
-            ui,
-            "Select all annotations",
-            MenuIcon::Glyph(inspector_widgets::Glyph::All),
-            !document.annotations.is_empty(),
-        )
-        .clicked()
-        {
-            self.finish_gesture(document, history);
-            self.tool = Tool::Select;
-            self.inspector.select(InspectorPanel::Styles);
-            self.set_selection((0..document.annotations.len()).collect(), document);
-            self.focus_canvas = true;
-            ui.close();
-        }
+        ui.horizontal(|ui| {
+            ui.label("Select:");
+            if icon_item(
+                ui,
+                "Select all",
+                MenuIcon::Glyph(inspector_widgets::Glyph::All),
+            )
+            .clicked()
+            {
+                self.select_all_image(document, history);
+                ui.close();
+            }
+            if ui
+                .add_enabled_ui(!document.annotations.is_empty(), |ui| {
+                    icon_item(ui, "Select all annotations", MenuIcon::Annotations)
+                })
+                .inner
+                .clicked()
+            {
+                self.finish_gesture(document, history);
+                self.deselect_pixels();
+                self.tool = Tool::Select;
+                self.inspector.select(InspectorPanel::Styles);
+                self.set_selection((0..document.annotations.len()).collect(), document);
+                self.focus_canvas = true;
+                ui.close();
+            }
+            if ui
+                .add_enabled_ui(self.area.is_some() || self.selected.is_some(), |ui| {
+                    icon_item(
+                        ui,
+                        "Deselect",
+                        MenuIcon::Glyph(inspector_widgets::Glyph::Clear),
+                    )
+                })
+                .inner
+                .clicked()
+            {
+                self.deselect_pixels();
+                self.focus_canvas = true;
+                ui.close();
+            }
+        });
         ui.separator();
         if item(ui, "Fit image", MenuIcon::App(DialogIcon::Fit), true).clicked() {
             self.fit = true;

@@ -125,39 +125,6 @@ impl EditorState {
         self.clipboard_status = None;
     }
 
-    pub(super) fn pixel_selection_commands(
-        &mut self,
-        ui: &mut egui::Ui,
-        document: &mut Document,
-        history: &mut EditHistory,
-    ) {
-        if canvas_menu::item(
-            ui,
-            "Select all",
-            canvas_menu::MenuIcon::Glyph(inspector_widgets::Glyph::All),
-            true,
-        )
-        .on_hover_text("Select the entire visible image (Command/Ctrl + A)")
-        .clicked()
-        {
-            self.select_all_image(document, history);
-            ui.close();
-        }
-        if canvas_menu::item(
-            ui,
-            "Deselect",
-            canvas_menu::MenuIcon::Glyph(inspector_widgets::Glyph::Clear),
-            self.area.is_some() || self.selected.is_some(),
-        )
-        .on_hover_text("Clear the selection (Escape)")
-        .clicked()
-        {
-            self.deselect_pixels();
-            self.focus_canvas = true;
-            ui.close();
-        }
-    }
-
     pub(super) fn area_bounds(&self, document: &Document) -> Option<Rect> {
         self.selected
             .and_then(|i| document.annotations.get(i))
