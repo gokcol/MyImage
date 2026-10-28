@@ -15,6 +15,9 @@ use tiny_skia::{FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, T
 
 use crate::document::{Annotation, AnnotationKind, Document, Point};
 
+#[path = "text_path_render.rs"]
+mod text_path_render;
+
 const TEXT_ATLAS_SIDE: usize = 4096;
 const MAX_TEXT_RASTER_PIXELS: usize = 4 * 1024 * 1024;
 const MAX_TEXT_CACHE_BYTES: usize = 8 * 1024 * 1024;
@@ -503,7 +506,16 @@ fn polygon_mesh(points: &[Pos2], color: Color32) -> egui::Mesh {
 pub fn annotation_bounds(annotation: &Annotation) -> Rect {
     match annotation.kind {
         AnnotationKind::Text => text_raster(annotation)
-            .map(|raster| raster.bounds.translate(pos(annotation.start).to_vec2()))
+            .map(|raster| {
+                let mut bounds = raster.bounds;
+                if let Some(path) = &annotation.text_style.path {
+                    bounds = bounds.union(
+                        Rect::from_points(&path.geometry().points)
+                            .expand(f32::from(path.stroke) * 0.5),
+                    );
+                }
+                bounds.translate(pos(annotation.start).to_vec2())
+            })
             .unwrap_or_else(|_| {
                 Rect::from_min_size(pos(annotation.start), egui::vec2(240.0, 24.0))
             }),
@@ -833,6 +845,20 @@ fn annotation_shapes(
                 }
             }
             AnnotationKind::Text | AnnotationKind::Step | AnnotationKind::Callout => {
+                if let Some(path) = annotation.text_style.path.as_ref().filter(|p| p.visible) {
+                    let [r, g, b, a] = path.color;
+                    shapes.push(Shape::line(
+                        path.geometry()
+                            .points
+                            .into_iter()
+                            .map(|p| p + pos(annotation.start).to_vec2())
+                            .collect(),
+                        Stroke::new(
+                            f32::from(path.stroke),
+                            Color32::from_rgba_unmultiplied(r, g, b, a),
+                        ),
+                    ));
+                }
                 // Both preview and export use this canonical pixel raster. Host
                 // DPI, editor zoom, and UI theme cannot alter text placement.
                 match text_raster(annotation) {
@@ -1009,6 +1035,8 @@ fn annotation_shapes(
 
 /// Flatten a copy for export. The original and editable annotations stay intact.
 pub fn flatten(document: &Document) -> Result<RgbaImage, String> {
+    let resolved = crate::connectors::resolved(document);
+    let document = resolved.as_ref();
     crate::document::validate_document(document)?;
     if document.geometry.canvas.is_some() {
         return flatten(&crate::canvas::render_document(document)?);
@@ -1516,6 +1544,7 @@ fn paint_text_transformed(
     annotation: &Annotation,
     transform: Transform,
 ) -> Result<(), String> {
+    text_path_render::paint_path(overlay, annotation, transform);
     let raster = text_raster(annotation)?;
     if raster.alpha.is_empty() {
         return Ok(());
@@ -1925,6 +1954,7 @@ fn ink_preview_texture(
 fn build_text_raster(annotation: &Annotation) -> Result<TextRaster, String> {
     FONTS.with_borrow_mut(|fonts| {
         fonts.begin_pass(TEXT_ATLAS_SIDE, TEXT_ALPHA);
+        if annotation.kind == AnnotationKind::Text && annotation.text_style.path.is_some() { return text_path_render::raster(fonts, annotation); }
         let (galley, shift) = text_layout(fonts, annotation)?;
         // egui reuses occupied atlas slots if a single layout overflows. Detect
         // it before reading any texels, rather than exporting corrupted glyphs.
@@ -2069,6 +2099,7 @@ fn preview_texture(
 }
 
 fn paint_text(overlay: &mut Pixmap, annotation: &Annotation) -> Result<(), String> {
+    text_path_render::paint_path(overlay, annotation, Transform::identity());
     let raster = text_raster(annotation)?;
     let rect = Rect::from_min_size(
         text_anchor(annotation) + raster.offset,

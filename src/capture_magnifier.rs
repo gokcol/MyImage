@@ -159,6 +159,79 @@ fn place_card(pointer: Pos2, size: Vec2, available: Rect) -> Rect {
     Rect::from_min_size(top_left, size)
 }
 
+/// A fixed 13×13 pixel grid makes the exact source pixel visible even at fit-to-window zoom.
+pub fn paint_color(
+    painter: &egui::Painter,
+    pointer: Pos2,
+    bounds: Rect,
+    viewport: Rect,
+    image: &image::RgbaImage,
+) {
+    let Some(sample) = Sample::at(pointer, bounds, [image.width(), image.height()]) else {
+        return;
+    };
+    let card = place_card(pointer, Vec2::new(120., 145.), viewport.shrink(6.));
+    let lens = Rect::from_min_size(card.min + Vec2::new(8., 7.), Vec2::splat(104.));
+    painter.rect_filled(card, 7., crate::appearance::palette(painter.ctx()).navy);
+    for y in 0..13 {
+        for x in 0..13 {
+            let cell = Rect::from_min_size(
+                lens.min + Vec2::new(x as f32 * 8., y as f32 * 8.),
+                Vec2::splat(8.),
+            );
+            painter.rect_filled(
+                cell,
+                0.,
+                if (x + y) % 2 == 0 {
+                    Color32::WHITE
+                } else {
+                    Color32::from_gray(205)
+                },
+            );
+            let sx = i64::from(sample.pixel[0]) + x - 6;
+            let sy = i64::from(sample.pixel[1]) + y - 6;
+            if sx >= 0
+                && sy >= 0
+                && let Some(p) = image.get_pixel_checked(sx as u32, sy as u32)
+            {
+                painter.rect_filled(
+                    cell,
+                    0.,
+                    Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]),
+                );
+            }
+        }
+    }
+    let center = Rect::from_center_size(lens.center(), Vec2::splat(8.));
+    painter.rect_stroke(
+        center.expand(1.),
+        0.,
+        Stroke::new(3., Color32::BLACK),
+        egui::StrokeKind::Outside,
+    );
+    painter.rect_stroke(
+        center.expand(1.),
+        0.,
+        Stroke::new(1., Color32::WHITE),
+        egui::StrokeKind::Outside,
+    );
+    let [r, g, b, _] = image.get_pixel(sample.pixel[0], sample.pixel[1]).0;
+    painter.text(
+        Pos2::new(card.center().x, lens.bottom() + 10.),
+        egui::Align2::CENTER_CENTER,
+        format!("#{r:02X}{g:02X}{b:02X}"),
+        egui::FontId::monospace(11.),
+        Color32::WHITE,
+    );
+    painter.text(
+        Pos2::new(card.center().x, lens.bottom() + 24.),
+        egui::Align2::CENTER_CENTER,
+        format!("{}, {}", sample.pixel[0], sample.pixel[1]),
+        egui::FontId::proportional(10.),
+        Color32::WHITE,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

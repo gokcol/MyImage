@@ -72,6 +72,8 @@ pub(super) fn erase(
                 piece.points = points;
                 sync_bounds(&mut piece);
                 result.push(piece);
+                // Only the first surviving fragment retains the connection identity.
+                style.layer.object_id = None;
             }
         }
         if point_count > crate::document::MAX_TOTAL_STROKE_POINTS {

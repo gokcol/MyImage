@@ -62,7 +62,9 @@ pub struct Settings {
     pub managed_image_sources: std::collections::BTreeSet<PathBuf>,
     pub library: crate::library::BrowserPreferences,
     pub editor_toolbar: Vec<String>,
+    pub editor_tool_order: Vec<String>,
     pub editor_tools: crate::editor::ToolPreferences,
+    pub editor_inspector: crate::editor::InspectorPreferences,
     #[serde(default)]
     pub toolbar_layout_version: u8,
 }
@@ -94,8 +96,10 @@ impl Default for Settings {
             managed_image_sources: Default::default(),
             library: Default::default(),
             editor_toolbar: crate::editor::default_toolbar(),
+            editor_tool_order: Vec::new(),
             editor_tools: Default::default(),
-            toolbar_layout_version: 1,
+            editor_inspector: Default::default(),
+            toolbar_layout_version: 2,
         }
     }
 }
@@ -268,7 +272,7 @@ mod tests {
         let legacy: Settings = serde_json::from_str(r#"{"include_pointer":true}"#).unwrap();
         assert_eq!(legacy.pointer_style, PointerStyle::Standard);
         assert_eq!(legacy.toolbar_layout_version, 0);
-        assert_eq!(Settings::default().toolbar_layout_version, 1);
+        assert_eq!(Settings::default().toolbar_layout_version, 2);
         for pointer_style in PointerStyle::ALL {
             let settings = Settings {
                 pointer_style,

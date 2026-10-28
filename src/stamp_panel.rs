@@ -975,7 +975,9 @@ mod tests {
                 prompt: "Test".into(),
             },
         ] {
-            for timing in 0..3 {
+            for (timing, pinned) in
+                (0..3).flat_map(|timing| [true, false].map(|pinned| (timing, pinned)))
+            {
                 let ctx = egui::Context::default();
                 crate::appearance::apply(&ctx);
                 let texture = ctx.load_texture(
@@ -987,6 +989,11 @@ mod tests {
                     tool: Tool::Stamp,
                     ..Default::default()
                 };
+                editor.set_inspector_preferences(InspectorPreferences {
+                    expanded: true,
+                    pinned,
+                    ..Default::default()
+                });
                 editor.stamps.loaded = true;
                 editor.stamps.category = "Test".into();
                 editor

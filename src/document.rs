@@ -26,7 +26,7 @@ use std::{
 };
 
 const MAGIC: &[u8; 8] = b"MYIMAGE\0";
-const VERSION: u32 = 22;
+const VERSION: u32 = 23;
 const HEADER_BYTES: u64 = 24;
 const MAX_PROJECT_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const MAX_METADATA_BYTES: usize = 48 * 1024 * 1024;
@@ -155,6 +155,8 @@ pub const MAX_LAYER_NAME_BYTES: usize = 256;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct LayerSettings {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object_id: Option<u64>,
     pub name: String,
     pub hidden: bool,
     pub locked: bool,
@@ -324,6 +326,7 @@ pub(crate) fn validate_annotations(annotations: &[Annotation]) -> Result<(), Str
     if annotations.len() > MAX_ANNOTATIONS {
         return Err("A project can contain at most 10,000 annotations.".into());
     }
+    let mut object_ids = std::collections::BTreeSet::new();
     let mut group_settings = std::collections::BTreeMap::new();
     let mut text_bytes = 0;
     let mut stamp_bytes = 0;
@@ -332,6 +335,14 @@ pub(crate) fn validate_annotations(annotations: &[Annotation]) -> Result<(), Str
     let mut stroke_points = 0;
     for annotation in annotations {
         validate_annotation(annotation)?;
+        if let Some(id) = annotation.layer.object_id
+            && (id == 0 || !object_ids.insert(id))
+        {
+            return Err("Object identities must be unique and nonzero.".into());
+        }
+        if annotation.group_layer.object_id.is_some() {
+            return Err("Object identities belong to individual layers.".into());
+        }
         fill_runs += annotation.fill_region.as_ref().map_or(0, |r| r.runs.len())
             + annotation.pixel_mask.as_ref().map_or(0, |r| r.runs.len());
         if fill_runs > crate::fill::MAX_TOTAL_RUNS {
@@ -370,6 +381,12 @@ pub(crate) fn validate_annotations(annotations: &[Annotation]) -> Result<(), Str
 }
 
 pub(crate) fn validate_annotation(annotation: &Annotation) -> Result<(), String> {
+    if let Some(path) = &annotation.text_style.path {
+        if annotation.kind != AnnotationKind::Text {
+            return Err("Text paths require a Text annotation.".into());
+        }
+        path.validate()?;
+    }
     if annotation.kind != AnnotationKind::Callout && !annotation.callout_style.is_default() {
         return Err("Callout shapes require a callout object.".into());
     }
@@ -518,6 +535,8 @@ pub(crate) fn validate_annotation(annotation: &Annotation) -> Result<(), String>
 /// Atomically replaces a project only after its complete contents are flushed.
 /// A failed validation, encoding, write, or publish leaves an existing file intact.
 pub fn save_project(document: &Document, destination: &Path) -> Result<(), String> {
+    let resolved = crate::connectors::resolved(document);
+    let document = resolved.as_ref();
     let parent = destination
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -687,6 +706,16 @@ pub fn load_project(path: &Path) -> Result<Document, String> {
         serde_json::from_slice(&json)
             .map_err(|error| format!("Cannot read project metadata: {error}"))?
     };
+    if version < 23
+        && metadata.annotations.iter().any(|a| {
+            a.text_style.path.is_some()
+                || a.layer.object_id.is_some()
+                || a.arrow.connection.is_some()
+                || a.arrow.elbow
+        })
+    {
+        return Err("Text paths require MyImage project version 23.".into());
+    }
     if version < 22
         && metadata
             .annotations
@@ -1782,6 +1811,7 @@ mod tests {
             );
         }
         d.annotations[0].layer = LayerSettings {
+            object_id: None,
             name: "Başlık ✨".into(),
             hidden: true,
             locked: true,
@@ -1789,6 +1819,7 @@ mod tests {
         for a in &mut d.annotations[1..] {
             a.group_id = Some(5);
             a.group_layer = LayerSettings {
+                object_id: None,
                 name: "Review".into(),
                 hidden: false,
                 locked: true,

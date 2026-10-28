@@ -139,6 +139,9 @@ impl Endpoint {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ArrowStyle {
+    pub elbow: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection: Option<crate::connectors::Connection>,
     pub pattern: Pattern,
     pub start: Endpoint,
     pub end: Endpoint,
@@ -152,6 +155,8 @@ pub struct ArrowStyle {
 impl Default for ArrowStyle {
     fn default() -> Self {
         Self {
+            elbow: false,
+            connection: None,
             pattern: Pattern::Solid,
             start: Endpoint::None,
             end: Endpoint::Triangle,
@@ -167,6 +172,13 @@ impl ArrowStyle {
         self == &Self::default()
     }
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .connection
+            .as_ref()
+            .is_some_and(|c| c.start == Some(0) || c.end == Some(0))
+        {
+            return Err("Connection targets must have nonzero identities.".into());
+        }
         if [self.start_size, self.end_size]
             .iter()
             .any(|v| !v.is_finite() || !(1.0..=8.0).contains(v))
@@ -227,6 +239,27 @@ fn endpoint(tip: Pos2, direction: Vec2, length: f32, cap: Endpoint) -> Option<Pa
 }
 
 pub fn parts(a: &Annotation) -> Vec<Part> {
+    if a.arrow.elbow {
+        let s = Pos2::new(a.start.x, a.start.y);
+        let e = Pos2::new(a.end.x, a.end.y);
+        let points = if (e.x - s.x).abs() >= (e.y - s.y).abs() {
+            vec![
+                s,
+                Pos2::new((s.x + e.x) * 0.5, s.y),
+                Pos2::new((s.x + e.x) * 0.5, e.y),
+                e,
+            ]
+        } else {
+            vec![
+                s,
+                Pos2::new(s.x, (s.y + e.y) * 0.5),
+                Pos2::new(e.x, (s.y + e.y) * 0.5),
+                e,
+            ]
+        };
+        let controls = [points[1], points[2]];
+        return polyline_parts(a, points, controls);
+    }
     if a.arrow.curve.is_some() {
         return curved_parts(a);
     }
@@ -316,6 +349,16 @@ fn curved_parts(a: &Annotation) -> Vec<Part> {
     let points: Vec<_> = (0..=steps)
         .map(|i| curve_point(a, i as f32 / steps as f32))
         .collect();
+    polyline_parts(a, points, [c1, c2])
+}
+
+fn polyline_parts(a: &Annotation, mut points: Vec<Pos2>, [c1, c2]: [Pos2; 2]) -> Vec<Part> {
+    points.dedup_by(|a, b| a.distance(*b) < 0.001);
+    if points.len() < 2 {
+        return vec![];
+    }
+    let start = Pos2::new(a.start.x, a.start.y);
+    let end = Pos2::new(a.end.x, a.end.y);
     let mut distances = vec![0.];
     for p in points.windows(2) {
         distances.push(distances.last().unwrap() + p[0].distance(p[1]));
@@ -540,6 +583,8 @@ mod tests {
             let y = 20. + i as f32 * 35.;
             let mut a = object(AnnotationKind::Arrow, [20., y], [270., y]);
             a.arrow = ArrowStyle {
+                connection: None,
+                elbow: false,
                 start: cap,
                 end: cap,
                 pattern: if i % 2 == 0 {

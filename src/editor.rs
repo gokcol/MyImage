@@ -19,11 +19,15 @@ mod annotation_selection;
 mod area_selection;
 #[path = "canvas_handles.rs"]
 mod canvas_handles;
+#[path = "canvas_menu.rs"]
+mod canvas_menu;
 #[path = "canvas_tools.rs"]
 mod canvas_tools;
 #[path = "object_canvas.rs"]
 mod object_canvas;
 use object_canvas::object_point;
+#[path = "connector_tool.rs"]
+mod connector_tool;
 #[path = "editor_toolbar.rs"]
 mod editor_toolbar;
 #[path = "editor_tools.rs"]
@@ -40,8 +44,12 @@ mod inspector_panel;
 mod inspector_widgets;
 #[path = "object_properties.rs"]
 mod object_properties;
+#[path = "precision_tools.rs"]
+mod precision_tools;
 #[path = "quick_styles.rs"]
 mod quick_styles;
+#[path = "retouch_tools.rs"]
+mod retouch_tools;
 #[path = "selection_panel.rs"]
 mod selection_panel;
 #[path = "selection_size.rs"]
@@ -54,9 +62,13 @@ mod stamp_panel;
 mod text_editor;
 #[path = "text_extract.rs"]
 mod text_extract;
+#[path = "text_path_ui.rs"]
+mod text_path_ui;
 #[path = "tool_appearance.rs"]
 mod tool_appearance;
 use annotation_selection::*;
+use inspector_panel::Panel as InspectorPanel;
+pub use inspector_panel::Preferences as InspectorPreferences;
 pub use tool_appearance::ToolPreferences;
 
 use eframe::egui::{
@@ -89,6 +101,13 @@ enum Tool {
     Highlighter,
     Pen,
     Eraser,
+    StyleBrush,
+    Measure,
+    ColorInspector,
+    Repair,
+    ScreenshotText,
+    Redact,
+    ConnectedArrow,
 }
 
 fn shape_tool(kind: AnnotationKind) -> Tool {
@@ -102,9 +121,19 @@ fn shape_tool(kind: AnnotationKind) -> Tool {
 impl Tool {
     fn kind(self) -> Option<AnnotationKind> {
         match self {
-            Self::Select | Self::Area | Self::Crop | Self::CutOut | Self::Wand | Self::Eraser => {
-                None
-            }
+            Self::Select
+            | Self::Area
+            | Self::Crop
+            | Self::CutOut
+            | Self::Wand
+            | Self::Eraser
+            | Self::StyleBrush
+            | Self::Measure
+            | Self::ColorInspector
+            | Self::Repair
+            | Self::ScreenshotText
+            | Self::Redact
+            | Self::ConnectedArrow => None,
             Self::Magnify => Some(AnnotationKind::Magnify),
             Self::Spotlight => Some(AnnotationKind::Spotlight),
             Self::Simplify => Some(AnnotationKind::Simplify),
@@ -197,7 +226,7 @@ impl ResizeDraft {
 
 pub fn default_toolbar() -> Vec<String> {
     [
-        "Select", "Arrow", "Text", "Callout", "Shapes", "Pen", "Stamps", "Fill", "Magnify",
+        "Select", "Arrow", "Text", "Callout", "Shapes", "Stamps", "Fill",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -213,7 +242,11 @@ pub struct EditorState {
     pixel_mask: Option<crate::fill::FillRegion>,
     studio: crate::studio::Options,
     extra_tools: editor_tools::State,
+    precision: precision_tools::State,
+    retouch: retouch_tools::State,
+    connector: connector_tool::State,
     toolbar_pins: Vec<String>,
+    toolbar_order: Vec<String>,
     toolbar_changed: bool,
     tool_preferences: ToolPreferences,
     tool_preferences_changed: bool,
@@ -250,9 +283,7 @@ pub struct EditorState {
     resize: Option<ResizeDraft>,
     canvas_size: Option<canvas_tools::CanvasDraft>,
     canvas_resize: Option<canvas_handles::CanvasResize>,
-    layers_open: bool,
-    presets_open: bool,
-    effects_open: bool,
+    inspector: inspector_panel::State,
     image_effect_tab: u8,
     presets: annotation_presets::PresetState,
     stamps: stamp_panel::StampState,
@@ -283,7 +314,11 @@ impl Default for EditorState {
             arrow: Default::default(),
             studio: Default::default(),
             extra_tools: Default::default(),
+            precision: Default::default(),
+            retouch: Default::default(),
+            connector: Default::default(),
             toolbar_pins: default_toolbar(),
+            toolbar_order: Vec::new(),
             toolbar_changed: false,
             tool_preferences: Default::default(),
             tool_preferences_changed: false,
@@ -320,9 +355,7 @@ impl Default for EditorState {
             resize: None,
             canvas_size: None,
             canvas_resize: None,
-            layers_open: false,
-            presets_open: false,
-            effects_open: false,
+            inspector: Default::default(),
             image_effect_tab: 0,
             presets: Default::default(),
             stamps: Default::default(),
@@ -356,9 +389,12 @@ impl EditorState {
     }
 
     pub fn reset(&mut self) {
+        let inspector = self.inspector;
         let preferences = std::mem::take(&mut self.tool_preferences);
         let preferences_changed = self.tool_preferences_changed;
         let pins = std::mem::take(&mut self.toolbar_pins);
+        let order = std::mem::take(&mut self.toolbar_order);
+        let toolbar_changed = self.toolbar_changed;
         let stamps = std::mem::take(&mut self.stamps);
         let mut presets = std::mem::take(&mut self.presets);
         presets.dialog = None;
@@ -369,8 +405,12 @@ impl EditorState {
         self.presets = presets;
         self.stamps = stamps;
         self.toolbar_pins = pins;
+        self.toolbar_order = order;
+        self.toolbar_changed = toolbar_changed;
         self.set_tool_preferences(preferences);
         self.tool_preferences_changed = preferences_changed;
+        self.inspector = inspector;
+        self.inspector.select(InspectorPanel::Styles);
     }
 
     /// Complete annotation gestures and discard unapplied image-tool previews
@@ -440,6 +480,7 @@ impl EditorState {
             }
             _ => None,
         };
+        crate::connectors::sync(document);
         let indices = gesture.changed_objects(document);
         if let Err(error) = crate::canvas::extend_for_annotations(document, &indices) {
             document.annotations = gesture.before.annotations;
@@ -456,7 +497,9 @@ impl EditorState {
     }
 
     fn activate_tool(&mut self, tool: Tool) {
-        self.effects_open = false;
+        if self.inspector.is(InspectorPanel::Effects) {
+            self.inspector.select(InspectorPanel::Styles);
+        }
         self.tool = tool;
         if let Some(kind) = tool.kind() {
             self.restore_appearance(kind);
@@ -518,6 +561,8 @@ impl EditorState {
         self.poll_extra_tools(ui.ctx(), document, history);
         self.poll_fill(ui.ctx(), document, history);
         self.poll_text_extraction(document);
+        self.poll_color_sample(ui.ctx(), document);
+        self.poll_retouch(ui.ctx(), document);
         let clipboard_was_busy = self.clipboard_job.is_some();
         self.poll_clipboard(document, history);
         if clipboard_was_busy && self.clipboard_job.is_none() {
@@ -531,6 +576,23 @@ impl EditorState {
             .memory(|m| m.focused())
             .is_some_and(|id| egui::text_edit::TextEditState::load(ui.ctx(), id).is_some());
         if !modal_open && !text_input_focused && self.canvas_resize.is_none() {
+            if self.precision_active()
+                && !egui::Popup::is_any_open(ui.ctx())
+                && ui.is_enabled()
+                && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+            {
+                self.stop_precision_tool();
+            }
+            if self.inspector.preferences.expanded
+                && !self.inspector.preferences.pinned
+                && self.gesture.is_none()
+                && self.area_drag.is_none()
+                && !egui::Popup::is_any_open(ui.ctx())
+                && ui.is_enabled()
+                && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+            {
+                self.inspector.close();
+            }
             if self.gesture.is_none()
                 && self.area_drag.is_none()
                 && ui.is_enabled()
@@ -578,135 +640,37 @@ impl EditorState {
         {
             self.clear_selection();
         }
-        inspector_panel::show(ui, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(6., 5.);
-            ui.spacing_mut().button_padding = Vec2::new(7., 4.);
-            ui.spacing_mut().interact_size.y = 24.;
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().button_padding = Vec2::new(6., 6.);
-                ui.spacing_mut().item_spacing.x = 4.;
-                if ui
-                    .selectable_label(
-                        !self.layers_open && !self.presets_open && !self.effects_open,
-                        "Styles",
-                    )
-                    .clicked()
-                {
-                    self.layers_open = false;
-                    self.presets_open = false;
-                    self.effects_open = false;
-                }
-                if ui
-                    .selectable_label(self.layers_open && !self.presets_open, "Layers")
-                    .clicked()
-                {
-                    self.layers_open = true;
-                    self.presets_open = false;
-                    self.effects_open = false;
-                }
-                if ui.selectable_label(self.presets_open, "Presets").clicked() {
-                    self.cancel_image_tools();
-                    self.presets_open = true;
-                    self.effects_open = false;
-                }
-                if ui.selectable_label(self.effects_open, "Effects").clicked() {
-                    self.open_image_effects(document, history);
-                }
-            });
-            ui.separator();
-            if self.effects_open {
-                egui::ScrollArea::vertical()
-                    .id_salt("image-effects-panel")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| self.image_effects_panel(ui, document, history));
-                return;
+        let workspace = ui.available_rect_before_wrap();
+        let overlay = inspector_panel::overlay_rect(ui);
+        // Only a direct press in the canvas dismisses the overlay. Its child
+        // popups and modal dialogs retain their normal focus and input behavior.
+        if self.inspector.preferences.expanded
+            && !self.precision_active()
+            && !self.inspector.preferences.pinned
+            && ui.is_enabled()
+            && !egui::Popup::is_any_open(ui.ctx())
+            && ui
+                .input(|input| {
+                    input.events.iter().find_map(|event| match event {
+                        egui::Event::PointerButton {
+                            pos, pressed: true, ..
+                        } if workspace.contains(*pos) && !overlay.contains(*pos) => Some(*pos),
+                        _ => None,
+                    })
+                })
+                .is_some_and(|pos| ui.ctx().layer_id_at(pos) == Some(ui.layer_id()))
+        {
+            self.inspector.close();
+        }
+        if self.inspector.preferences.expanded {
+            if self.inspector.preferences.pinned {
+                inspector_panel::dock(ui, |ui| self.inspector_contents(ui, document, history));
+            } else {
+                inspector_panel::overlay(ui, overlay, |ui| {
+                    self.inspector_contents(ui, document, history)
+                });
             }
-            if !(self.extra_panel_active(document)
-                || self.tool == Tool::Crop
-                || self.presets_open
-                || self.layers_open
-                || (self.tool == Tool::Area && self.selected.is_none()))
-            {
-                self.shape_picker(ui, document, history);
-                self.quick_styles(ui, document, history);
-            }
-            if !self.layers_open
-                && !self.presets_open
-                && self.tool != Tool::Crop
-                && self.style_kind(document) == Some(AnnotationKind::Stamp)
-            {
-                self.stamp_panel(ui, document, history);
-                return;
-            }
-            let footer = !self.layers_open
-                && !self.presets_open
-                && self.tool != Tool::Crop
-                && (self.selected.is_some() || self.tool.kind().is_some())
-                && !self
-                    .style_kind(document)
-                    .is_some_and(|k| k.is_area_edit() || k == AnnotationKind::Fill);
-            // Let the footer claim its real height before laying out the
-            // scroll area. A guessed reserve lets selection controls enlarge
-            // the whole workspace, refitting the canvas under a held pointer.
-            ui.allocate_ui_with_layout(
-                ui.available_size(),
-                egui::Layout::bottom_up(egui::Align::Min),
-                |ui| {
-                    if footer {
-                        self.selection_footer(ui, document, history);
-                        ui.separator();
-                    }
-                    ui.allocate_ui_with_layout(
-                        ui.available_size(),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            egui::ScrollArea::vertical()
-                                .id_salt("annotation-inspector-scroll")
-                                .max_height(ui.available_height().max(0.))
-                                .min_scrolled_height(0.)
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    if !self.layers_open
-                                        && !self.presets_open
-                                        && self.extra_panel_active(document)
-                                    {
-                                        self.extra_tools_panel(ui, document, history);
-                                    } else if !self.layers_open
-                                        && !self.presets_open
-                                        && (self.tool == Tool::Fill
-                                            || self.style_kind(document)
-                                                == Some(AnnotationKind::Fill))
-                                    {
-                                        self.fill_panel(ui, document, history);
-                                    } else if self.tool == Tool::Area
-                                        && self.additional.is_empty()
-                                        && (self.selected.is_none()
-                                            || self.selected.is_some_and(|i| {
-                                                document.annotations[i].kind.is_area_edit()
-                                            }))
-                                        && !self.layers_open
-                                        && !self.presets_open
-                                    {
-                                        self.area_inspector(ui, document, history);
-                                    } else if self.tool == Tool::Crop {
-                                        self.crop_inspector(ui, document, history);
-                                    } else if self.presets_open {
-                                        self.presets_panel(ui, document, history);
-                                    } else if self.layers_open {
-                                        self.layers_panel(ui, document, history);
-                                    } else if self.style_kind(document)
-                                        == Some(AnnotationKind::Stamp)
-                                    {
-                                        self.stamp_panel(ui, document, history);
-                                    } else {
-                                        self.inspector(ui, document, history);
-                                    }
-                                });
-                        },
-                    );
-                },
-            );
-        });
+        }
         // Inline typing owns pointer input, but the image must retain its real
         // colors instead of inheriting the disabled workspace's fade.
         let workspace_opacity = ui.opacity();
@@ -723,6 +687,123 @@ impl EditorState {
         ui.set_opacity(workspace_opacity);
     }
 
+    fn inspector_contents(
+        &mut self,
+        ui: &mut egui::Ui,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
+        ui.spacing_mut().item_spacing = Vec2::new(6., 5.);
+        ui.spacing_mut().button_padding = Vec2::new(7., 4.);
+        ui.spacing_mut().interact_size.y = 24.;
+        if let Some(action) = inspector_panel::header(ui, self.inspector.preferences) {
+            self.finish_properties(document, history);
+            match action {
+                inspector_panel::HeaderAction::Close => self.inspector.close(),
+                inspector_panel::HeaderAction::TogglePin => self.inspector.toggle_pin(),
+            }
+            ui.ctx().request_repaint();
+        }
+        if self.inspector.is(InspectorPanel::Effects) {
+            egui::ScrollArea::vertical()
+                .id_salt("image-effects-panel")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.image_effects_panel(ui, document, history));
+            return;
+        }
+        if self.precision_active() && self.inspector.is(InspectorPanel::Styles) {
+            egui::ScrollArea::vertical()
+                .id_salt("precision-tools-panel")
+                .auto_shrink([false, false])
+                .show(ui, |ui| self.precision_panel(ui, document, history));
+            return;
+        }
+        if !(self.extra_panel_active(document)
+            || self.tool == Tool::Crop
+            || self.inspector.is(InspectorPanel::Presets)
+            || self.inspector.is(InspectorPanel::Layers)
+            || (self.tool == Tool::Area && self.selected.is_none()))
+        {
+            self.shape_picker(ui, document, history);
+            self.quick_styles(ui, document, history);
+        }
+        if !self.inspector.is(InspectorPanel::Layers)
+            && !self.inspector.is(InspectorPanel::Presets)
+            && self.tool != Tool::Crop
+            && self.style_kind(document) == Some(AnnotationKind::Stamp)
+        {
+            self.stamp_panel(ui, document, history);
+            return;
+        }
+        let footer = !self.inspector.is(InspectorPanel::Layers)
+            && !self.inspector.is(InspectorPanel::Presets)
+            && self.tool != Tool::Crop
+            && (self.selected.is_some() || self.tool.kind().is_some())
+            && !self
+                .style_kind(document)
+                .is_some_and(|k| k.is_area_edit() || k == AnnotationKind::Fill);
+        // Let the footer claim its real height before laying out the
+        // scroll area. A guessed reserve lets selection controls enlarge
+        // the whole workspace, refitting the canvas under a held pointer.
+        ui.allocate_ui_with_layout(
+            ui.available_size(),
+            egui::Layout::bottom_up(egui::Align::Min),
+            |ui| {
+                if footer {
+                    self.selection_footer(ui, document, history);
+                    ui.separator();
+                }
+                ui.allocate_ui_with_layout(
+                    ui.available_size(),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("annotation-inspector-scroll")
+                            .max_height(ui.available_height().max(0.))
+                            .min_scrolled_height(0.)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                if !self.inspector.is(InspectorPanel::Layers)
+                                    && !self.inspector.is(InspectorPanel::Presets)
+                                    && self.extra_panel_active(document)
+                                {
+                                    self.extra_tools_panel(ui, document, history);
+                                } else if !self.inspector.is(InspectorPanel::Layers)
+                                    && !self.inspector.is(InspectorPanel::Presets)
+                                    && (self.tool == Tool::Fill
+                                        || self.style_kind(document) == Some(AnnotationKind::Fill))
+                                {
+                                    self.fill_panel(ui, document, history);
+                                } else if self.tool == Tool::Area
+                                    && self.additional.is_empty()
+                                    && (self.selected.is_none()
+                                        || self.selected.is_some_and(|i| {
+                                            document.annotations[i].kind.is_area_edit()
+                                        }))
+                                    && !self.inspector.is(InspectorPanel::Layers)
+                                    && !self.inspector.is(InspectorPanel::Presets)
+                                {
+                                    self.area_inspector(ui, document, history);
+                                } else if self.tool == Tool::Crop
+                                    && self.inspector.is(InspectorPanel::Styles)
+                                {
+                                    self.crop_inspector(ui, document, history);
+                                } else if self.inspector.is(InspectorPanel::Presets) {
+                                    self.presets_panel(ui, document, history);
+                                } else if self.inspector.is(InspectorPanel::Layers) {
+                                    self.layers_panel(ui, document, history);
+                                } else if self.style_kind(document) == Some(AnnotationKind::Stamp) {
+                                    self.stamp_panel(ui, document, history);
+                                } else {
+                                    self.inspector(ui, document, history);
+                                }
+                            });
+                    },
+                );
+            },
+        );
+    }
+
     /// Image-level controls share the Recents row to leave more canvas space.
     pub fn image_controls(
         &mut self,
@@ -735,7 +816,12 @@ impl EditorState {
         ui.spacing_mut().button_padding = Vec2::new(7., 3.);
         let actions =
             appearance::icon_button(ui, "Image tools · crop, resize, rotate", Icon::Settings);
-        egui::Popup::menu(&actions).show(|ui| self.canvas_menu(ui, document, history));
+        egui::Popup::menu(&actions)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .show(|ui| {
+                self.precision.context_source = None;
+                self.canvas_menu(ui, document, history);
+            });
         if appearance::icon_button(ui, "Fit canvas to window", Icon::Fit).clicked() {
             self.fit = true;
         }
@@ -798,193 +884,6 @@ impl EditorState {
             ui.add(egui::Label::new(egui::RichText::new(status).small()).truncate())
                 .on_hover_text(status);
         }
-    }
-
-    pub fn image_menu(
-        &mut self,
-        ui: &mut egui::Ui,
-        document: &mut Document,
-        history: &mut EditHistory,
-    ) {
-        if ui
-            .button("Canvas size…")
-            .on_hover_text("Add transparent canvas space around the image")
-            .clicked()
-        {
-            self.open_canvas_size(document, history);
-            ui.close();
-        }
-        ui.set_min_width(190.);
-        ui.spacing_mut().button_padding = Vec2::new(8., 4.);
-        ui.spacing_mut().item_spacing.y = 3.;
-        ui.spacing_mut().interact_size.y = 24.;
-        if ui
-            .selectable_label(self.tool == Tool::Crop, "Crop")
-            .on_hover_text("Trim the canvas without losing original pixels")
-            .clicked()
-        {
-            ui.close();
-            self.finish_gesture(document, history);
-            self.layers_open = false;
-            self.presets_open = false;
-            self.effects_open = false;
-            self.tool = Tool::Crop;
-            self.clear_selection();
-            self.crop = Some(CropDraft {
-                rect: document.geometry.crop_rect(original_size(document)),
-                drag_start: None,
-            });
-        }
-        if ui
-            .button("Resize image…")
-            .on_hover_text("Set the output pixel dimensions")
-            .clicked()
-        {
-            ui.close();
-            self.finish_gesture(document, history);
-            let size = document.output_size();
-            self.resize = Some(ResizeDraft {
-                size,
-                ratio: size[0] as f64 / size[1] as f64,
-                locked: true,
-            });
-        }
-        if ui.button("Rotate left").clicked() {
-            ui.close();
-            self.rotate(document, history, false);
-        }
-        if ui.button("Rotate right").clicked() {
-            ui.close();
-            self.rotate(document, history, true);
-        }
-        if ui.button("Rotate 180°").clicked() {
-            self.finish_gesture(document, history);
-            let mut geometry = document.geometry;
-            geometry.quarter_turns = (geometry.quarter_turns + 2) % 4;
-            self.apply_geometry(document, history, geometry);
-            ui.close();
-        }
-        ui.separator();
-        if ui.button("Flip horizontal").clicked() {
-            self.flip(document, history, true);
-            ui.close();
-        }
-        if ui.button("Flip vertical").clicked() {
-            self.flip(document, history, false);
-            ui.close();
-        }
-        ui.separator();
-        if ui.add_enabled(document.geometry != ImageGeometry::default(), egui::Button::new("Reset image edits"))
-                .on_hover_text("Restore the original image dimensions, crop, and orientation; annotations are kept").clicked()
-            {
-                self.finish_gesture(document, history);
-                self.apply_geometry(document, history, ImageGeometry::default());
-                ui.close();
-            }
-    }
-
-    fn canvas_menu(
-        &mut self,
-        ui: &mut egui::Ui,
-        document: &mut Document,
-        history: &mut EditHistory,
-    ) {
-        if self.area.is_some() || self.selected.is_some() {
-            let pixels = self.area.is_some();
-            let enabled = self.selected.is_none() || self.can_edit_selection(document);
-            let label = if pixels {
-                "Delete selected area"
-            } else {
-                "Delete selected layers"
-            };
-            if crate::appearance::action_button(
-                ui,
-                label,
-                crate::appearance::Icon::Trash,
-                enabled,
-                false,
-            )
-            .on_hover_text(if pixels {
-                "Clear these pixels to transparency as an editable layer (Delete / Backspace)"
-            } else {
-                "Remove selected annotations or groups; keep underlying layers (Delete / Backspace)"
-            })
-            .clicked()
-            {
-                self.delete_current_selection(document, history);
-                ui.close();
-            }
-            ui.separator();
-        }
-        self.image_menu(ui, document, history);
-        ui.separator();
-        self.edit_actions(ui, document, history);
-        self.pixel_selection_commands(ui, document, history);
-        if ui
-            .add_enabled(
-                !document.annotations.is_empty(),
-                egui::Button::new("Select all annotations"),
-            )
-            .clicked()
-        {
-            self.finish_gesture(document, history);
-            self.tool = Tool::Select;
-            self.layers_open = false;
-            self.presets_open = false;
-            self.effects_open = false;
-            self.set_selection((0..document.annotations.len()).collect(), document);
-            self.focus_canvas = true;
-            ui.close();
-        }
-        ui.separator();
-        if ui.button("Fit image").clicked() {
-            self.fit = true;
-            ui.close();
-        }
-        if ui.button("Actual size (100%)").clicked() {
-            self.fit = false;
-            self.zoom = 1.;
-            ui.close();
-        }
-        ui.horizontal(|ui| {
-            ui.label("Zoom");
-            if crate::appearance::zoom_slider(ui, &mut self.zoom, 0.05..=8.).changed() {
-                self.fit = false;
-            }
-            ui.small(format!("{:.0}%", self.zoom * 100.));
-        });
-    }
-
-    fn edit_actions(
-        &mut self,
-        ui: &mut egui::Ui,
-        document: &mut Document,
-        history: &mut EditHistory,
-    ) {
-        if ui
-            .add_enabled(history.can_undo(), egui::Button::new("Undo"))
-            .on_hover_text("Undo the last change (Command/Ctrl + Z)")
-            .clicked()
-        {
-            self.finish_gesture(document, history);
-            history.undo(document);
-            self.clear_selection();
-            self.area = None;
-            ui.close();
-        }
-        if ui
-            .add_enabled(history.can_redo(), egui::Button::new("Redo"))
-            .on_hover_text("Redo (Command/Ctrl + Shift + Z)")
-            .clicked()
-        {
-            self.finish_gesture(document, history);
-            history.redo(document);
-            self.clear_selection();
-            self.area = None;
-            ui.close();
-        }
-        ui.separator();
-        self.clipboard_buttons(ui, document, history);
     }
 
     fn apply_geometry(
@@ -1297,6 +1196,7 @@ impl EditorState {
         if let Some(a) = document.annotations.get(index) {
             self.sync_fill_selection(a);
         }
+        crate::connectors::sync(document);
         self.record_properties(before, document, history);
     }
 
@@ -1308,6 +1208,7 @@ impl EditorState {
         texture: &egui::TextureHandle,
         preview: &mut crate::privacy_preview::PrivacyPreview,
     ) {
+        crate::connectors::sync(document);
         let viewport = ui.available_size().max(Vec2::splat(1.0));
         let [width, height] = document.output_size();
         let image_size = Vec2::new(width as f32, height as f32);
@@ -1351,8 +1252,11 @@ impl EditorState {
                     Rect::from_min_size(space.min + visible.min.to_vec2(), visible.size())
                         .intersect(ui.clip_rect()),
                 );
-                let (canvas_resizing, painted_resize) =
-                    self.canvas_resize_ui(ui, document, history, rect, scale, viewport);
+                let (canvas_resizing, painted_resize) = if self.precision_active() {
+                    (false, false)
+                } else {
+                    self.canvas_resize_ui(ui, document, history, rect, scale, viewport)
+                };
                 if painted_resize {
                     return;
                 }
@@ -1400,6 +1304,7 @@ impl EditorState {
                     })
                 });
                 if (ui.is_enabled() && !canvas_resizing)
+                    && !self.precision_active()
                     && self.selected.is_some()
                     && let Some(position) = press
                     && space.intersect(ui.clip_rect()).contains(position)
@@ -1411,7 +1316,9 @@ impl EditorState {
                     self.clear_selection();
                     self.object_press = false;
                 }
+                self.precision_canvas_input(ui, &response, rect, scale, document, history);
                 if (ui.is_enabled() && !canvas_resizing)
+                    && !self.precision_active()
                     && !matches!(
                         self.tool,
                         Tool::Fill | Tool::Wand | Tool::Pen | Tool::Eraser
@@ -1560,7 +1467,10 @@ impl EditorState {
                     stamp_dropped = true;
                 }
 
-                if !stamp_dropped && response.clicked_by(PointerButton::Primary) {
+                if !stamp_dropped
+                    && !self.precision_active()
+                    && response.clicked_by(PointerButton::Primary)
+                {
                     response.request_focus();
                     if let Some(position) = response.interact_pointer_pos() {
                         let point = object_point(position, rect, scale, document);
@@ -1726,12 +1636,16 @@ impl EditorState {
                     .as_ref()
                     .or(expansion.as_ref())
                     .map_or((&*document, rect), |(doc, bounds)| (doc, *bounds));
+                let retouch_preview = self.retouch_preview(paint_document);
+                let paint_document = retouch_preview.as_ref().unwrap_or(paint_document);
                 // Keep the original editable text in the document, but omit its
                 // painted copy while the on-canvas TextEdit owns the glyphs.
                 let text_preview = self.text_dialog.as_mut().map(|draft| {
                     draft.canvas = Some((rect.min, scale, ui.clip_rect()));
                     let mut text_preview = paint_document.clone();
-                    if let Some(annotation) = text_preview.annotations.get_mut(draft.index) {
+                    if let Some(annotation) = text_preview.annotations.get_mut(draft.index)
+                        && annotation.text_style.path.is_none()
+                    {
                         annotation.text.clear();
                     }
                     text_preview
@@ -1830,7 +1744,13 @@ impl EditorState {
                 }
                 if !(matches!(
                     self.tool,
-                    Tool::Crop | Tool::Pen | Tool::Eraser | Tool::Fill
+                    Tool::Crop
+                        | Tool::Pen
+                        | Tool::Eraser
+                        | Tool::Fill
+                        | Tool::StyleBrush
+                        | Tool::Measure
+                        | Tool::ColorInspector
                 ) || (self.tool == Tool::Area
                     && self.additional.is_empty()
                     && self.area_bounds(document).is_some()))
@@ -1968,8 +1888,21 @@ impl EditorState {
                 if let Some(cursor) = self.active_gesture_cursor(document) {
                     ui.ctx().set_cursor_icon(cursor);
                 }
+                self.paint_precision_overlay(ui, rect, scale, document);
+                if response.secondary_clicked() {
+                    self.precision.context_source =
+                        response.interact_pointer_pos().and_then(|pos| {
+                            hit_document_annotation(
+                                document,
+                                object_point(pos, rect, scale, document),
+                                scale,
+                            )
+                        });
+                }
                 if !canvas_resizing {
-                    response.context_menu(|ui| self.canvas_menu(ui, document, history));
+                    egui::Popup::context_menu(&response)
+                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .show(|ui| self.canvas_menu(ui, document, history));
                     self.floating_properties(
                         ui,
                         document,
@@ -1979,7 +1912,9 @@ impl EditorState {
                         ui.clip_rect(),
                     );
                 }
-                self.paint_canvas_handles(ui, document, paint_rect);
+                if !self.precision_active() {
+                    self.paint_canvas_handles(ui, document, paint_rect);
+                }
                 // Paint after the handles so their resize cursors take priority.
                 if self.tool == Tool::Fill
                     && ui.ctx().output(|output| output.cursor_icon) == CursorIcon::None
@@ -2010,6 +1945,9 @@ impl EditorState {
     }
 
     fn canvas_cursor(&self, at: Point, scale: f32, document: &Document) -> CursorIcon {
+        if self.precision_active() {
+            return CursorIcon::Crosshair;
+        }
         if let Some(cursor) = self.active_gesture_cursor(document) {
             return cursor;
         }
@@ -2095,7 +2033,13 @@ impl EditorState {
             area_mask: Vec::new(),
             stamp: None,
             fill_region: None,
-            text_style: self.text_style.clone(),
+            text_style: {
+                let mut style = self.text_style.clone();
+                if kind != AnnotationKind::Text {
+                    style.path = None;
+                }
+                style
+            },
             callout_style: if kind == AnnotationKind::Callout {
                 self.callout_style
             } else {
@@ -2105,6 +2049,7 @@ impl EditorState {
             arrow: if kind == AnnotationKind::Arrow {
                 crate::arrow_style::ArrowStyle {
                     curve: None,
+                    connection: None,
                     ..self.arrow.clone()
                 }
             } else if kind.is_shape() {
@@ -2134,16 +2079,20 @@ impl EditorState {
     }
 
     fn draws_objects(&self) -> bool {
-        !matches!(
-            self.tool,
-            Tool::Select
-                | Tool::Area
-                | Tool::Crop
-                | Tool::CutOut
-                | Tool::Wand
-                | Tool::Fill
-                | Tool::Eraser
-        )
+        !self.precision_active()
+            && !matches!(
+                self.tool,
+                Tool::Select
+                    | Tool::Area
+                    | Tool::Crop
+                    | Tool::CutOut
+                    | Tool::Wand
+                    | Tool::Fill
+                    | Tool::Eraser
+                    | Tool::StyleBrush
+                    | Tool::Measure
+                    | Tool::ColorInspector
+            )
     }
 
     fn object_target(&self, at: Point, scale: f32, document: &Document) -> bool {
@@ -2361,9 +2310,22 @@ impl EditorState {
                 *last = point;
             }
         }
+        crate::connectors::sync(document);
     }
 
     fn keyboard(&mut self, ui: &mut egui::Ui, document: &mut Document, history: &mut EditHistory) {
+        if ui.input_mut(|i| {
+            i.consume_key(
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::COMMAND
+                },
+                Key::R,
+            )
+        }) {
+            self.open_resize(document, history);
+            return;
+        }
         if matches!(self.tool, Tool::Area | Tool::Wand) && self.area_keyboard(ui, document, history)
         {
             return;
@@ -2394,6 +2356,9 @@ impl EditorState {
             self.deselect_pixels();
             self.cancel_image_tools();
             self.tool = Tool::Select;
+        }
+        if self.precision_active() {
+            return;
         }
         if self.tool == Tool::Crop {
             if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter)) {
@@ -2520,6 +2485,7 @@ impl EditorState {
             document.annotations.remove(index);
         }
         self.deselect_pixels();
+        crate::connectors::sync(document);
         history.commit(before, document);
         self.focus_canvas = true;
     }
@@ -2792,7 +2758,9 @@ fn hits_transformed(annotation: &Annotation, at: Point, scale: f32, document: &D
                     .length()
                     .max(f32::EPSILON);
             let threshold = (6.0 / scale).max(annotation.stroke_width * stroke_scale * 0.5);
-            (annotation.arrow.curve.is_none() && segment_distance(at, start, end) <= threshold)
+            (annotation.arrow.curve.is_none()
+                && !annotation.arrow.elbow
+                && segment_distance(at, start, end) <= threshold)
                 || crate::arrow_style::parts(annotation).iter().any(|part| {
                     let points: Vec<_> = part
                         .points
@@ -3038,7 +3006,7 @@ fn paint_crop(
 }
 
 fn tool_button(ui: &mut egui::Ui, tool: Tool, label: &str, selected: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(48.0, 42.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(44.0, 38.0), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -3070,10 +3038,10 @@ fn tool_button(ui: &mut egui::Ui, tool: Tool, label: &str, selected: bool) -> eg
         } else {
             painter.rect_filled(rect, 7, fill);
         }
-        let center = Pos2::new(rect.center().x, rect.top() + 14.);
+        let center = Pos2::new(rect.center().x, rect.top() + 12.);
         paint_tool_icon(painter, center, tool, color);
         painter.text(
-            Pos2::new(rect.center().x, rect.bottom() - 8.),
+            Pos2::new(rect.center().x, rect.bottom() - 7.),
             egui::Align2::CENTER_CENTER,
             label,
             egui::FontId::proportional(10.5),
@@ -3117,6 +3085,32 @@ fn paint_tool_icon(painter: &egui::Painter, center: Pos2, tool: Tool, color: Col
     let color = icon_style::color(painter.ctx(), color, family);
     let stroke = Stroke::new(icon_style::current(painter.ctx()).width(), color);
     match tool {
+        Tool::ConnectedArrow => {
+            painter.line_segment(
+                [center - egui::vec2(8., 0.), center + egui::vec2(8., 0.)],
+                stroke,
+            );
+            for dx in [-8., 8.] {
+                painter.circle_stroke(center + egui::vec2(dx, 0.), 3., stroke);
+            }
+        }
+        Tool::Repair | Tool::ScreenshotText | Tool::Redact => {
+            let glyph = match tool {
+                Tool::Repair => "✦",
+                Tool::ScreenshotText => "T",
+                _ => "▰",
+            };
+            painter.text(
+                center,
+                egui::Align2::CENTER_CENTER,
+                glyph,
+                egui::FontId::proportional(20.),
+                color,
+            );
+        }
+        Tool::StyleBrush | Tool::Measure | Tool::ColorInspector => {
+            precision_tools::paint_icon(painter, center, tool, color, stroke);
+        }
         Tool::Wand => {
             painter.line_segment(
                 [center + egui::vec2(-7., 7.), center + egui::vec2(4., -4.)],
@@ -3509,7 +3503,7 @@ fn handles(annotation: &Annotation) -> Vec<(Handle, Pos2)> {
                     crate::arrow_style::curve_point(annotation, 0.5),
                 ),
             ];
-            if annotation.arrow.curve.is_some() {
+            if annotation.arrow.curve.is_some() && !annotation.arrow.elbow {
                 h.extend(
                     ARROW_CURVE_PARAMETERS
                         .into_iter()
@@ -3590,18 +3584,25 @@ fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
     let bounds = interaction_bounds(original);
     match handle {
         Handle::ArrowStart => {
+            if let Some(c) = &mut annotation.arrow.connection {
+                c.start = None;
+            }
             annotation.start = at;
             if let Some(c) = &mut annotation.arrow.curve {
                 c[0] = from_pos(point(c[0]) + (point(at) - point(original.start)));
             }
         }
         Handle::ArrowEnd => {
+            if let Some(c) = &mut annotation.arrow.connection {
+                c.end = None;
+            }
             annotation.end = at;
             if let Some(c) = &mut annotation.arrow.curve {
                 c[1] = from_pos(point(c[1]) + (point(at) - point(original.end)));
             }
         }
         Handle::ArrowBend => {
+            annotation.arrow.elbow = false;
             // Moving both controls by 4/3 delta places B(0.5) exactly under the pointer.
             let delta = (point(at) - crate::arrow_style::curve_point(original, 0.5)) * 4. / 3.;
             annotation.arrow.curve =
@@ -3623,6 +3624,9 @@ fn resized(original: &Annotation, handle: Handle, at: Point) -> Annotation {
         Handle::TextSize => {
             let size = point(at) - point(original.start);
             let factor = (size.x / bounds.width().max(1.0)).max(size.y / bounds.height().max(1.0));
+            if let Some(path) = &mut annotation.text_style.path {
+                path.scale(factor);
+            }
             annotation.font_size =
                 (original.font_size * factor).clamp(1.0, crate::document::MAX_FONT_SIZE);
         }

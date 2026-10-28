@@ -5,7 +5,7 @@ use crate::text_style::{Alignment, TextStyle};
 pub(super) struct TextDraft {
     pub(super) index: usize,
     before: EditState,
-    focus: bool,
+    pub(super) focus: bool,
     pub(super) canvas: Option<(Pos2, f32, Rect)>,
 }
 impl EditorState {
@@ -101,6 +101,14 @@ impl EditorState {
         let Some(mut draft) = self.text_dialog.take() else {
             return;
         };
+        if document
+            .annotations
+            .get(draft.index)
+            .is_some_and(|a| a.text_style.path.is_some())
+        {
+            self.path_text_dialog(ctx, draft, document, history);
+            return;
+        }
         let Some((origin, scale, viewport)) = draft.canvas else {
             self.text_dialog = Some(draft);
             return;

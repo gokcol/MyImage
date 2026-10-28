@@ -13,7 +13,7 @@ struct QuickStyle {
     effect_size: u32,
 }
 
-fn styles(kind: AnnotationKind) -> [QuickStyle; 6] {
+fn styles(kind: AnnotationKind) -> [QuickStyle; 8] {
     let colors = if kind == AnnotationKind::Highlighter {
         [
             [255, 218, 35, 85],
@@ -22,6 +22,8 @@ fn styles(kind: AnnotationKind) -> [QuickStyle; 6] {
             [241, 113, 173, 85],
             [255, 158, 59, 85],
             [170, 134, 239, 85],
+            [242, 84, 84, 85],
+            [35, 190, 206, 85],
         ]
     } else {
         [
@@ -31,27 +33,35 @@ fn styles(kind: AnnotationKind) -> [QuickStyle; 6] {
             [240, 170, 28, 255],
             [38, 48, 65, 255],
             [132, 83, 207, 255],
+            [42, 155, 85, 255],
+            [220, 66, 137, 255],
         ]
     };
     let labels = if kind.is_effect() {
-        ["8 px", "12 px", "16 px", "24 px", "32 px", "64 px"]
+        [
+            "8 px", "12 px", "16 px", "24 px", "32 px", "64 px", "96 px", "128 px",
+        ]
     } else if kind == AnnotationKind::Highlighter {
-        ["Yellow", "Green", "Blue", "Pink", "Orange", "Violet"]
+        [
+            "Yellow", "Green", "Blue", "Pink", "Orange", "Violet", "Red", "Cyan",
+        ]
     } else {
-        ["Red", "Blue", "Teal", "Amber", "Ink", "Violet"]
+        [
+            "Red", "Blue", "Teal", "Amber", "Ink", "Violet", "Green", "Pink",
+        ]
     };
     std::array::from_fn(|i| QuickStyle {
         label: labels[i],
         color: colors[i],
         width: if kind == AnnotationKind::Freehand {
-            [3., 5., 8., 12., 2., 6.][i]
+            [3., 5., 8., 12., 2., 6., 4., 10.][i]
         } else {
-            [3., 4., 4., 6., 3., 6.][i]
+            [3., 4., 4., 6., 3., 6., 4., 6.][i]
         },
-        font_size: [28., 32., 28., 40., 24., 36.][i],
+        font_size: [28., 32., 28., 40., 24., 36., 32., 36.][i],
         filled: i >= 3,
         text_color: if i == 3 { [29, 38, 52, 255] } else { [255; 4] },
-        effect_size: [8, 12, 16, 24, 32, 64][i],
+        effect_size: [8, 12, 16, 24, 32, 64, 96, 128][i],
     })
 }
 
@@ -206,19 +216,57 @@ impl EditorState {
         if !kind.is_shape() {
             ui.label(egui::RichText::new(kind_name(kind)).size(18.).strong());
         }
-        ui.label(egui::RichText::new("Quick styles").color(appearance::palette(ui.ctx()).muted));
-        ui.add_space(4.);
-        let width = (ui.available_width() - 16.) / 3.;
+        let tab_id = egui::Id::new(("quick-style-tab", kind as u8));
+        let mut tab = ui
+            .ctx()
+            .data(|data| data.get_temp::<usize>(tab_id))
+            .unwrap_or(0)
+            .min(2);
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new("Quick styles").color(appearance::palette(ui.ctx()).muted),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 3.;
+                for index in (0..3).rev() {
+                    let response = ui.add_sized(
+                        [23., 22.],
+                        egui::Button::new((index + 1).to_string()).selected(tab == index),
+                    );
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::Button,
+                            ui.is_enabled(),
+                            tab == index,
+                            format!("Quick styles {}", index + 1),
+                        )
+                    });
+                    if response
+                        .on_hover_text(match index {
+                            0 => "Quick styles 1 · First four styles",
+                            1 => "Quick styles 2 · More styles",
+                            _ => "Quick styles 3 · Your four saved styles",
+                        })
+                        .clicked()
+                    {
+                        tab = index;
+                    }
+                }
+            });
+        });
+        ui.ctx().data_mut(|data| data.insert_temp(tab_id, tab));
+        ui.add_space(2.);
+        let width = (ui.available_width() - 15.) / 4.;
+        let height = if kind.is_effect() { 46. } else { 36. };
         let enabled = self.selected.is_none() || self.can_edit_selection(document);
-        let choices = styles(kind);
         ui.add_enabled_ui(enabled, |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(8., 6.);
-            for row in choices.chunks(3) {
-                ui.horizontal(|ui| {
-                    for &style in row {
+            ui.spacing_mut().item_spacing = Vec2::new(5., 4.);
+            ui.horizontal(|ui| {
+                if tab < 2 {
+                    for &style in &styles(kind)[tab * 4..tab * 4 + 4] {
                         let selected = self.style_matches(kind, style);
                         let (rect, response) =
-                            ui.allocate_exact_size(Vec2::new(width, 58.), Sense::click());
+                            ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
                         let label = format!("{} · {} quick style", kind_name(kind), style.label);
                         response.widget_info(|| {
                             egui::WidgetInfo::selected(
@@ -233,6 +281,7 @@ impl EditorState {
                             rect,
                             kind,
                             style,
+                            None,
                             selected,
                             response.hovered() || response.has_focus(),
                         );
@@ -247,8 +296,96 @@ impl EditorState {
                             self.apply_quick_style(document, history, style);
                         }
                     }
-                });
-            }
+                } else {
+                    let current = tool_appearance::Appearance::from_editor(self);
+                    for (slot, saved) in self.custom_quick_styles(kind).iter().enumerate() {
+                        let (rect, response) =
+                            ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+                        let label = format!(
+                            "{} {} style {}",
+                            if saved.is_some() {
+                                "Apply custom"
+                            } else {
+                                "Save current"
+                            },
+                            kind_name(kind),
+                            slot + 1
+                        );
+                        response.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                ui.is_enabled(),
+                                &label,
+                            )
+                        });
+                        if let Some(saved) = saved {
+                            preview(
+                                ui,
+                                rect,
+                                kind,
+                                styles(kind)[0],
+                                Some(saved),
+                                *saved == current,
+                                response.hovered() || response.has_focus(),
+                            );
+                        } else {
+                            let palette = appearance::palette(ui.ctx());
+                            ui.painter().rect(
+                                rect,
+                                7.,
+                                if response.hovered() {
+                                    palette.cream
+                                } else {
+                                    palette.paper
+                                },
+                                Stroke::new(
+                                    if response.has_focus() { 2. } else { 1. },
+                                    palette.border,
+                                ),
+                                StrokeKind::Inside,
+                            );
+                            appearance::icon(
+                                ui.painter(),
+                                rect.center(),
+                                appearance::Icon::Create,
+                                palette.muted,
+                                16.,
+                            );
+                        }
+                        let response = response.on_hover_text(if saved.is_some() {
+                            format!("{label}\nRight-click to update or clear this slot")
+                        } else {
+                            format!(
+                                "{label}\nSet the properties below, then click to save them here"
+                            )
+                        });
+                        if response.clicked() {
+                            if saved.is_some() {
+                                self.apply_custom_quick_style(document, history, kind, slot);
+                            } else {
+                                self.save_custom_quick_style(kind, slot);
+                            }
+                        }
+                        response.context_menu(|ui| {
+                            if ui
+                                .button(if saved.is_some() {
+                                    "Update from current style"
+                                } else {
+                                    "Save current style"
+                                })
+                                .clicked()
+                            {
+                                self.save_custom_quick_style(kind, slot);
+                                ui.close();
+                            }
+                            if saved.is_some() && ui.button("Clear saved style").clicked() {
+                                self.clear_custom_quick_style(kind, slot);
+                                ui.close();
+                            }
+                        });
+                    }
+                }
+            });
         });
         ui.add_space(3.);
         ui.separator();
@@ -261,6 +398,7 @@ fn preview(
     rect: Rect,
     kind: AnnotationKind,
     style: QuickStyle,
+    custom: Option<&tool_appearance::Appearance>,
     selected: bool,
     hovered: bool,
 ) {
@@ -290,8 +428,15 @@ fn preview(
         ),
         StrokeKind::Inside,
     );
-    let preview_scale = 0.75;
-    let origin = rect.min + Vec2::new((rect.width() - 80. * preview_scale) * 0.5, 2.);
+    let preview_height = rect.height() - if kind.is_effect() { 14. } else { 0. };
+    let preview_scale = ((rect.width() - 6.) / 80.)
+        .min((preview_height - 4.) / 52.)
+        .min(0.75);
+    let origin = rect.min
+        + Vec2::new(
+            (rect.width() - 80. * preview_scale) * 0.5,
+            (preview_height - 52. * preview_scale) * 0.5,
+        );
     let mut annotation = Annotation {
         kind,
         start: Point { x: 12., y: 12. },
@@ -361,6 +506,9 @@ fn preview(
         }
         _ => {}
     }
+    if let Some(custom) = custom {
+        custom.paint_preview(&mut annotation);
+    }
     if kind.is_effect() {
         // A neutral strength swatch: no source-image pixels enter the style gallery.
         for y in 0..3 {
@@ -389,13 +537,19 @@ fn preview(
             preview_scale,
         );
     }
-    painter.text(
-        rect.center_bottom() - Vec2::new(0., 11.),
-        egui::Align2::CENTER_CENTER,
-        style.label,
-        egui::FontId::proportional(11.),
-        appearance::palette(ui.ctx()).ink,
-    );
+    // Strength values distinguish privacy effects; color names stay in tooltips.
+    if kind.is_effect() {
+        painter.text(
+            rect.center_bottom() - Vec2::new(0., 8.),
+            egui::Align2::CENTER_CENTER,
+            format!(
+                "{} px",
+                custom.map_or(style.effect_size, |a| a.effect_size())
+            ),
+            egui::FontId::proportional(10.5),
+            appearance::palette(ui.ctx()).ink,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -418,7 +572,10 @@ mod tests {
     #[test]
     fn every_kind_styles_undo_and_reopen_without_losing_content_or_geometry() {
         let dir = tempfile::tempdir().unwrap();
-        for a in artwork() {
+        for (a, style_index) in artwork()
+            .into_iter()
+            .flat_map(|a| [5, 6, 7].map(|i| (a.clone(), i)))
+        {
             let mut d = blank();
             d.annotations.push(a);
             d.annotations[0].group_id = None;
@@ -429,7 +586,7 @@ mod tests {
             let mut e = EditorState::default();
             e.select(Some(0), &d);
             let kind = d.annotations[0].kind;
-            e.apply_quick_style(&mut d, &mut h, styles(kind)[5]);
+            e.apply_quick_style(&mut d, &mut h, styles(kind)[style_index]);
             assert!(h.is_dirty(&d));
             let updated = d.edit_state();
             let before = &original.annotations[0];
@@ -689,12 +846,14 @@ mod tests {
         let mut d = blank();
         let mut h = EditHistory::new(d.edit_state());
         let mut e = EditorState {
-            layers_open: true,
+            inspector: inspector_panel::State::pinned(InspectorPanel::Layers),
             ..Default::default()
         };
         click("Arrow", &mut e, &mut d, &mut h, &ctx, &texture);
         assert!(e.tool == Tool::Arrow);
-        assert!(!e.layers_open && !e.presets_open);
+        assert!(
+            !e.inspector.is(InspectorPanel::Layers) && !e.inspector.is(InspectorPanel::Presets)
+        );
         let output = frame(&mut e, &mut d, &mut h, &ctx, &texture, vec![]);
         let text_bounds = |label: &str| {
             output
@@ -731,8 +890,37 @@ mod tests {
                 "Unexpected {hidden}"
             );
         }
-        assert!(text_bounds("Arrow properties").top() > text_bounds("Violet").bottom());
-        click("Blue", &mut e, &mut d, &mut h, &ctx, &texture);
+        let last_preview = output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .find_map(|(_, n)| {
+                (n.label() == Some("Arrow · Amber quick style"))
+                    .then(|| n.bounds())
+                    .flatten()
+            })
+            .unwrap();
+        assert!(f64::from(text_bounds("Arrow properties").top()) > last_preview.y1);
+        for color in [
+            "Red", "Blue", "Teal", "Amber", "Ink", "Violet", "Green", "Pink",
+        ] {
+            assert!(
+                !output.shapes.iter().any(
+                    |s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.job.text == color)
+                )
+            );
+        }
+        click(
+            "Arrow · Blue quick style",
+            &mut e,
+            &mut d,
+            &mut h,
+            &ctx,
+            &texture,
+        );
         assert_eq!(e.color, styles(AnnotationKind::Arrow)[1].color);
         assert!(!h.can_undo());
         let mut a = e.new_annotation(AnnotationKind::Arrow, Point { x: 20., y: 20. });
@@ -741,7 +929,15 @@ mod tests {
         h = EditHistory::new(d.edit_state());
         e.activate_tool(Tool::Select);
         e.select(Some(0), &d);
-        click("Violet", &mut e, &mut d, &mut h, &ctx, &texture);
+        click("Quick styles 2", &mut e, &mut d, &mut h, &ctx, &texture);
+        click(
+            "Arrow · Violet quick style",
+            &mut e,
+            &mut d,
+            &mut h,
+            &ctx,
+            &texture,
+        );
         assert_eq!(
             d.annotations[0].color,
             styles(AnnotationKind::Arrow)[5].color
@@ -752,7 +948,14 @@ mod tests {
             styles(AnnotationKind::Arrow)[1].color
         );
         click("Callout", &mut e, &mut d, &mut h, &ctx, &texture);
-        click("Amber", &mut e, &mut d, &mut h, &ctx, &texture);
+        click(
+            "Callout · Amber quick style",
+            &mut e,
+            &mut d,
+            &mut h,
+            &ctx,
+            &texture,
+        );
         assert_eq!(e.color, styles(AnnotationKind::Callout)[3].color);
         assert_eq!(e.text_color, [29, 38, 52, 255]);
     }

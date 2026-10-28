@@ -567,14 +567,14 @@ mod tests {
         let original = destination.edit_state();
         let pixels = destination.image.clone();
         let mut h = EditHistory::new(original.clone());
-        e.presets_open = true;
+        e.inspector.show(InspectorPanel::Presets);
         e.insert_preset(1, &mut destination, &mut h);
         assert_eq!(destination.annotations.len(), 10);
         assert_eq!(
             e.selected_indices(&destination),
             (0..10).collect::<Vec<_>>()
         );
-        assert!(e.layers_open && !e.presets_open);
+        assert!(e.inspector.is(InspectorPanel::Layers) && !e.inspector.is(InspectorPanel::Presets));
         let first = destination.annotations.clone();
         e.insert_preset(1, &mut destination, &mut h);
         assert_ne!(
@@ -676,6 +676,9 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
+                egui::TopBottomPanel::top("test-ribbon").show(ctx, |ui| {
+                    ui.horizontal(|ui| e.toolbar(ui, d, h));
+                });
                 egui::TopBottomPanel::bottom("test-image-controls").show(ctx, |ui| {
                     ui.horizontal(|ui| e.image_controls(ui, d, h));
                 });
@@ -770,6 +773,7 @@ mod tests {
         let initial = d.edit_state();
         let mut h = EditHistory::new(initial.clone());
         e.set_selection(vec![0, 1, 2], &d);
+        click("Choose panel", &mut e, &mut d, &mut h, &ctx, &texture);
         click("Presets", &mut e, &mut d, &mut h, &ctx, &texture);
         click(
             "Save selection as preset…",
@@ -803,6 +807,7 @@ mod tests {
         e.reset();
         d = blank();
         h = EditHistory::new(d.edit_state());
+        click("Choose panel", &mut e, &mut d, &mut h, &ctx, &texture);
         click("Presets", &mut e, &mut d, &mut h, &ctx, &texture);
         click("Review kit", &mut e, &mut d, &mut h, &ctx, &texture);
         click("Insert preset", &mut e, &mut d, &mut h, &ctx, &texture);

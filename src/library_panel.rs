@@ -24,6 +24,8 @@ mod actions;
 mod availability;
 #[path = "library_browser.rs"]
 mod browser;
+#[path = "library_gallery.rs"]
+mod gallery;
 #[path = "library_selection.rs"]
 mod selection;
 use browser::{Collection, Location};
@@ -181,6 +183,7 @@ pub struct LibraryPanel {
     filter_dirty: bool,
     reset_scroll: bool,
     selection: FileSelection,
+    marquee: Option<selection::Marquee>,
     recent_selection: FileSelection,
     pending: HashSet<PathBuf>,
     outdated_previews: HashSet<PathBuf>,
@@ -215,6 +218,7 @@ impl Default for LibraryPanel {
             filter_dirty: true,
             reset_scroll: true,
             selection: FileSelection::default(),
+            marquee: None,
             recent_selection: FileSelection::default(),
             pending: HashSet::new(),
             outdated_previews: HashSet::new(),
@@ -505,6 +509,7 @@ impl LibraryPanel {
         chosen
     }
     pub fn refresh(&mut self) {
+        self.cancel_marquee();
         self.generation.fetch_add(1, Ordering::Relaxed);
         self.needs_scan = true;
         self.scanning = false;
@@ -711,6 +716,7 @@ impl LibraryPanel {
         if !self.filter_dirty {
             return;
         }
+        self.cancel_marquee();
         self.filtered = filter_entries(&self.entries, self.filter, &self.search);
         self.filtered.retain(|&i| {
             self.collection
@@ -722,6 +728,15 @@ impl LibraryPanel {
             self.preferences.sort,
             self.preferences.descending,
         );
+        // Keep the requested sort within each day, with date separators in order.
+        self.filtered.sort_by(|&a, &b| {
+            let dates = self.entries[a].date.cmp(&self.entries[b].date);
+            if self.preferences.descending {
+                dates.reverse()
+            } else {
+                dates
+            }
+        });
         self.calendar = build_calendar(
             self.entries
                 .iter()

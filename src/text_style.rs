@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TextStyle {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<crate::text_path::TextPath>,
     pub monospace: bool,
     pub italic: bool,
     pub underline: bool,

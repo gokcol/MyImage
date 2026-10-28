@@ -211,6 +211,8 @@ impl EditorState {
             }
             candidate.annotations.push(copy);
         }
+        crate::connectors::remap(&mut candidate.annotations[first..], &document.annotations);
+        crate::connectors::sync(&mut candidate);
         if let Err(error) = crate::canvas::extend_for_annotations(
             &mut candidate,
             &(first..first + indices.len()).collect::<Vec<_>>(),
@@ -303,7 +305,7 @@ impl EditorState {
     }
 }
 
-fn fresh_group(used: &BTreeSet<u64>) -> u64 {
+pub(super) fn fresh_group(used: &BTreeSet<u64>) -> u64 {
     (1..)
         .find(|id| !used.contains(id))
         .expect("bounded annotation count leaves an unused group ID")
@@ -356,6 +358,7 @@ pub(super) fn move_selection(
     for &i in indices {
         document.annotations[i] = offset_annotation(&originals[i], delta);
     }
+    crate::connectors::sync(document);
 }
 
 pub(super) fn resize_selection(
@@ -392,6 +395,9 @@ pub(super) fn resize_selection(
             *p = transform(*p);
         }
         a.stroke_width = (a.stroke_width * factor).clamp(0.1, crate::document::MAX_STROKE_WIDTH);
+        if let Some(path) = &mut a.text_style.path {
+            path.scale(factor);
+        }
         a.font_size = (a.font_size * factor).clamp(1.0, crate::document::MAX_FONT_SIZE);
         if a.kind.is_effect() {
             a.effect_size = (a.effect_size as f32 * factor)
@@ -401,6 +407,7 @@ pub(super) fn resize_selection(
         }
         candidate.annotations[i] = a;
     }
+    crate::connectors::sync(&mut candidate);
     crate::document::validate_document(&candidate)?;
     document.annotations = candidate.annotations;
     Ok(())

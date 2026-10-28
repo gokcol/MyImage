@@ -403,6 +403,35 @@ impl LibraryPanel {
                 .small()
                 .color(appearance::palette(ui.ctx()).muted),
             );
+            let select_all = ui
+                .add_enabled(
+                    !self.filtered.is_empty(),
+                    egui::Button::new("Select all").small(),
+                )
+                .on_hover_text(
+                    "Select every project in the displayed date interval and current filter",
+                );
+            if select_all.clicked() {
+                self.cancel_marquee();
+                let order = self
+                    .filtered
+                    .iter()
+                    .map(|&i| self.entries[i].path.clone())
+                    .collect::<Vec<_>>();
+                self.selection.select_all(&order);
+                self.selection.focus = Some(select_all.id);
+                select_all.request_focus();
+            }
+            let deselect = ui.add_enabled(
+                !self.selection.paths.is_empty(),
+                egui::Button::new("Deselect").small(),
+            );
+            if deselect.clicked() {
+                self.cancel_marquee();
+                self.selection.clear();
+                self.selection.focus = Some(deselect.id);
+                deselect.request_focus();
+            }
             if !self.warnings.is_empty() {
                 ui.label(
                     RichText::new(format!("{} notices", self.warnings.len()))
@@ -488,37 +517,167 @@ impl LibraryPanel {
         let row_height = if list { 72. } else { card_height };
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("library-thumbnails")
+            .scroll_source(egui::scroll_area::ScrollSource {
+                drag: false,
+                ..Default::default()
+            })
             .auto_shrink([false, false]);
         if self.reset_scroll {
             scroll = scroll.vertical_scroll_offset(0.);
             self.reset_scroll = false;
         }
         let mut action = None;
-        scroll.show_rows(
-            ui,
-            row_height,
-            self.filtered.len().div_ceil(columns),
-            |ui, range| {
-                for row in range {
-                    ui.horizontal(|ui| {
-                        for column in 0..columns {
-                            let Some(&index) = self.filtered.get(row * columns + column) else {
-                                break;
-                            };
-                            let entry = self.entries[index].clone();
-                            if let Some(next) = ui
-                                .push_id(&entry.path, |ui| {
-                                    self.card(ui, &entry, width, row_height, list)
-                                })
-                                .inner
-                            {
-                                action = Some(next);
-                            }
-                        }
-                    });
-                }
-            },
+        let gallery = gallery::Gallery::new(
+            &self.entries,
+            &self.filtered,
+            columns,
+            Vec2::new(width, row_height),
+            ui.spacing().item_spacing,
         );
+        scroll.show_viewport(ui, |ui, visible| {
+            ui.set_height(gallery.height);
+            let origin = ui.max_rect().min;
+            let layout = selection::GalleryLayout {
+                origin,
+                viewport: visible
+                    .translate(origin.to_vec2())
+                    .intersect(ui.clip_rect()),
+                columns,
+                card: Vec2::new(width, row_height),
+                gap: ui.spacing().item_spacing,
+                cards: &gallery.cards,
+                day_checkboxes: &gallery.day_checkboxes,
+            };
+            let background = ui.interact(
+                layout.viewport,
+                ui.id().with("library-marquee"),
+                egui::Sense::click_and_drag(),
+            );
+            background.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    "Drag to select projects",
+                )
+            });
+            let marquee = self.marquee_selection(ui, &background, &layout);
+            for (row_index, row) in gallery
+                .rows
+                .iter()
+                .enumerate()
+                .filter(|(_, row)| row.rect.intersects(visible))
+            {
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .id_salt(("gallery-row", row_index))
+                        .max_rect(row.rect.translate(origin.to_vec2())),
+                    |ui| {
+                        ui.horizontal(|ui| match &row.content {
+                            gallery::RowContent::Date(date, range) => {
+                                ui.style_mut().interaction.selectable_labels = false;
+                                let palette = appearance::palette(ui.ctx());
+                                ui.painter().rect_filled(ui.max_rect(), 4., palette.base);
+                                let count = range.len();
+                                let selected = range
+                                    .clone()
+                                    .filter(|&position| {
+                                        self.selection
+                                            .paths
+                                            .contains(&self.entries[self.filtered[position]].path)
+                                    })
+                                    .count();
+                                let partial = selected > 0 && selected < count;
+                                let mut checked = selected == count;
+                                let checkbox = ui.add_sized(
+                                    Vec2::splat(28.),
+                                    egui::Checkbox::without_text(&mut checked)
+                                        .indeterminate(partial),
+                                );
+                                let label =
+                                    format!("Select projects for {}", date.format("%Y-%m-%d"));
+                                checkbox.widget_info(|| {
+                                    if partial {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Checkbox,
+                                            ui.is_enabled(),
+                                            &label,
+                                        )
+                                    } else {
+                                        egui::WidgetInfo::selected(
+                                            egui::WidgetType::Checkbox,
+                                            ui.is_enabled(),
+                                            checked,
+                                            &label,
+                                        )
+                                    }
+                                });
+                                if checkbox.changed() {
+                                    self.selection.set_group(
+                                        range.clone().map(|position| {
+                                            self.entries[self.filtered[position]].path.clone()
+                                        }),
+                                        checked,
+                                    );
+                                    self.selection.focus = Some(checkbox.id);
+                                    checkbox.request_focus();
+                                    ui.ctx().request_repaint();
+                                }
+                                checkbox.on_hover_text(if selected == count {
+                                    "Deselect this day's displayed projects"
+                                } else {
+                                    "Select this day's displayed projects"
+                                });
+                                let (icon, _) =
+                                    ui.allocate_exact_size(Vec2::splat(24.), egui::Sense::hover());
+                                appearance::icon(
+                                    ui.painter(),
+                                    icon.center(),
+                                    appearance::Icon::CalendarDay,
+                                    palette.accent,
+                                    16.,
+                                );
+                                ui.strong(date.format("%Y / %B / %d · %A").to_string());
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.small(format!(
+                                            "{count} project{}",
+                                            if count == 1 { "" } else { "s" }
+                                        ));
+                                    },
+                                );
+                            }
+                            gallery::RowContent::Projects(range) => {
+                                for position in range.clone() {
+                                    let entry = self.entries[self.filtered[position]].clone();
+                                    if let Some(next) = ui
+                                        .push_id(&entry.path, |ui| {
+                                            self.card(ui, &entry, width, row_height, list)
+                                        })
+                                        .inner
+                                    {
+                                        action = Some(next);
+                                    }
+                                }
+                            }
+                        });
+                    },
+                );
+            }
+            if let Some(rect) = marquee {
+                let accent = appearance::palette(ui.ctx()).accent;
+                ui.painter().with_clip_rect(layout.viewport).rect(
+                    rect,
+                    2.,
+                    accent.gamma_multiply(0.13),
+                    Stroke::new(1., accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if !ui.input(|i| i.pointer.primary_down()) {
+                self.marquee = None;
+            }
+        });
         action
     }
 
@@ -631,17 +790,24 @@ impl LibraryPanel {
                 24.,
             );
         }
-        if entry.kind == EntryKind::Project && !list {
-            let badge = Rect::from_min_size(preview.min + Vec2::splat(5.), Vec2::new(60., 19.));
-            ui.painter()
-                .rect_filled(badge, 4., appearance::palette(ui.ctx()).ginger);
-            ui.painter().text(
-                badge.center(),
-                egui::Align2::CENTER_CENTER,
-                "PROJECT",
-                FontId::proportional(9.),
-                appearance::palette(ui.ctx()).ink,
-            );
+        let checkbox_rect = Rect::from_min_size(rect.min + Vec2::splat(6.), Vec2::splat(24.));
+        ui.painter().rect_filled(checkbox_rect, 4., Color32::WHITE);
+        let mut checked = self.selection.paths.contains(&entry.path);
+        let checkbox = ui.put(checkbox_rect, egui::Checkbox::without_text(&mut checked));
+        checkbox.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Checkbox,
+                ui.is_enabled(),
+                checked,
+                format!("Select {}", entry.name),
+            )
+        });
+        let checkbox_clicked = checkbox.changed();
+        if checkbox_clicked {
+            self.selection.click(&entry.path, &[], true, false);
+            self.selection.focus = Some(checkbox.id);
+            checkbox.request_focus();
+            ui.ctx().request_repaint();
         }
         let favorite = self.preferences.favorites.contains(&entry.path);
         let star_rect =
@@ -735,6 +901,8 @@ impl LibraryPanel {
             .on_hover_text(tooltip)
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if !star_clicked
+            && !checkbox_clicked
+            && self.marquee.is_none()
             && response.double_clicked()
             && !ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift)
         {

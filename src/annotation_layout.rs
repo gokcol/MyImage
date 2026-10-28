@@ -619,6 +619,11 @@ mod tests {
         let before = d.edit_state();
         let mut h = EditHistory::new(before.clone());
         let mut e = EditorState::default();
+        e.set_inspector_preferences(InspectorPreferences {
+            expanded: true,
+            pinned: true,
+            ..Default::default()
+        });
         e.select(Some(0), &d);
         click_label("Arrange ▾", &mut e, &mut d, &mut h, &ctx, &texture);
         click_label("All annotations", &mut e, &mut d, &mut h, &ctx, &texture);

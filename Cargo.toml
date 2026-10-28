@@ -1,6 +1,6 @@
 [package]
 name = "myimage"
-version = "2.1.2"
+version = "2.2.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Native desktop screen capture for macOS and Windows"
@@ -39,6 +39,7 @@ arboard = "=3.7.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "=0.2.191"
 objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSColorSampler", "NSColor", "NSColorSpace", "block2", "objc2-core-foundation"] }
 block2 = "0.6"
 objc2-screen-capture-kit = "0.3.2"
 objc2-foundation = "0.3.2"

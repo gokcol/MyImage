@@ -111,8 +111,7 @@ impl EditorState {
             egui::vec2(crop.width as f32, crop.height as f32),
         ));
         self.tool = Tool::Area;
-        self.layers_open = false;
-        self.presets_open = false;
+        self.inspector.select(InspectorPanel::Styles);
         self.focus_canvas = true;
     }
 
@@ -132,21 +131,26 @@ impl EditorState {
         document: &mut Document,
         history: &mut EditHistory,
     ) {
-        if ui
-            .button("Select all")
-            .on_hover_text("Select the entire visible image (Command/Ctrl + A)")
-            .clicked()
+        if canvas_menu::item(
+            ui,
+            "Select all",
+            canvas_menu::MenuIcon::Glyph(inspector_widgets::Glyph::All),
+            true,
+        )
+        .on_hover_text("Select the entire visible image (Command/Ctrl + A)")
+        .clicked()
         {
             self.select_all_image(document, history);
             ui.close();
         }
-        if ui
-            .add_enabled(
-                self.area.is_some() || self.selected.is_some(),
-                egui::Button::new("Deselect"),
-            )
-            .on_hover_text("Clear the selection (Escape)")
-            .clicked()
+        if canvas_menu::item(
+            ui,
+            "Deselect",
+            canvas_menu::MenuIcon::Glyph(inspector_widgets::Glyph::Clear),
+            self.area.is_some() || self.selected.is_some(),
+        )
+        .on_hover_text("Clear the selection (Escape)")
+        .clicked()
         {
             self.deselect_pixels();
             self.focus_canvas = true;

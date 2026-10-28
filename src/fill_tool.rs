@@ -87,6 +87,11 @@ impl EditorState {
         self.fill_tool.global = preferences.global;
     }
 
+    pub(super) fn remember_sampled_fill(&mut self, color: [u8; 4]) {
+        self.fill_tool.color = color;
+        self.remember_fill_preferences();
+    }
+
     fn remember_fill_preferences(&mut self) {
         let preferences = tool_appearance::FillPreferences {
             color: self.fill_tool.color,
@@ -183,9 +188,7 @@ impl EditorState {
             self.restore_fill_preferences();
         }
         self.fill_tool.error = None;
-        self.layers_open = false;
-        self.effects_open = false;
-        self.presets_open = false;
+        self.inspector.select(InspectorPanel::Styles);
     }
     pub(super) fn sync_fill_selection(&mut self, annotation: &Annotation) {
         if let Some(region) = &annotation.fill_region {
@@ -390,7 +393,7 @@ impl EditorState {
                 }
                 ui.weak("Color updates immediately. Update the region after changing tolerance, Global fill or underlying artwork.");
                 if ui.button("Remove fill").clicked() {self.delete(document,history);}
-                if ui.button("Open layers").clicked() {self.layers_open=true;}
+                if ui.button("Open layers").clicked() {self.inspector.show(InspectorPanel::Layers);}
             }
             ui.separator();
             if self.area.is_some() {

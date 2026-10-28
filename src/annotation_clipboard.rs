@@ -165,6 +165,7 @@ pub(super) fn prepare_insertion(
     for a in &mut annotations {
         *a = offset_annotation(a, delta);
     }
+    crate::connectors::remap(&mut annotations, &destination.annotations);
     let mut candidate = destination.clone();
     candidate.annotations.extend(annotations.iter().cloned());
     crate::document::validate_document(&candidate)?;
@@ -551,10 +552,8 @@ impl EditorState {
         self.set_selection((first..first + count).collect(), document);
         self.tool = Tool::Select;
         self.focus_canvas = true;
-        self.layers_open |= protected;
         if protected {
-            self.presets_open = false;
-            self.effects_open = false;
+            self.inspector.show(InspectorPanel::Layers);
         }
         self.image_error = None;
         (count, protected)
@@ -615,12 +614,16 @@ impl EditorState {
         document: &mut Document,
         history: &mut EditHistory,
     ) {
-        if ui
-            .button("Copy")
-            .on_hover_text(
-                "Copy the selected area, or whole image when no area is selected (Command/Ctrl + C)",
-            )
-            .clicked()
+        if canvas_menu::item(
+            ui,
+            "Copy",
+            canvas_menu::MenuIcon::Glyph(inspector_widgets::Glyph::Copy),
+            true,
+        )
+        .on_hover_text(
+            "Copy the selected area, or whole image when no area is selected (Command/Ctrl + C)",
+        )
+        .clicked()
         {
             self.finish_annotation_gesture(document, history);
             self.copy_current(ui.ctx(), document);
@@ -630,21 +633,40 @@ impl EditorState {
         if self.extract_text_button(ui, document, history) {
             ui.close();
         }
-        if self.selected.is_some() && self.selected_indices(document).iter().all(|&i| !document.annotations[i].kind.is_area_edit() && document.annotations[i].kind != AnnotationKind::Fill) && ui.button("Copy editable annotations").on_hover_text("Copy selected objects and groups with their styles for another MyImage document").clicked() {
-            self.copy_annotations(ui.ctx(),document);ui.close();
-        }
-        if ui
-            .add_enabled(self.area.is_some(), egui::Button::new("Cut"))
+        if self.selected.is_some()
+            && self.selected_indices(document).iter().all(|&i| {
+                !document.annotations[i].kind.is_area_edit()
+                    && document.annotations[i].kind != AnnotationKind::Fill
+            })
+            && canvas_menu::item(
+                ui,
+                "Copy editable annotations",
+                canvas_menu::MenuIcon::App(DialogIcon::Copy),
+                true,
+            )
             .on_hover_text(
-                "Copy the selected pixels, then clear that area to transparency (Command/Ctrl + X)",
+                "Copy selected objects and groups with their styles for another MyImage document",
             )
             .clicked()
+        {
+            self.copy_annotations(ui.ctx(), document);
+            ui.close();
+        }
+        if canvas_menu::item(
+            ui,
+            "Cut",
+            canvas_menu::MenuIcon::Glyph(inspector_widgets::Glyph::Cut),
+            self.area.is_some(),
+        )
+        .on_hover_text(
+            "Copy the selected pixels, then clear that area to transparency (Command/Ctrl + X)",
+        )
+        .clicked()
         {
             self.cut_selection(ui.ctx(), document, history);
             ui.close();
         }
-        if ui
-            .button("Paste")
+        if canvas_menu::item(ui, "Paste", canvas_menu::MenuIcon::Paste, true)
             .on_hover_text(
                 "Paste an image as a movable layer, or paste editable MyImage annotations (Command/Ctrl + V)",
             )
@@ -900,6 +922,7 @@ mod tests {
         let mut d = blank();
         let mut h = EditHistory::new(d.edit_state());
         let mut e = EditorState {
+            inspector: inspector_panel::State::pinned(InspectorPanel::Styles),
             area: Some(Rect::from_min_size(
                 egui::pos2(20., 30.),
                 egui::vec2(300., 200.),
@@ -1195,7 +1218,7 @@ mod tests {
             }
             assert_eq!(d.annotations[10 + i], expected);
         }
-        assert!(e.layers_open);
+        assert!(e.inspector.is(InspectorPanel::Layers));
         assert_eq!(e.selected_indices(&d), (10..20).collect::<Vec<_>>());
         e.paste_annotations(&text, &mut d, &mut h);
         assert_eq!(d.annotations[20].group_id, Some(3));

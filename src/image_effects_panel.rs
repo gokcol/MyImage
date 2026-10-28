@@ -12,9 +12,7 @@ impl EditorState {
         history: &mut EditHistory,
     ) {
         self.finish_gesture(document, history);
-        self.effects_open = true;
-        self.layers_open = false;
-        self.presets_open = false;
+        self.inspector.show(InspectorPanel::Effects);
     }
 
     pub(super) fn image_effects_panel(

@@ -437,6 +437,8 @@ pub enum Icon {
     CalendarYear,
     CalendarMonth,
     CalendarDay,
+    Pin,
+    Unpin,
 }
 
 pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f32) {
@@ -917,6 +919,30 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
                 );
             }
         }
+        Icon::Pin | Icon::Unpin => {
+            // Upright when docked, angled when floating.
+            let angle: f32 = if matches!(kind, Icon::Pin) { -0.55 } else { 0. };
+            let at = |x: f32, y: f32| {
+                center
+                    + Vec2::new(
+                        x * angle.cos() - y * angle.sin(),
+                        x * angle.sin() + y * angle.cos(),
+                    ) * size
+            };
+            p.line(vec![at(-0.25, -0.38), at(0.25, -0.38)], s);
+            p.line(
+                vec![
+                    at(-0.17, -0.38),
+                    at(-0.17, -0.04),
+                    at(-0.32, 0.12),
+                    at(0.32, 0.12),
+                    at(0.17, -0.04),
+                    at(0.17, -0.38),
+                ],
+                s,
+            );
+            p.line_segment([at(0., 0.12), at(0., 0.44)], s);
+        }
         Icon::Refresh => {
             let points = (0..24)
                 .map(|i| center + Vec2::angled(0.2 + i as f32 / 23. * 5.2) * size * 0.4)
@@ -936,7 +962,7 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
 }
 
 pub fn nav_button(ui: &mut egui::Ui, label: &str, kind: Icon, selected: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(52.0, 44.0), egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(48.0, 40.0), egui::Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -965,13 +991,13 @@ pub fn nav_button(ui: &mut egui::Ui, label: &str, kind: Icon, selected: bool) ->
     }
     icon(
         ui.painter(),
-        rect.center_top() + Vec2::new(0.0, 14.0),
+        rect.center_top() + Vec2::new(0.0, 12.0),
         kind,
         color,
         18.0,
     );
     ui.painter().text(
-        rect.center_top() + Vec2::new(0.0, 36.0),
+        rect.center_top() + Vec2::new(0.0, 32.0),
         egui::Align2::CENTER_CENTER,
         label,
         egui::FontId::proportional(10.5),

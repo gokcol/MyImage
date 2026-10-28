@@ -271,10 +271,12 @@ impl MyImageApp {
         let library = LibraryPanel::with_preferences(settings.library.clone());
         let mut editor = EditorState::with_presets(storage::preset_library_path(demo));
         editor.set_tool_preferences(settings.editor_tools.clone());
+        editor.set_inspector_preferences(settings.editor_inspector);
         editor.set_toolbar(
             settings.editor_toolbar.clone(),
-            settings.toolbar_layout_version == 0,
+            settings.toolbar_layout_version < 2,
         );
+        editor.set_toolbar_order(settings.editor_tool_order.clone());
         Self {
             about_open: false,
             appearance_open: false,
@@ -394,6 +396,9 @@ impl MyImageApp {
     }
 
     fn persist_settings(&mut self) {
+        if let Some(preferences) = self.editor.take_inspector_preferences_change() {
+            self.settings.editor_inspector = preferences;
+        }
         if let Some(preferences) = self.editor.take_tool_preferences_change() {
             self.settings.editor_tools = preferences;
         }
@@ -825,6 +830,10 @@ impl MyImageApp {
     }
 
     fn finish_edit(&mut self) {
+        if let Some(preferences) = self.editor.take_inspector_preferences_change() {
+            self.settings.editor_inspector = preferences;
+            self.persist_settings();
+        }
         if let Some(document) = &mut self.document {
             self.editor.finish_gesture(document, &mut self.history);
         }
@@ -2070,7 +2079,7 @@ impl eframe::App for MyImageApp {
                                     }
                                     if self.view == View::Editor {
                                         ui.add_enabled_ui(has_doc, |ui| {
-                                            ui.menu_button("Image ▾", |ui| {
+                                            egui::containers::menu::MenuButton::new("Image ▾").config(egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)).ui(ui, |ui| {
                                                 if let Some(document) = &mut self.document {
                                                     self.editor.image_menu(
                                                         ui,
@@ -2079,7 +2088,7 @@ impl eframe::App for MyImageApp {
                                                     );
                                                 }
                                             })
-                                            .response
+                                            .0
                                             .on_hover_text(
                                                 "Resize, extend canvas, rotate, flip and crop",
                                             );
@@ -2120,7 +2129,7 @@ impl eframe::App for MyImageApp {
             });
         let previous_view = self.view;
         egui::TopBottomPanel::top("workspace_toolbar")
-            .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(6))
+            .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(5))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(3., 3.);
                 ui.add_enabled_ui(
@@ -2139,7 +2148,6 @@ impl eframe::App for MyImageApp {
                                 (View::Home, "Home", Icon::Home),
                                 (View::Editor, "Editor", Icon::Edit),
                                 (View::Library, "Library", Icon::Library),
-                                (View::Capture, "Capture", Icon::Capture),
                                 (View::Create, "Create", Icon::Create),
                             ] {
                                 if appearance::nav_button(
@@ -2155,9 +2163,9 @@ impl eframe::App for MyImageApp {
                                 }
                             }
                             if self.view == View::Editor {
-                                ui.add_space(12.);
+                                ui.add_space(8.);
                                 ui.separator();
-                                ui.add_space(12.);
+                                ui.add_space(8.);
                                 if let Some(document) = &mut self.document {
                                     self.editor.toolbar(ui, document, &mut self.history);
                                 }
@@ -2166,9 +2174,10 @@ impl eframe::App for MyImageApp {
                     },
                 );
             });
-        if let Some(pins) = self.editor.take_toolbar_change() {
+        if let Some((pins, order)) = self.editor.take_toolbar_change() {
             self.settings.editor_toolbar = pins;
-            self.settings.toolbar_layout_version = self.settings.toolbar_layout_version.max(1);
+            self.settings.editor_tool_order = order;
+            self.settings.toolbar_layout_version = self.settings.toolbar_layout_version.max(2);
             self.persist_settings();
         }
         if previous_view != self.view {
@@ -2370,6 +2379,12 @@ impl eframe::App for MyImageApp {
             && let Some(preferences) = self.editor.take_tool_preferences_change()
         {
             self.settings.editor_tools = preferences;
+            self.persist_settings();
+        }
+        if !ctx.input(|input| input.pointer.any_down())
+            && let Some(preferences) = self.editor.take_inspector_preferences_change()
+        {
+            self.settings.editor_inspector = preferences;
             self.persist_settings();
         }
         self.promote_edited_recent(ctx);

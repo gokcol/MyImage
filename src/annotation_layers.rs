@@ -598,6 +598,7 @@ mod tests {
         let mut e = EditorState::default();
         let target = LayerTarget::Group(1);
         let mut settings = LayerSettings {
+            object_id: None,
             name: "Review notes".into(),
             hidden: true,
             locked: true,
@@ -835,6 +836,9 @@ mod tests {
         input: egui::RawInput,
     ) -> egui::FullOutput {
         ctx.run(input, |ctx| {
+            egui::TopBottomPanel::top("test-ribbon").show(ctx, |ui| {
+                ui.horizontal(|ui| e.toolbar(ui, d, h));
+            });
             egui::CentralPanel::default().show(ctx, |ui| {
                 e.ui(ui, d, h, texture, &mut Default::default());
             });
@@ -897,8 +901,9 @@ mod tests {
         let original = d.edit_state();
         let mut h = EditHistory::new(original.clone());
         let mut e = EditorState::default();
+        click_label("Choose panel", &mut e, &mut d, &mut h, &ctx, &texture);
         click_label("Layers", &mut e, &mut d, &mut h, &ctx, &texture);
-        assert!(e.layers_open);
+        assert!(e.inspector.is(InspectorPanel::Layers));
         click_label("Group 1", &mut e, &mut d, &mut h, &ctx, &texture);
         assert_eq!(e.selected_indices(&d), vec![0, 1]);
         click_label("Show Group 1", &mut e, &mut d, &mut h, &ctx, &texture);

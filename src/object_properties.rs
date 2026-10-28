@@ -43,7 +43,17 @@ const COLORS: [(&str, [u8; 3]); 8] = [
 pub(super) fn palette(ui: &mut egui::Ui, color: &mut [u8; 4]) -> bool {
     let mut changed = false;
     ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.;
+        let custom_color = !egui::containers::menu::is_in_menu(ui);
+        let custom_width = if custom_color {
+            ui.spacing().interact_size.x
+        } else {
+            0.
+        };
+        let gaps = (COLORS.len() - 1 + usize::from(custom_color)) as f32;
+        // Keep every swatch and the custom picker usable in a narrow inspector.
+        ui.spacing_mut().item_spacing.x =
+            ((ui.available_width() - COLORS.len() as f32 * 23. - custom_width) / gaps)
+                .clamp(0., 4.);
         for (name, rgb) in COLORS {
             let selected = color[..3] == rgb;
             let (rect, response) = ui.allocate_exact_size(Vec2::splat(23.), Sense::click());
@@ -77,7 +87,7 @@ pub(super) fn palette(ui: &mut egui::Ui, color: &mut [u8; 4]) -> bool {
                 changed = true;
             }
         }
-        if !egui::containers::menu::is_in_menu(ui) {
+        if custom_color {
             changed |= ui
                 .color_edit_button_srgba_unmultiplied(color)
                 .on_hover_text("Custom color")
@@ -443,16 +453,131 @@ fn arrow_presets(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle) 
     changed
 }
 
+fn route_button(ui: &mut egui::Ui, label: &str, selected: bool, enabled: bool, icon: u8) -> bool {
+    ui.add_enabled_ui(enabled, |ui| {
+        let (rect, response) = ui.allocate_exact_size(Vec2::new(40., 28.), Sense::click());
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                selected,
+                label,
+            )
+        });
+        if selected || response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                4.,
+                if selected {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    ui.visuals().faint_bg_color
+                },
+            );
+        }
+        let color = ui.visuals().text_color();
+        let stroke = Stroke::new(1.7, color);
+        let center = rect.center();
+        let p = |x, y| center + Vec2::new(x, y);
+        let arrowhead = |tip: Pos2, d: f32| {
+            ui.painter()
+                .line_segment([tip + Vec2::new(-d * 4., -4.), tip], stroke);
+            ui.painter()
+                .line_segment([tip + Vec2::new(-d * 4., 4.), tip], stroke);
+        };
+        match icon {
+            0..=2 => {
+                ui.painter().line_segment([p(-12., 0.), p(12., 0.)], stroke);
+                if icon >= 1 {
+                    arrowhead(p(12., 0.), 1.);
+                }
+                if icon == 2 {
+                    arrowhead(p(-12., 0.), -1.);
+                }
+            }
+            3 => {
+                ui.painter().add(egui::Shape::line(
+                    vec![p(-12., -6.), p(0., -6.), p(0., 6.), p(12., 6.)],
+                    stroke,
+                ));
+                arrowhead(p(12., 6.), 1.);
+            }
+            4 => {
+                ui.painter().add(egui::Shape::line(
+                    vec![p(-11., -5.), p(-4., -9.), p(4., -2.), p(11., -5.)],
+                    Stroke::new(1., ui.visuals().weak_text_color()),
+                ));
+                ui.painter().line_segment([p(-12., 5.), p(12., 5.)], stroke);
+            }
+            _ => {
+                ui.painter().circle_stroke(p(-6., 0.), 5., stroke);
+                ui.painter().circle_stroke(p(6., 0.), 5., stroke);
+                ui.painter()
+                    .line_segment([p(-4., 8.), p(4., -8.)], Stroke::new(2., color));
+            }
+        }
+        response.on_hover_text(label).clicked()
+    })
+    .inner
+}
+fn routes(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle) -> bool {
+    let before = arrow.clone();
+    ui.label("Routes");
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.;
+        if route_button(
+            ui,
+            "Line",
+            arrow.start == Endpoint::None && arrow.end == Endpoint::None,
+            true,
+            0,
+        ) {
+            arrow.start = Endpoint::None;
+            arrow.end = Endpoint::None;
+        }
+        if route_button(
+            ui,
+            "Arrow",
+            arrow.start == Endpoint::None && arrow.end == Endpoint::Triangle,
+            true,
+            1,
+        ) {
+            arrow.start = Endpoint::None;
+            arrow.end = Endpoint::Triangle;
+        }
+        if route_button(
+            ui,
+            "Double arrow",
+            arrow.start == Endpoint::Triangle && arrow.end == Endpoint::Triangle,
+            true,
+            2,
+        ) {
+            arrow.start = Endpoint::Triangle;
+            arrow.end = Endpoint::Triangle;
+        }
+        if route_button(ui, "Elbow route", arrow.elbow, true, 3) {
+            arrow.elbow = !arrow.elbow;
+        }
+        if route_button(
+            ui,
+            "Straighten",
+            false,
+            arrow.curve.is_some() || arrow.elbow,
+            4,
+        ) {
+            arrow.curve = None;
+            arrow.elbow = false;
+        }
+    });
+    if arrow.connection.is_some() && route_button(ui, "Detach both endpoints", false, true, 5) {
+        arrow.connection = None;
+    }
+    *arrow != before
+}
+
 fn arrow_controls(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle) -> bool {
     let mut changed = false;
-    ui.small("Drag the yellow points on the arrow to reshape it.");
-    if ui
-        .add_enabled(arrow.curve.is_some(), egui::Button::new("Straighten"))
-        .clicked()
-    {
-        arrow.curve = None;
-        changed = true;
-    }
+    changed |= routes(ui, arrow);
     if egui::containers::menu::is_in_menu(ui) {
         changed |= arrow_presets(ui, arrow);
     } else {
@@ -477,31 +602,10 @@ fn arrow_controls(ui: &mut egui::Ui, arrow: &mut crate::arrow_style::ArrowStyle)
     ui.add_enabled_ui(arrow.end != Endpoint::None, |ui| {
         changed |= slider(ui, &mut arrow.end_size, 1.0..=8.0, "End size", "×");
     });
-    ui.horizontal(|ui| {
-        if ui
-            .small_button("Line")
-            .on_hover_text("Plain line without endpoints")
-            .clicked()
-        {
-            arrow.start = Endpoint::None;
-            arrow.end = Endpoint::None;
-            changed = true;
-        }
-        if ui.small_button("Arrow").clicked() {
-            arrow.start = Endpoint::None;
-            arrow.end = Endpoint::Triangle;
-            changed = true;
-        }
-        if ui.small_button("Double arrow").clicked() {
-            arrow.start = Endpoint::Triangle;
-            arrow.end = Endpoint::Triangle;
-            changed = true;
-        }
-    });
     changed
 }
 
-fn text_controls(
+pub(super) fn text_controls(
     ui: &mut egui::Ui,
     style: &mut crate::text_style::TextStyle,
     size: &mut f32,
@@ -943,18 +1047,20 @@ impl EditorState {
         if kind == AnnotationKind::Arrow || kind.is_shape() || kind == AnnotationKind::Freehand {
             let maximum = self.stroke_width.max(64.);
             changed |= slider(ui, &mut self.stroke_width, 0.1..=maximum, "Width", " px");
-            ui.horizontal(|ui| {
-                for width in [1., 2., 4., 8., 12., 24.] {
-                    if ui
-                        .selectable_label(self.stroke_width == width, format!("{width:.0}"))
-                        .on_hover_text(format!("{width:.0} px"))
-                        .clicked()
-                    {
-                        self.stroke_width = width;
-                        changed = true;
+            if kind != AnnotationKind::Arrow {
+                ui.horizontal(|ui| {
+                    for width in [1., 2., 4., 8., 12., 24.] {
+                        if ui
+                            .selectable_label(self.stroke_width == width, format!("{width:.0}"))
+                            .on_hover_text(format!("{width:.0} px"))
+                            .clicked()
+                        {
+                            self.stroke_width = width;
+                            changed = true;
+                        }
                     }
-                }
-            });
+                });
+            }
         }
         if kind == AnnotationKind::Arrow {
             changed |= arrow_controls(ui, &mut self.arrow);
@@ -1027,6 +1133,9 @@ impl EditorState {
         }
         if matches!(kind, AnnotationKind::Text | AnnotationKind::Callout) {
             changed |= text_controls(ui, &mut self.text_style, &mut self.font_size);
+            if kind == AnnotationKind::Text {
+                changed |= text_path_ui::controls(ui, &mut self.text_style);
+            }
         }
         changed
     }
@@ -1080,7 +1189,7 @@ impl EditorState {
                     self.privacy_actions(ui, document, history);
                     ui.separator();
                     if ui.button("Open layers").clicked() {
-                        self.layers_open = true;
+                        self.inspector.show(InspectorPanel::Layers);
                         ui.close();
                     }
                     if ui
@@ -1108,6 +1217,7 @@ impl EditorState {
         viewport: Rect,
     ) {
         if !ui.is_enabled()
+            || self.precision_active()
             || matches!(self.tool, Tool::Step | Tool::Pen | Tool::Eraser)
             || self.gesture.is_some()
             || self.area_drag.is_some()
@@ -1154,21 +1264,37 @@ impl EditorState {
         let initial_size = if quick {
             Vec2::new(
                 if kind == AnnotationKind::Arrow {
-                    166.
+                    200.
                 } else if kind.is_shape() {
-                    134.
+                    168.
                 } else {
-                    70.
+                    104.
                 },
                 38.,
             )
         } else {
-            Vec2::new(330., 40.)
+            Vec2::new(364., 40.)
         };
         let previous = ui.ctx().memory(|m| m.area_rect(bar_id));
         let size = previous.map_or(initial_size, |r| r.size());
+        // Keep the on-canvas shortcuts clear of the inspector overlay without
+        // resizing or scrolling the actual image underneath it.
+        let mut viewport = viewport;
+        if self.inspector.preferences.expanded
+            && !self.inspector.preferences.pinned
+            && let Some(overlay) = ui
+                .ctx()
+                .memory(|m| m.area_rect(egui::Id::new("inspector-overlay")))
+        {
+            viewport.max.x = viewport.right().min(overlay.left() - 6.);
+            if viewport.width() < size.x + 16. {
+                return;
+            }
+        }
         let position = if egui::Popup::is_any_open(ui.ctx()) {
-            previous.map(|r| r.min)
+            previous
+                .filter(|r| viewport.contains_rect(*r))
+                .map(|r| r.min)
         } else {
             None
         }
@@ -1190,6 +1316,21 @@ impl EditorState {
                     ui.spacing_mut().button_padding = Vec2::new(6., 5.);
                     ui.spacing_mut().interact_size.y = 26.;
                     ui.horizontal(|ui| {
+                        if inspector_widgets::tile(
+                            ui,
+                            "Open Styles",
+                            inspector_widgets::Glyph::App(crate::appearance::Icon::Settings),
+                            Vec2::splat(28.),
+                            self.inspector.is(InspectorPanel::Styles)
+                                && self.inspector.preferences.expanded,
+                            false,
+                        )
+                        .on_hover_text("Styles")
+                        .clicked()
+                        {
+                            self.finish_properties(document, history);
+                            self.inspector.show(InspectorPanel::Styles);
+                        }
                         if indices.len() > 1 {
                             ui.weak(format!("{} selected", indices.len()));
                             ui.menu_button("Arrange ▾", |ui| {
@@ -1581,11 +1722,28 @@ mod tests {
             "End",
             "Start size",
             "End size",
-            "Double arrow",
+            "Routes",
         ] {
             assert!(
                 labels.iter().any(|s| s == label),
                 "Missing {label}: {labels:?}"
+            );
+        }
+        for removed in [
+            "1",
+            "2",
+            "4",
+            "8",
+            "12",
+            "24",
+            "Double arrow",
+            "Elbow route",
+            "Straighten",
+            "Drag the yellow points on the arrow to reshape it.",
+        ] {
+            assert!(
+                !labels.iter().any(|label| label == removed),
+                "Unexpected text control: {removed}"
             );
         }
     }
