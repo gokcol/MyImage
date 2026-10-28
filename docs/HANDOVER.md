@@ -4,21 +4,27 @@ Prepared 24 October 2026 (Europe/Istanbul); added to Git at the user's request o
 
 Project root updated on 26 October 2026 (Europe/Istanbul) to `/Users/gokcol/SWPROJECTS/Utility/MyImage`. Use this directory for subsequent work; release evidence may retain historical workspace paths.
 
-## Version 2.2 release candidate — build 85, 28 October 2026
+## Published version 2.2 — build 85, 28 October 2026
 
-The final **v2.2** candidate is **2.2.0 build 85**, including all editor and Library improvements described below. Quick resize preserves the selected Fit/manual-zoom mode and briefly displays the new output dimensions on the canvas, making changes clear even when Fit keeps the same apparent image size. Undo/Redo buttons remain visible beside image controls; shortcuts work after menu, toolbar and property controls while text fields/modal drafts retain their own keyboard behavior. Image history survives autosave, including rotation and resize. Undo and Redo use the same action handler for buttons, menus and keyboard shortcuts.
+The published **v2.2** release is **2.2.0 build 85**, including all editor and Library improvements described below. Quick resize preserves the selected Fit/manual-zoom mode and briefly displays the new output dimensions on the canvas, making changes clear even when Fit keeps the same apparent image size. Undo/Redo buttons remain visible beside image controls; shortcuts work after menu, toolbar and property controls while text fields/modal drafts retain their own keyboard behavior. Image history survives autosave, including rotation and resize. Undo and Redo use the same action handler for buttons, menus and keyboard shortcuts.
 
 Validation passed: **592 tests** (577 application + 15 packaging; 23 ignored), formatting, strict all-target workspace Clippy and Windows MSVC cross-compilation. Added regressions cover both view modes, feedback expiry, shortcuts after toolbar focus, modal-draft protection, and rotation/resize Undo/Redo across real autosaves. Native Mac review confirmed the temporary 660×660 indicator and the visible Undo/Redo buttons; after a saved rotation, Undo restored horizontal text and Redo restored the rotation. Physical keyboard automation was not sent while Firefox retained foreground; event-level UI tests cover the shortcuts.
 
-Evidence: `dist/local-mac-v2.2.0-build85/` and `dist/release-v2.2-build85/`. Signing, notarization, installation, Windows installer verification and GitHub publication are being completed for this source. Build 84 is currently installed and was verified; its unpublished draft release was superseded by these final improvements. Store submission is unchanged. Preserve the unrelated branding PNG deletion.
+**[v2.2](https://github.com/gokcol/MyImage/releases/tag/v2.2) is public and latest**, published 28 October 2026 at 09:04 Istanbul, from source `31dd145f3386e6f2a8a1adcad757b02b41b39543`. All 15 release assets were verified against local hashes. The published tag remains on this application source; later documentation commits do not move it.
+
+**2.2.0 build 85** is installed at `/Applications/MyImage.app`, opened and confirmed running. It retains the existing Developer ID team `HXDYTBC6ZT`, hardened runtime and signing requirement. Apple accepted app notarization `1354ad07-0ad8-40af-aa13-e3055c5ec295` and DMG notarization `22724e54-5e2d-4d90-af11-ae251d133a84` using the existing MyPDF profile. App/DMG tickets are stapled and Gatekeeper accepted. Installed files match the source bundle and ZIP; rollback matches build 84; settings were byte-identical before first launch.
+
+The [native checks](https://github.com/gokcol/MyImage/actions/runs/40640398331) and [Windows installer workflow](https://github.com/gokcol/MyImage/actions/runs/40640409257) passed for the released source. Windows Setup and portable ZIP are published and unsigned. Disposable Windows checks passed installation, upgrade, binary identity, Start menu, file-open quoting, startup defaults/cleanup, uninstall and project preservation. Interactive Windows capture, clipboard, pen/touch, scaling and tray validation remain pending.
+
+Evidence: `dist/local-mac-v2.2.0-build85/` and `dist/release-v2.2-build85/`, including native screenshots, release/checksum reports and CI records. Builds 83 and 84 were superseded before publication. Store submission is unchanged. Preserve the unrelated branding PNG deletion.
 
 ## Previous local Mac test build 84 — 28 October 2026
 
-The final **v2.2** release uses application version **2.2.0 build 84**. Canvas menu actions have contextual icons; **Rotate**, **Flip** and **Select** each use one compact icon row. **Select all annotations** has colored objects inside its selection outline. Inline minus/plus buttons change the current output size by 10% per click. The **Resize image** dialog contains the 25%, 50%, 125%, 150% and Set to original presets: they update the draft fields and require **Apply resize**; Cancel leaves the image unchanged. Command/Ctrl+Shift+R opens that dialog with canvas focus. Library thumbnails omit the PROJECT badge; per-day checkboxes preserve other-day selection and show all/partial/none states.
+The previous **v2.2** candidate used application version **2.2.0 build 84**. Canvas menu actions have contextual icons; **Rotate**, **Flip** and **Select** each use one compact icon row. **Select all annotations** has colored objects inside its selection outline. Inline minus/plus buttons change the current output size by 10% per click. The **Resize image** dialog contains the 25%, 50%, 125%, 150% and Set to original presets: they update the draft fields and require **Apply resize**; Cancel leaves the image unchanged. Command/Ctrl+Shift+R opens that dialog with canvas focus. Library thumbnails omit the PROJECT badge; per-day checkboxes preserve other-day selection and show all/partial/none states.
 
 All **590 tests** pass (575 application + 15 packaging; 23 ignored), plus formatting, strict workspace Clippy and Windows MSVC cross-compilation. Native Mac review confirmed the final menu rows and colored selection icon, repeated 10% resize clicks (600 → 660 → 726), dialog preset dimensions (50% → 300, before Apply), Cancel, clean Library thumbnails and partial day selection (9 of 10). Evidence is in `dist/local-mac-v2.2.0-build84/`, including screenshots. Mac packaging, notarization and installation completed for build 84; its GitHub draft was superseded by build 85 before publication. Evidence remains in `dist/release-v2.2-build84/`. Windows interactive device testing remains pending. Store submission is unchanged.
 
-Build 83 was installed and verified, but its draft release assets/source were superseded before publication by the user's final menu requests. Only the unpublished v2.2 candidate tag is being advanced to build 84; previously published release tags remain unchanged. Preserve the unrelated branding PNG deletion.
+Build 83 was installed and verified, but its draft release assets/source were superseded before publication by the user's final menu requests. The unpublished v2.2 candidate tag was advanced to build 84 and then build 85 before publication; previously published release tags were unchanged. Preserve the unrelated branding PNG deletion.
 
 ## Previous local Mac test build 83 — 28 October 2026
 
@@ -95,9 +101,32 @@ Build 77 uses the existing Developer ID identity/team `HXDYTBC6ZT` and unchanged
 This is a local installation for user testing, with source changes uncommitted on base `167f6a6a92d97497951dbe3cbc1085b2d652e42f`. Evidence, source patch, signed/notarized ZIP, check logs and `macos-validation.json` are in `dist/local-mac-v2.1.3-build77/`. User testing is pending. No GitHub release or Store submission was changed; public build 76 and Store package 2.1.4.0 remain the snapshots below. The unrelated branding PNG deletion remains untouched.
 
 <!-- CURRENT_RELEASE_START -->
-## Public release snapshot — 27 October 2026
+## Current public release — 28 October 2026
 
-Project: `/Users/gokcol/SWPROJECTS/Utility/MyImage`, branch `main`. The old workspace path is stale; pass the new directory explicitly to shell commands.
+Project: `/Users/gokcol/SWPROJECTS/Utility/MyImage`, branch `main`. The old workspace path is stale; pass the current root explicitly to shell commands.
+
+| Item | Latest verified state |
+| --- | --- |
+| Released source | `31dd145f3386e6f2a8a1adcad757b02b41b39543`; annotated tag `v2.2` |
+| Published app | **2.2.0 build 85** |
+| GitHub | Public and latest, [v2.2](https://github.com/gokcol/MyImage/releases/tag/v2.2), published 28 October 2026 at 09:04 Istanbul |
+| Mac | Build 85 installed, opened and verified at `/Applications/MyImage.app`; matching DMG and ZIP published |
+| Mac signing | Existing Developer ID team; signed, notarized, stapled and Gatekeeper accepted; verified rollback is build 84 |
+| Windows | x64 Setup and portable ZIP published; unsigned; install/upgrade/uninstall and preservation checks passed |
+| Source validation | 592 tests passed, 23 ignored; formatting, strict Clippy, Windows cross-compilation and both release-source CI workflows passed |
+| Store | Unchanged by v2.2. Last verified 27 October: package **2.1.4.0**, **In certification / Pre-processing**, automatic publication after approval |
+| Validation limits | Interactive Windows capture/clipboard/pen/touch/scaling/tray checks remain pending. Store signing and availability have not been rechecked. |
+
+Release and installation are complete. The published tag stays on the application source above; documentation-only follow-up commits may advance `main`. Preserve the unrelated unstaged deletion `assets/branding/myimage-calico-logo-v1.png`.
+
+Evidence: `dist/release-v2.2-build85/release-validation.json`, `macos-validation.json`, `windows-validation.json`, `native-ci.json`, `windows-ci.json`, `SHA256SUMS` and `release-notes.md`; native Mac screenshots and installation audit are in `dist/local-mac-v2.2.0-build85/`. Apple app/DMG notarization IDs are recorded in the build 85 section above. Use the existing MyPDF profile; it authenticated successfully without credential changes.
+
+Do not resubmit or cancel the historical Store submission merely to repeat completed work. Its last verified package, identity and certification evidence are retained below.
+<!-- CURRENT_RELEASE_END -->
+
+## Historical build 76 release and Store snapshot — 27 October 2026
+
+This section records the earlier build 76 release and Store submission. Its local-build pointers are historical; use the current release block above for the installed/public version.
 
 | Item | Latest verified state |
 | --- | --- |
@@ -130,8 +159,8 @@ On 26 October, build 76 was uploaded/saved, replacing 2.1.3.0. The overview show
 
 Build 75 remains a historical public release. Its **2.1.3.0** package replaced 2.1.2.0, but was held In draft for this flicker fix. Do not overwrite prior release tags or binaries. The unrelated deletion `assets/branding/myimage-calico-logo-v1.png` remains deliberately unstaged.
 
-The sections below retain historical build-74 details and operating procedures. Use this current block and release reports for current versions and status.
-<!-- CURRENT_RELEASE_END -->
+The sections below retain historical build-74 details and operating procedures. Use the current release block above for current versions and status.
+
 
 ## Historical build 74 outcome
 
