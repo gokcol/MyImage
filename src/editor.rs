@@ -281,6 +281,7 @@ pub struct EditorState {
     text_editor_generation: u64,
     crop: Option<CropDraft>,
     resize: Option<ResizeDraft>,
+    resize_feedback: Option<([u32; 2], std::time::Instant)>,
     canvas_size: Option<canvas_tools::CanvasDraft>,
     canvas_resize: Option<canvas_handles::CanvasResize>,
     inspector: inspector_panel::State,
@@ -353,6 +354,7 @@ impl Default for EditorState {
             text_editor_generation: 0,
             crop: None,
             resize: None,
+            resize_feedback: None,
             canvas_size: None,
             canvas_resize: None,
             inspector: Default::default(),
@@ -576,6 +578,11 @@ impl EditorState {
             .memory(|m| m.focused())
             .is_some_and(|id| egui::text_edit::TextEditState::load(ui.ctx(), id).is_some());
         if !modal_open && !text_input_focused && self.canvas_resize.is_none() {
+            // Image history shortcuts also work after menu, toolbar and property
+            // controls take focus. Text editors retain their own local undo.
+            if ui.is_enabled() && !egui::Popup::is_any_open(ui.ctx()) {
+                self.history_shortcuts(ui, document, history);
+            }
             if self.precision_active()
                 && !egui::Popup::is_any_open(ui.ctx())
                 && ui.is_enabled()
@@ -822,6 +829,7 @@ impl EditorState {
                 self.precision.context_source = None;
                 self.canvas_menu(ui, document, history);
             });
+        self.history_controls(ui, document, history);
         if appearance::icon_button(ui, "Fit canvas to window", Icon::Fit).clicked() {
             self.fit = true;
         }
@@ -900,6 +908,7 @@ impl EditorState {
         document.geometry = geometry;
         history.commit(before, document);
         self.fit = true;
+        self.focus_canvas = true;
         self.image_error = None;
         true
     }
@@ -1221,6 +1230,7 @@ impl EditorState {
         preview: &mut crate::privacy_preview::PrivacyPreview,
     ) {
         crate::connectors::sync(document);
+        let feedback_bounds = ui.available_rect_before_wrap();
         let viewport = ui.available_size().max(Vec2::splat(1.0));
         let [width, height] = document.output_size();
         let image_size = Vec2::new(width as f32, height as f32);
@@ -1942,6 +1952,7 @@ impl EditorState {
                     }
                 }
             });
+        self.resize_feedback_ui(ui, feedback_bounds);
     }
 
     fn active_gesture_cursor(&self, document: &Document) -> Option<CursorIcon> {
@@ -2343,22 +2354,8 @@ impl EditorState {
             return;
         }
         self.clipboard_events(ui, document, history);
-        let redo_modifiers = Modifiers {
-            shift: true,
-            ..Modifiers::COMMAND
-        };
-        if ui.input_mut(|i| {
-            i.consume_key(redo_modifiers, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y)
-        }) {
-            self.finish_gesture(document, history);
-            history.redo(document);
-            self.area = None;
-            self.clear_selection();
-        } else if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Z)) {
-            self.finish_gesture(document, history);
-            history.undo(document);
-            self.area = None;
-            self.clear_selection();
+        if !egui::Popup::is_any_open(ui.ctx()) {
+            self.history_shortcuts(ui, document, history);
         }
         if ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             if let Some(gesture) = self.gesture.take() {
@@ -2381,7 +2378,15 @@ impl EditorState {
         if self.gesture.is_some() {
             return;
         }
-        if ui.input_mut(|i| i.consume_key(redo_modifiers, Key::G)) {
+        if ui.input_mut(|i| {
+            i.consume_key(
+                Modifiers {
+                    shift: true,
+                    ..Modifiers::COMMAND
+                },
+                Key::G,
+            )
+        }) {
             self.ungroup_selection(document, history);
         } else if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::G)) {
             self.group_selection(document, history);

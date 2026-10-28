@@ -605,6 +605,7 @@ mod tests {
         preview: crate::privacy_preview::PrivacyPreview,
         time: f64,
         size: Vec2,
+        image_controls: bool,
     }
 
     impl Workspace {
@@ -632,6 +633,7 @@ mod tests {
                 preview: Default::default(),
                 time: 0.,
                 size: Vec2::new(1100., 740.),
+                image_controls: false,
             };
             this.editor.activate_tool(Tool::Arrow);
             this.settle();
@@ -654,6 +656,17 @@ mod tests {
                                 .toolbar(ui, &mut self.document, &mut self.history)
                         });
                     });
+                    if self.image_controls {
+                        egui::TopBottomPanel::bottom("test-image-controls").show(ctx, |ui| {
+                            ui.horizontal(|ui| {
+                                self.editor.image_controls(
+                                    ui,
+                                    &mut self.document,
+                                    &mut self.history,
+                                )
+                            });
+                        });
+                    }
                     egui::CentralPanel::default().show(ctx, |ui| {
                         self.editor.ui(
                             ui,
@@ -1186,10 +1199,24 @@ mod tests {
         open_menu(&mut w);
         w.click("Increase image size by 10%");
         assert_eq!(w.document.output_size(), [1320, 880]);
+        assert!(w.editor.fit, "quick resize must retain Fit mode");
+        assert_eq!(w.editor.resize_feedback.unwrap().0, [1320, 880]);
+        w.editor.fit = false;
+        w.editor.zoom = 0.5;
         w.click("Increase image size by 10%");
         assert_eq!(w.document.output_size(), [1452, 968]);
+        assert!(!w.editor.fit);
+        assert_eq!(w.editor.zoom, 0.5, "manual zoom remains unchanged");
+        assert_eq!(w.editor.resize_feedback.unwrap().0, [1452, 968]);
         w.click("Decrease image size by 10%");
         assert_eq!(w.document.output_size(), [1307, 871]);
+        w.editor.resize_feedback.as_mut().unwrap().1 =
+            std::time::Instant::now() - std::time::Duration::from_secs(1);
+        w.settle();
+        assert!(
+            w.editor.resize_feedback.is_none(),
+            "resize feedback disappears without changing the image"
+        );
         for (label, size) in [
             ("25%", [300, 200]),
             ("50%", [600, 400]),
@@ -1299,5 +1326,62 @@ mod tests {
         assert!(w.editor.area.is_none());
         assert_eq!(w.document.edit_state(), before_selection);
         assert!(!w.history.can_undo());
+    }
+    #[test]
+    fn image_history_buttons_and_shortcuts_work_after_controls_and_preserve_modal_drafts() {
+        fn key(w: &mut Workspace, redo: bool) {
+            let modifiers = egui::Modifiers {
+                shift: redo,
+                ..egui::Modifiers::COMMAND
+            };
+            for pressed in [true, false] {
+                w.frame(vec![egui::Event::Key {
+                    key: Key::Z,
+                    physical_key: Some(Key::Z),
+                    pressed,
+                    repeat: false,
+                    modifiers,
+                }]);
+            }
+            w.settle();
+        }
+        let mut w = Workspace::new();
+        w.image_controls = true;
+        w.settle();
+        let initial = w.document.edit_state();
+        w.click("Image tools · crop, resize, rotate");
+        w.click("Rotate right");
+        let rotated = w.document.edit_state();
+        assert_eq!(rotated.geometry.quarter_turns, 1);
+        w.history.mark_saved(&rotated);
+        key(&mut w, false);
+        assert_eq!(w.document.edit_state(), initial);
+        key(&mut w, true);
+        assert_eq!(w.document.edit_state(), rotated);
+        w.click("Undo");
+        assert_eq!(w.document.edit_state(), initial);
+        w.click("Redo");
+        assert_eq!(w.document.edit_state(), rotated);
+        w.click("Fit canvas to window");
+        key(&mut w, false);
+        assert_eq!(
+            w.document.edit_state(),
+            initial,
+            "toolbar focus must not block image undo"
+        );
+        key(&mut w, true);
+        w.click("Image tools · crop, resize, rotate");
+        w.click("Resize image…");
+        w.click("50%");
+        key(&mut w, false);
+        assert_eq!(
+            w.document.edit_state(),
+            rotated,
+            "a modal draft owns its keyboard input"
+        );
+        assert_eq!(w.editor.resize.as_ref().unwrap().size, [400, 600]);
+        w.click("Cancel");
+        w.click("Undo");
+        assert_eq!(w.document.edit_state(), initial);
     }
 }

@@ -478,4 +478,61 @@ mod tests {
                 .flip_vertical
         );
     }
+    #[test]
+    fn rotation_and_resize_history_survive_autosave_undo_and_redo() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        app.autosave_project(&ctx);
+        finish(&mut app, &ctx);
+        let project = app.project_path.clone().unwrap();
+        let original = app.document.as_ref().unwrap().edit_state();
+        let pixels = app.document.as_ref().unwrap().image.clone();
+        for geometry in [
+            crate::geometry::ImageGeometry {
+                quarter_turns: 1,
+                ..Default::default()
+            },
+            crate::geometry::ImageGeometry {
+                quarter_turns: 1,
+                resize: Some([22, 33]),
+                ..Default::default()
+            },
+        ] {
+            let doc = app.document.as_mut().unwrap();
+            let before = doc.edit_state();
+            doc.geometry = geometry;
+            app.history.commit(before, doc);
+            app.autosave_project(&ctx);
+            app.project_session.due = Some(Instant::now());
+            app.autosave_project(&ctx);
+            finish(&mut app, &ctx);
+            assert_eq!(document::load_project(&project).unwrap().geometry, geometry);
+            assert!(app.history.can_undo());
+        }
+        let edited = app.document.as_ref().unwrap().edit_state();
+        for _ in 0..2 {
+            assert!(app.history.undo(app.document.as_mut().unwrap()));
+            app.autosave_project(&ctx);
+            app.project_session.due = Some(Instant::now());
+            app.autosave_project(&ctx);
+            finish(&mut app, &ctx);
+            assert!(app.history.can_redo());
+        }
+        assert_eq!(
+            document::load_project(&project).unwrap().edit_state(),
+            original
+        );
+        for _ in 0..2 {
+            assert!(app.history.redo(app.document.as_mut().unwrap()));
+            app.autosave_project(&ctx);
+            app.project_session.due = Some(Instant::now());
+            app.autosave_project(&ctx);
+            finish(&mut app, &ctx);
+        }
+        assert_eq!(
+            document::load_project(&project).unwrap().edit_state(),
+            edited
+        );
+        assert!(Arc::ptr_eq(&pixels, &app.document.as_ref().unwrap().image));
+    }
 }

@@ -166,12 +166,58 @@ impl EditorState {
         relative: bool,
     ) -> bool {
         self.finish_gesture(document, history);
-        self.apply_geometry(
+        let fit = self.fit;
+        let applied = self.apply_geometry(
             document,
             history,
             resize_geometry(document, scaled_size(document, percent, relative)),
-        )
+        );
+        if applied {
+            // Preserve the chosen view mode; feedback makes fitted resizes visible.
+            self.fit = fit;
+            self.confirm_resize(document);
+        }
+        applied
     }
+    fn confirm_resize(&mut self, document: &Document) {
+        self.resize_feedback = Some((
+            document.output_size(),
+            std::time::Instant::now() + std::time::Duration::from_secs(3),
+        ));
+    }
+
+    pub(super) fn resize_feedback_ui(&mut self, ui: &mut egui::Ui, bounds: Rect) {
+        let Some((size, until)) = self.resize_feedback else {
+            return;
+        };
+        let now = std::time::Instant::now();
+        if now >= until {
+            self.resize_feedback = None;
+            return;
+        }
+        ui.ctx()
+            .request_repaint_after(until.saturating_duration_since(now));
+        let painter = ui.painter().with_clip_rect(bounds);
+        let text = painter.layout_no_wrap(
+            format!("{} × {} px", size[0], size[1]),
+            egui::FontId::proportional(15.),
+            Color32::WHITE,
+        );
+        let badge_size = text.size() + Vec2::new(24., 14.);
+        let badge = Rect::from_min_size(
+            bounds.left_bottom() + Vec2::new(12., -12. - badge_size.y),
+            badge_size,
+        );
+        painter.rect_filled(badge, 7., Color32::from_rgba_unmultiplied(25, 32, 45, 238));
+        painter.rect_stroke(
+            badge,
+            7.,
+            Stroke::new(1., Color32::from_white_alpha(65)),
+            StrokeKind::Inside,
+        );
+        painter.galley(badge.min + Vec2::new(12., 7.), text, Color32::WHITE);
+    }
+
     fn quick_resize_menu(
         &mut self,
         ui: &mut egui::Ui,
@@ -413,6 +459,71 @@ impl EditorState {
         });
     }
 
+    pub(super) fn restore_history(
+        &mut self,
+        document: &mut Document,
+        history: &mut EditHistory,
+        redo: bool,
+    ) {
+        self.finish_gesture(document, history);
+        let size = document.output_size();
+        let changed = if redo {
+            history.redo(document)
+        } else {
+            history.undo(document)
+        };
+        if changed {
+            self.resize_feedback = None;
+            if document.output_size() != size {
+                self.confirm_resize(document);
+            }
+            self.deselect_pixels();
+            self.image_error = None;
+            self.focus_canvas = true;
+        }
+    }
+
+    pub(super) fn history_shortcuts(
+        &mut self,
+        ui: &mut egui::Ui,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
+        let redo_modifiers = Modifiers {
+            shift: true,
+            ..Modifiers::COMMAND
+        };
+        if ui.input_mut(|i| {
+            i.consume_key(redo_modifiers, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y)
+        }) {
+            self.restore_history(document, history, true);
+        } else if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Z)) {
+            self.restore_history(document, history, false);
+        }
+    }
+
+    pub(super) fn history_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        document: &mut Document,
+        history: &mut EditHistory,
+    ) {
+        for (redo, label) in [(false, "Undo"), (true, "Redo")] {
+            let enabled = if redo {
+                history.can_redo()
+            } else {
+                history.can_undo()
+            };
+            if ui
+                .add_enabled_ui(enabled, |ui| icon_item(ui, label, MenuIcon::Rotate(redo)))
+                .inner
+                .clicked()
+            {
+                self.restore_history(document, history, redo);
+            }
+        }
+    }
+
     pub(super) fn edit_actions(
         &mut self,
         ui: &mut egui::Ui,
@@ -423,20 +534,14 @@ impl EditorState {
             .on_hover_text("Undo the last change (Command/Ctrl + Z)")
             .clicked()
         {
-            self.finish_gesture(document, history);
-            history.undo(document);
-            self.clear_selection();
-            self.area = None;
+            self.restore_history(document, history, false);
             ui.close();
         }
         if item(ui, "Redo", MenuIcon::Rotate(true), history.can_redo())
             .on_hover_text("Redo (Command/Ctrl + Shift + Z)")
             .clicked()
         {
-            self.finish_gesture(document, history);
-            history.redo(document);
-            self.clear_selection();
-            self.area = None;
+            self.restore_history(document, history, true);
             ui.close();
         }
         ui.separator();
