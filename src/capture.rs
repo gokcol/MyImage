@@ -751,7 +751,10 @@ mod display_tests {
             (-2560, -200, 2560, 1.5)
         );
         assert_eq!(super::capture_targets(&displays, Some(2)).unwrap()[0].id, 2);
-        assert!(super::capture_targets(&displays, Some(999)).is_err());
+        // Zero is always invalid. Other synthetic IDs must not be sent to the
+        // host's mirror service: headless Macs can alias unknown IDs together.
+        // Missing/unrelated IDs are covered with a fake mirror service below.
+        assert!(super::capture_targets(&displays, Some(0)).is_err());
         assert!(super::capture_targets(&[], None).is_err());
     }
 
