@@ -25,7 +25,7 @@ use crate::{
     storage::{self, Settings},
 };
 use capture_output::CaptureOutput;
-use capture_session::{CapturedFrame, ScrollSession};
+use capture_session::{CapturedFrame, ScrollSession, SelectionSession};
 use chrono::{DateTime, Local};
 use eframe::egui::{
     self, Color32, Pos2, Rect, Stroke, Vec2, ViewportCommand, viewport::WindowLevel,
@@ -45,14 +45,10 @@ enum WorkEvent {
     ProjectLibraryReady(Result<crate::project_store::Migration, String>),
     LegacyCapturesRetired(Vec<String>),
     Displays(Result<Vec<DisplayInfo>, String>),
-    Captured(
-        u64,
-        DisplayInfo,
-        DateTime<Local>,
-        Result<CapturedFrame, String>,
-    ),
+    Captured(u64, DateTime<Local>, Result<Vec<CapturedFrame>, String>),
     WindowCaptured(
         u64,
+        DisplayInfo,
         u32,
         Option<[f32; 4]>,
         DateTime<Local>,
@@ -174,7 +170,7 @@ pub struct MyImageApp {
     pending_capture: Option<bool>,
     capture_cancel: Option<Arc<AtomicBool>>,
     capture_copy_retry: Option<CaptureOutput>,
-    selection: Option<Selection>,
+    selection: Option<SelectionSession>,
     scroll_session: Option<ScrollSession>,
     busy: bool,
     error: Option<String>,
@@ -483,20 +479,19 @@ impl MyImageApp {
         // Capture itself does not replace the open project. Ask about unsaved
         // edits only if the completed capture is actually sent to Editor.
         self.finish_edit();
-        let Some(display) = self
-            .displays
-            .iter()
-            .find(|d| Some(d.id) == self.settings.display_id)
-            .or_else(|| self.displays.iter().find(|d| d.is_primary))
-            .or(self.displays.first())
-            .cloned()
-        else {
+        if self.displays.is_empty() {
             self.error = Some(
                 "No display is available. Connect a display and choose Refresh displays.".into(),
             );
             self.show(ctx);
             return;
+        }
+        let fixed_display = if self.settings.capture_all_displays {
+            None
+        } else {
+            self.settings.display_id
         };
+        let demo_displays = self.displays.clone();
         // A preflight permission hint can be stale after a local rebuild.
         // ScreenCaptureKit enforces access on this explicit capture action and
         // returns a real permission error; there is no partial-image fallback.
@@ -518,56 +513,86 @@ impl MyImageApp {
             && self.settings.capture_mode != capture::CaptureMode::Text;
         let mode = self.settings.capture_mode;
         self.shape = CaptureShape::Rectangle;
-        log::info!("Capture requested on display {}", display.id);
+        log::info!("Capture requested: {:?}", fixed_display);
         std::thread::spawn(move || {
-            // Let the compositor remove our window and a tray menu before capture.
-            // This worker exists only for a requested capture; no idle polling.
+            // Capture every target before showing any overlay, so no capture
+            // contains MyImage or an overlay from another display.
             std::thread::sleep(Duration::from_millis(250) + Duration::from_secs(delay.into()));
             if cancel.load(Ordering::Acquire) {
                 return;
             }
             let at = Local::now();
-            // Mirroring, docking or changing resolution can replace the display
-            // ID and bounds while Capture Now is open (or during its delay).
-            // Refresh at capture time, but only follow a verified mirror alias.
-            let current_display = if demo {
-                Ok(display.clone())
-            } else {
-                capture::displays().and_then(|displays| {
-                    let target = capture::resolve_display(display.id, &displays);
-                    let _ = tx.send(WorkEvent::Displays(Ok(displays)));
-                    target
-                })
-            };
-            let display = match current_display {
-                Ok(display) => display,
-                Err(error) => {
-                    let _ = tx.send(WorkEvent::Captured(generation, display, at, Err(error)));
-                    ctx.request_repaint();
-                    return;
-                }
-            };
-            if cancel.load(Ordering::Acquire) {
-                return;
-            }
-            let result = if demo {
-                Ok(CapturedFrame {
-                    image: if mode == capture::CaptureMode::Scrolling {
-                        image::RgbaImage::from_fn(1600, 1000, capture_session::demo_scroll_pixel)
-                    } else if mode == capture::CaptureMode::Text {
-                        screen_text::demo_image()
-                    } else {
-                        demo_image()
-                    },
-                    windows: if matches!(
+            let result = (|| {
+                // Refresh after the delay to include newly connected screens and
+                // current bounds. A fixed target only follows verified mirrors.
+                let displays = if demo {
+                    demo_displays
+                } else {
+                    capture::displays()?
+                };
+                let targets = capture::capture_targets(&displays, fixed_display);
+                let _ = tx.send(WorkEvent::Displays(Ok(displays)));
+                let targets = targets?;
+                let needs_windows = matches!(
+                    mode,
+                    capture::CaptureMode::Region
+                        | capture::CaptureMode::MultiRegion
+                        | capture::CaptureMode::Window
+                        | capture::CaptureMode::FullScreen
+                        | capture::CaptureMode::Scrolling
+                );
+                let windows = if needs_windows && !demo {
+                    match capture::windows() {
+                        Ok(windows) => windows,
+                        Err(_)
+                            if matches!(
+                                mode,
+                                capture::CaptureMode::Region
+                                    | capture::CaptureMode::MultiRegion
+                                    | capture::CaptureMode::FullScreen
+                            ) =>
+                        {
+                            Vec::new()
+                        }
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    Vec::new()
+                };
+                if !demo
+                    && matches!(
                         mode,
-                        capture::CaptureMode::Region
-                            | capture::CaptureMode::MultiRegion
-                            | capture::CaptureMode::Window
-                            | capture::CaptureMode::Scrolling
-                    ) {
+                        capture::CaptureMode::Window | capture::CaptureMode::Scrolling
+                    )
+                    && windows.is_empty()
+                {
+                    return Err("No capturable window is available on this desktop.".into());
+                }
+                let mut frames = Vec::with_capacity(targets.len());
+                for display in targets {
+                    if cancel.load(Ordering::Acquire) {
+                        return Err("Capture canceled".into());
+                    }
+                    let image = if demo {
+                        if mode == capture::CaptureMode::Scrolling {
+                            image::RgbaImage::from_fn(
+                                1600,
+                                1000,
+                                capture_session::demo_scroll_pixel,
+                            )
+                        } else if mode == capture::CaptureMode::Text {
+                            screen_text::demo_image()
+                        } else {
+                            demo_image()
+                        }
+                    } else {
+                        capture::capture_display(display.id, pointer).map_err(|error| {
+                            format!("Could not capture {}. {error}", display.name)
+                        })?
+                    };
+                    let windows = if demo && needs_windows {
                         vec![capture::WindowInfo {
-                            id: 0,
+                            id: display.id,
                             name: "Demo window".into(),
                             x: display.x + (display.width / 8) as i32,
                             y: display.y + (display.height / 8) as i32,
@@ -575,45 +600,20 @@ impl MyImageApp {
                             height: display.height * 3 / 4,
                         }]
                     } else {
-                        vec![]
-                    },
-                })
-            } else {
-                capture::capture_display(display.id, pointer).and_then(|image| {
-                    let windows = if matches!(
-                        mode,
-                        capture::CaptureMode::Region
-                            | capture::CaptureMode::MultiRegion
-                            | capture::CaptureMode::Window
-                            | capture::CaptureMode::Scrolling
-                    ) {
-                        match capture::windows() {
-                            Ok(w) => w,
-                            Err(_)
-                                if matches!(
-                                    mode,
-                                    capture::CaptureMode::Region
-                                        | capture::CaptureMode::MultiRegion
-                                ) =>
-                            {
-                                Vec::new()
-                            }
-                            Err(e) => return Err(e),
-                        }
-                    } else {
-                        vec![]
+                        windows.clone()
                     };
-                    if matches!(
-                        mode,
-                        capture::CaptureMode::Window | capture::CaptureMode::Scrolling
-                    ) && windows.is_empty()
-                    {
-                        return Err("No capturable window is available on this desktop.".into());
-                    }
-                    Ok(CapturedFrame { image, windows })
-                })
-            };
-            let _ = tx.send(WorkEvent::Captured(generation, display, at, result));
+                    frames.push(CapturedFrame {
+                        display,
+                        image,
+                        windows,
+                    });
+                }
+                Ok(frames)
+            })();
+            if cancel.load(Ordering::Acquire) {
+                return;
+            }
+            let _ = tx.send(WorkEvent::Captured(generation, at, result));
             ctx.request_repaint();
         });
     }
@@ -720,15 +720,18 @@ impl MyImageApp {
 
     fn cancel_selection(&mut self, ctx: &egui::Context) {
         if let Some(selection) = self.selection.take() {
+            selection.close(ctx);
             self.restore_window(ctx, selection.return_hidden);
             self.status = "Capture canceled".into();
         }
     }
 
-    fn accept_selection(&mut self, ctx: &egui::Context, rect: selection::PixelRect) {
-        let Some(selection) = self.selection.take() else {
-            return;
-        };
+    fn accept_selection(
+        &mut self,
+        ctx: &egui::Context,
+        selection: Selection,
+        rect: selection::PixelRect,
+    ) {
         if selection.mode == capture::CaptureMode::Text {
             self.queue_screen_text(ctx, move || {
                 selection::crop_selection(&selection.image, rect, CaptureShape::Rectangle, 0)
@@ -1168,7 +1171,7 @@ impl MyImageApp {
                     }
                     Err(error) => self.error = Some(error),
                 },
-                WorkEvent::Captured(generation, display, captured_at, result) => {
+                WorkEvent::Captured(generation, captured_at, result) => {
                     if generation != self.generation {
                         continue;
                     }
@@ -1177,40 +1180,34 @@ impl MyImageApp {
                     };
                     self.capture_cancel = None;
                     match result {
-                        Ok(frame) => {
-                            let image = frame.image;
-                            if self.settings.capture_mode == capture::CaptureMode::FullScreen {
-                                self.save_captured_image(ctx, image, captured_at);
+                        Ok(mut frames) if !frames.is_empty() => {
+                            if self.settings.capture_mode == capture::CaptureMode::FullScreen
+                                && frames.len() == 1
+                            {
+                                self.save_captured_image(ctx, frames.remove(0).image, captured_at);
                                 continue;
                             }
-                            let texture = load_texture(ctx, "selection", &image);
-                            self.selection = Some(Selection {
-                                display,
-                                image,
-                                texture,
+                            self.selection = Some(SelectionSession::new(
+                                ctx,
+                                frames,
                                 captured_at,
-                                drag: Default::default(),
-                                multi: Default::default(),
-                                mode: self.settings.capture_mode,
+                                self.settings.capture_mode,
                                 return_hidden,
-                                placement_frames: 0,
-                                windows: frame.windows,
-                                window_id: None,
-                                hover_cycle: 0,
-                                magnifier: true,
-                                magnifier_preview: Default::default(),
-                                pointer_ready: false,
-                            });
+                            ));
                             self.show(ctx);
                         }
-                        Err(error) => {
-                            self.error = Some(error);
+                        result => {
+                            self.error = Some(
+                                result
+                                    .err()
+                                    .unwrap_or_else(|| "No display is available.".into()),
+                            );
                             self.view = View::Capture;
                             self.show(ctx);
                         }
                     }
                 }
-                WorkEvent::WindowCaptured(generation, id, crop, at, result) => {
+                WorkEvent::WindowCaptured(generation, display, id, crop, at, result) => {
                     if generation != self.generation || self.pending_capture.take().is_none() {
                         continue;
                     }
@@ -1219,7 +1216,7 @@ impl MyImageApp {
                         Ok(image)
                             if self.settings.capture_mode == capture::CaptureMode::Scrolling =>
                         {
-                            self.start_window_scroll(ctx, id, crop, image, at)
+                            self.start_window_scroll(ctx, display, id, crop, image, at)
                         }
                         Ok(image) => self.save_captured_image(ctx, image, at),
                         Err(error) => {
@@ -1961,7 +1958,6 @@ impl eframe::App for MyImageApp {
         }
         if self.selection.is_some() {
             self.selection_ui(ctx);
-            crate::pointer_style::paint(ctx, self.settings.pointer_style);
             return;
         }
         if !self.busy

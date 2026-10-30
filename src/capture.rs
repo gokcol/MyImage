@@ -84,7 +84,7 @@ impl CaptureMode {
                 "Select several areas. Adjust each one, then capture together with transparent gaps."
             }
             Self::Window => "Point to a window, click to select, then capture.",
-            Self::FullScreen => "Capture the entire selected display.",
+            Self::FullScreen => "Click the screen to capture, or choose a fixed display.",
             Self::Scrolling => {
                 "Click a window or select part of it. Scroll down, then finish. Sections are collected automatically."
             }
@@ -292,6 +292,32 @@ pub fn displays() -> Result<Vec<DisplayInfo>, String> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         Err("Screen capture is supported on macOS and Windows.".into())
+    }
+}
+
+/// Select from freshly enumerated desktop geometry. Mirrored displays that
+/// occupy the same desktop rectangle share one overlay.
+pub fn capture_targets(
+    displays: &[DisplayInfo],
+    fixed: Option<u32>,
+) -> Result<Vec<DisplayInfo>, String> {
+    if let Some(id) = fixed {
+        return resolve_display(id, displays).map(|d| vec![d]);
+    }
+    let mut targets: Vec<DisplayInfo> = Vec::new();
+    for display in displays {
+        if !targets.iter().any(|d| {
+            d.id == display.id
+                || (d.x, d.y, d.width, d.height)
+                    == (display.x, display.y, display.width, display.height)
+        }) {
+            targets.push(display.clone());
+        }
+    }
+    if targets.is_empty() {
+        Err("No active displays were found. Connect or wake a display and try again.".into())
+    } else {
+        Ok(targets)
     }
 }
 
@@ -689,6 +715,44 @@ mod display_tests {
             33 => 44,
             _ => 0,
         }
+    }
+
+    #[test]
+    fn any_display_includes_extended_desktop_and_deduplicates_mirrors() {
+        let display = DisplayInfo {
+            id: 1,
+            name: "Main".into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale_factor: 1.,
+            is_primary: true,
+        };
+        let mut left = display.clone();
+        left.id = 2;
+        left.x = -2560;
+        left.y = -200;
+        left.width = 2560;
+        left.scale_factor = 1.5;
+        left.is_primary = false;
+        let mut mirror = display.clone();
+        mirror.id = 3;
+        let displays = vec![display, left, mirror];
+        let targets = super::capture_targets(&displays, None).unwrap();
+        assert_eq!(targets.iter().map(|d| d.id).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            (
+                targets[1].x,
+                targets[1].y,
+                targets[1].width,
+                targets[1].scale_factor
+            ),
+            (-2560, -200, 2560, 1.5)
+        );
+        assert_eq!(super::capture_targets(&displays, Some(2)).unwrap()[0].id, 2);
+        assert!(super::capture_targets(&displays, Some(999)).is_err());
+        assert!(super::capture_targets(&[], None).is_err());
     }
 
     #[test]

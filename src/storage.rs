@@ -48,6 +48,7 @@ pub struct Settings {
     pub pointer_style: crate::pointer_style::PointerStyle,
     pub output_dir: PathBuf,
     pub display_id: Option<u32>,
+    pub capture_all_displays: bool,
     pub shape: String,
     pub corner_radius: u32,
     pub delay_seconds: u32,
@@ -82,6 +83,7 @@ impl Default for Settings {
             pointer_style: Default::default(),
             output_dir: base.join("MyImage"),
             display_id: None,
+            capture_all_displays: true,
             shape: "rectangle".into(),
             corner_radius: 24,
             delay_seconds: 0,
@@ -182,6 +184,22 @@ mod tests {
     use super::*;
     use chrono::{Local, TimeZone};
     use std::sync::Arc;
+
+    #[test]
+    fn existing_settings_enable_any_display_and_explicit_choice_survives_reload() {
+        let mut settings: Settings = serde_json::from_str(
+            r#"{"display_id":17,"include_pointer":true,"capture_on_release":true}"#,
+        )
+        .unwrap();
+        assert!(settings.capture_all_displays);
+        assert_eq!(settings.display_id, Some(17));
+        settings.capture_all_displays = false;
+        let settings: Settings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!settings.capture_all_displays);
+        assert_eq!(settings.display_id, Some(17));
+        assert!(settings.include_pointer && settings.capture_on_release);
+    }
 
     #[test]
     fn fast_capture_is_opt_in_and_persists_without_changing_destination() {

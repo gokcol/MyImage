@@ -44,6 +44,7 @@ pub fn run(background: bool) -> eframe::Result {
         inner,
         hidden,
         root: RootWindow::default(),
+        wakeup: RootWakeup::default(),
         modifiers: winit::keyboard::ModifiersState::empty(),
     })?;
     Ok(())
@@ -53,6 +54,7 @@ struct ResidentRuntime<'a> {
     inner: eframe::EframeWinitApplication<'a>,
     hidden: Arc<AtomicBool>,
     root: RootWindow,
+    wakeup: RootWakeup,
     modifiers: winit::keyboard::ModifiersState,
 }
 
@@ -85,24 +87,30 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
         self.inner.window_event(event_loop, id, event);
     }
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
-        let immediate = matches!(&event, UserEvent::RequestRepaint { when, .. } if *when <= std::time::Instant::now());
+        self.wakeup.schedule(
+            &event,
+            self.hidden.load(Ordering::Relaxed) || self.root.occluded,
+        );
         self.inner.user_event(event_loop, event);
-        // Some window systems suppress redraw notifications for invisible windows.
-        // Process an explicit callback wakeup even then, so tray/hotkey/worker events
-        // can show the window. This is event-driven and never runs an idle timer.
-        if immediate
-            && (self.hidden.load(Ordering::Relaxed) || self.root.occluded)
-            && let Some(id) = self.root.id
-        {
-            self.inner
-                .window_event(event_loop, id, WindowEvent::RedrawRequested);
-        }
     }
     fn device_event(&mut self, event_loop: &ActiveEventLoop, id: DeviceId, event: DeviceEvent) {
         self.inner.device_event(event_loop, id, event);
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.inner.about_to_wait(event_loop);
+        // Invisible windows may suppress redraw notifications. Coalesce explicit
+        // wakeups until native input has been drained, then render once. Rendering
+        // inside user_event can feed child repaint requests back into the same
+        // queue indefinitely, starving mouse-up, keyboard and occlusion events.
+        if self
+            .wakeup
+            .take(self.hidden.load(Ordering::Relaxed) || self.root.occluded)
+            && let Some(id) = self.root.id
+        {
+            self.inner
+                .window_event(event_loop, id, WindowEvent::RedrawRequested);
+        }
+
         if (self.hidden.load(Ordering::Relaxed) || self.root.occluded)
             && matches!(event_loop.control_flow(), ControlFlow::Poll)
         {
@@ -117,6 +125,21 @@ impl ApplicationHandler<UserEvent> for ResidentRuntime<'_> {
     }
     fn memory_warning(&mut self, event_loop: &ActiveEventLoop) {
         self.inner.memory_warning(event_loop);
+    }
+}
+
+#[derive(Default)]
+struct RootWakeup {
+    pending: bool,
+}
+impl RootWakeup {
+    fn schedule(&mut self, event: &UserEvent, dormant: bool) {
+        self.pending |= dormant
+            && matches!(event, UserEvent::RequestRepaint { when, .. }
+            if *when <= std::time::Instant::now());
+    }
+    fn take(&mut self, dormant: bool) -> bool {
+        std::mem::take(&mut self.pending) && dormant
     }
 }
 
@@ -142,6 +165,44 @@ impl RootWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn child_repaints_coalesce_until_native_input_can_run() {
+        let mut wakeup = RootWakeup::default();
+        let child = egui::ViewportId::from_hash_of("second-screen");
+        for viewport_id in [egui::ViewportId::ROOT, child, child] {
+            wakeup.schedule(
+                &UserEvent::RequestRepaint {
+                    viewport_id,
+                    when: std::time::Instant::now(),
+                    cumulative_pass_nr: 0,
+                },
+                true,
+            );
+        }
+        assert!(wakeup.take(true));
+        assert!(!wakeup.take(true));
+        wakeup.schedule(
+            &UserEvent::RequestRepaint {
+                viewport_id: child,
+                when: std::time::Instant::now(),
+                cumulative_pass_nr: 1,
+            },
+            true,
+        );
+        // A native visibility event can arrive before the coalesced wakeup.
+        assert!(!wakeup.take(false));
+        assert!(!wakeup.take(true));
+        wakeup.schedule(
+            &UserEvent::RequestRepaint {
+                viewport_id: child,
+                when: std::time::Instant::now() + std::time::Duration::from_secs(1),
+                cumulative_pass_nr: 2,
+            },
+            true,
+        );
+        assert!(!wakeup.take(true));
+    }
+
     #[test]
     fn launcher_events_never_replace_the_hidden_editor_wakeup_target() {
         let editor = WindowId::from(1);

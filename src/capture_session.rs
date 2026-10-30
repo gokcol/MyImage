@@ -298,9 +298,77 @@ fn capture_on_completion(enabled: bool, mode: CaptureMode, completed: bool) -> b
 }
 
 pub(super) struct CapturedFrame {
+    pub display: DisplayInfo,
     pub image: image::RgbaImage,
     pub windows: Vec<capture::WindowInfo>,
 }
+pub(super) struct SelectionSession {
+    pub screens: Vec<Selection>,
+    pub return_hidden: bool,
+}
+
+fn overlay_id(display: &DisplayInfo) -> egui::ViewportId {
+    egui::ViewportId::from_hash_of(("capture-screen", display.id))
+}
+
+fn overlay_geometry(display: &DisplayInfo, desktop_units_per_point: f32) -> (Pos2, Vec2) {
+    (
+        Pos2::new(display.x as f32, display.y as f32) / desktop_units_per_point,
+        Vec2::new(display.width as f32, display.height as f32) / desktop_units_per_point,
+    )
+}
+
+impl SelectionSession {
+    pub fn new(
+        ctx: &egui::Context,
+        frames: Vec<CapturedFrame>,
+        captured_at: DateTime<Local>,
+        mode: CaptureMode,
+        return_hidden: bool,
+    ) -> Self {
+        Self {
+            return_hidden,
+            screens: frames
+                .into_iter()
+                .map(|frame| Selection {
+                    texture: load_texture(ctx, "selection", &frame.image),
+                    display: frame.display,
+                    image: frame.image,
+                    windows: frame.windows,
+                    captured_at,
+                    mode,
+                    return_hidden,
+                    placement_frames: 0,
+                    drag: Default::default(),
+                    multi: Default::default(),
+                    window_id: None,
+                    hover_cycle: 0,
+                    magnifier: true,
+                    magnifier_preview: Default::default(),
+                    pointer_ready: false,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn close(&self, ctx: &egui::Context) {
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, ViewportCommand::Visible(false));
+        for screen in self.screens.iter().skip(1) {
+            ctx.send_viewport_cmd_to(overlay_id(&screen.display), ViewportCommand::Visible(false));
+            ctx.send_viewport_cmd_to(overlay_id(&screen.display), ViewportCommand::Close);
+        }
+        ctx.request_repaint();
+    }
+}
+
+#[derive(Debug, PartialEq)]
+enum SelectionAction {
+    Cancel,
+    Window(u32, Option<[f32; 4]>),
+    Regions(Vec<selection::PixelRect>),
+    Region(selection::PixelRect),
+}
+
 pub(super) struct ScrollSession {
     display: DisplayInfo,
     rect: selection::PixelRect,
@@ -321,23 +389,95 @@ pub(super) struct ScrollSession {
 
 impl MyImageApp {
     pub(super) fn selection_ui(&mut self, ctx: &egui::Context) {
-        let menu_was_open = egui::Popup::is_any_open(ctx);
-        if !menu_was_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.cancel_selection(ctx);
-            return;
-        }
-        let Some(selection) = &mut self.selection else {
+        let Some(mut session) = self.selection.take() else {
             return;
         };
+        let mut chosen = None;
+        for (index, screen) in session.screens.iter_mut().enumerate() {
+            // Mode changes in one controller apply to every screen.
+            if screen.mode != self.settings.capture_mode {
+                screen.mode = self.settings.capture_mode;
+                screen.drag = RegionDrag::default();
+                screen.multi = MultiRegions::default();
+                screen.window_id = None;
+                screen.hover_cycle = 0;
+            }
+            if index == 0 {
+                // Immediate viewports repaint through their parent. Keep the
+                // root visible as one overlay so native child input can wake
+                // it reliably, including mouse release, Enter and Escape.
+                if let Some(action) = self.selection_overlay_ui(ctx, screen) {
+                    chosen = Some((index, action));
+                }
+                crate::pointer_style::paint(ctx, self.settings.pointer_style);
+            } else {
+                let divisor = ctx.zoom_factor()
+                    * if cfg!(target_os = "windows") {
+                        screen.display.scale_factor
+                    } else {
+                        1.
+                    };
+                let (position, size) = overlay_geometry(&screen.display, divisor);
+                let builder = egui::ViewportBuilder::default()
+                    .with_title(format!("MyImage Capture — {}", screen.display.name))
+                    .with_position(position)
+                    .with_inner_size(size)
+                    .with_min_inner_size(Vec2::ZERO)
+                    .with_decorations(false)
+                    .with_resizable(false)
+                    .with_taskbar(false)
+                    .with_has_shadow(false)
+                    .with_window_level(WindowLevel::AlwaysOnTop)
+                    .with_active(false)
+                    .with_visible(screen.placement_frames >= 4);
+                ctx.show_viewport_immediate(overlay_id(&screen.display), builder, |child, _| {
+                    if let Some(action) = self.selection_overlay_ui(child, screen) {
+                        chosen = Some((index, action));
+                    }
+                    crate::pointer_style::paint(child, self.settings.pointer_style);
+                });
+            }
+            if chosen.is_some() {
+                break;
+            }
+        }
+        if let Some((index, action)) = chosen {
+            session.close(ctx);
+            let screen = session.screens.remove(index);
+            match action {
+                SelectionAction::Cancel => {
+                    self.restore_window(ctx, session.return_hidden);
+                    self.status = "Capture canceled".into();
+                }
+                SelectionAction::Window(id, crop) => {
+                    self.capture_selected_window(ctx, screen, id, crop)
+                }
+                SelectionAction::Regions(regions) => {
+                    self.queue_capture_output(ctx, screen.captured_at, move || {
+                        selection::crop_regions(&screen.image, &regions)
+                    })
+                }
+                SelectionAction::Region(rect) => self.accept_selection(ctx, screen, rect),
+            }
+        } else {
+            self.selection = Some(session);
+        }
+    }
+
+    fn selection_overlay_ui(
+        &mut self,
+        ctx: &egui::Context,
+        selection: &mut Selection,
+    ) -> Option<SelectionAction> {
+        let menu_was_open = egui::Popup::is_any_open(ctx);
+        if ctx.input(|i| i.viewport().close_requested())
+            || (!menu_was_open && ctx.input(|i| i.key_pressed(egui::Key::Escape)))
+        {
+            return Some(SelectionAction::Cancel);
+        }
         let placing_overlay = selection.placement_frames < 4;
         if placing_overlay {
-            let divisor = if cfg!(target_os = "windows") {
-                ctx.pixels_per_point()
-            } else {
-                ctx.zoom_factor()
-            };
-            let display = &selection.display;
-            if selection.placement_frames == 0 {
+            if selection.placement_frames == 0 && ctx.viewport_id() == egui::ViewportId::ROOT {
                 if cfg!(target_os = "windows") {
                     ctx.send_viewport_cmd(ViewportCommand::Maximized(false));
                 }
@@ -346,30 +486,40 @@ impl MyImageApp {
                 ctx.send_viewport_cmd(ViewportCommand::MinInnerSize(Vec2::ZERO));
                 ctx.send_viewport_cmd(ViewportCommand::WindowLevel(WindowLevel::AlwaysOnTop));
             }
-            ctx.send_viewport_cmd(ViewportCommand::InnerSize(Vec2::new(
-                display.width as f32 / divisor,
-                display.height as f32 / divisor,
-            )));
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(Pos2::new(
-                display.x as f32 / divisor,
-                display.y as f32 / divisor,
-            )));
+            let divisor = if cfg!(target_os = "windows") {
+                ctx.pixels_per_point()
+            } else {
+                ctx.zoom_factor()
+            };
+            let (position, size) = overlay_geometry(&selection.display, divisor);
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
             selection.placement_frames += 1;
             ctx.request_repaint();
         }
-        // Resizing/moving the editor into a screen overlay invalidates its old
-        // window-relative hover coordinates. Wait for an event in the new frame.
-        if !placing_overlay
-            && ctx.input(|i| {
-                i.events.iter().any(|event| {
-                    matches!(
-                        event,
-                        egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }
-                    )
-                })
+        // Placement changes invalidate window-relative coordinates. Only real
+        // events on this overlay enable selection; leaving clears stale hover.
+        let pointer_moved = ctx.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. }
+                )
             })
-        {
+        });
+        if ctx.input(|i| {
+            i.events
+                .iter()
+                .any(|event| matches!(event, egui::Event::PointerGone))
+        }) {
+            selection.pointer_ready = false;
+            selection.drag.active = false;
+            selection.drag.adjustment = None;
+        } else if !placing_overlay && pointer_moved {
             selection.pointer_ready = true;
+            if !ctx.input(|i| i.viewport().focused.unwrap_or(i.focused)) {
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
         }
         let mut mode = selection.mode;
         let old_mode = mode;
@@ -392,8 +542,11 @@ impl MyImageApp {
         let mut accepted_regions = Vec::new();
         let mut window = None;
         // Place the controller before the canvas so its hit region takes priority.
-        let area =
-            egui::Area::new(egui::Id::new("capture-now-controls")).order(egui::Order::Foreground);
+        let area = egui::Area::new(egui::Id::new((
+            "capture-now-controls",
+            selection.display.id,
+        )))
+        .order(egui::Order::Foreground);
         let area = if let Some(rect) = selection.drag.bounds().filter(|_| !selection.drag.active) {
             area.fixed_pos(controls_position(
                 ctx.content_rect(),
@@ -412,105 +565,110 @@ impl MyImageApp {
         };
         let bar = area
             .show(ctx, |ui| {
-                egui::Frame::new()
-                    .fill(appearance::palette(ui.ctx()).navy)
-                    .corner_radius(12)
-                    .inner_margin(12)
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing.x = 10.;
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("Capture Now")
-                                    .strong()
-                                    .color(Color32::WHITE),
-                            );
-                            egui::ComboBox::from_id_salt("capture_mode_live")
-                                .selected_text(mode.label())
-                                .width(110.)
-                                .show_ui(ui, |ui| {
-                                    for choice in [
-                                        CaptureMode::Region,
-                                        CaptureMode::MultiRegion,
-                                        CaptureMode::Window,
-                                        CaptureMode::Scrolling,
-                                        CaptureMode::Text,
-                                    ] {
-                                        ui.selectable_value(&mut mode, choice, choice.label());
+                ui.push_id(selection.display.id, |ui| {
+                    egui::Frame::new()
+                        .fill(appearance::palette(ui.ctx()).navy)
+                        .corner_radius(12)
+                        .inner_margin(12)
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = 10.;
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("Capture Now")
+                                        .strong()
+                                        .color(Color32::WHITE),
+                                );
+                                egui::ComboBox::from_id_salt("capture_mode_live")
+                                    .selected_text(mode.label())
+                                    .width(110.)
+                                    .show_ui(ui, |ui| {
+                                        for choice in [
+                                            CaptureMode::Region,
+                                            CaptureMode::MultiRegion,
+                                            CaptureMode::Window,
+                                            CaptureMode::FullScreen,
+                                            CaptureMode::Scrolling,
+                                            CaptureMode::Text,
+                                        ] {
+                                            ui.selectable_value(&mut mode, choice, choice.label());
+                                        }
+                                    })
+                                    .response
+                                    .on_hover_text(
+                                        "Choose a capture type. Space switches Region / Window.",
+                                    );
+                                if mode == CaptureMode::Text {
+                                    ui.label(
+                                        egui::RichText::new("Text → clipboard")
+                                            .color(Color32::WHITE),
+                                    );
+                                } else {
+                                    destination_changed = crate::capture_panel::destination_picker(
+                                        ui,
+                                        &mut self.settings.capture_destination,
+                                    );
+                                }
+                                ui.checkbox(
+                                    &mut selection.magnifier,
+                                    egui::RichText::new("Magnifier").color(Color32::WHITE),
+                                );
+                                if ui.button("Reset").clicked() {
+                                    selection.drag = RegionDrag::default();
+                                    selection.multi = MultiRegions::default();
+                                    selection.window_id = None;
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    cancel = true;
+                                }
+                                if mode == CaptureMode::MultiRegion {
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "{}/32",
+                                            selection.multi.rects.len()
+                                        ))
+                                        .color(Color32::WHITE),
+                                    );
+                                    if ui
+                                        .add_enabled(
+                                            selection.multi.selected.is_some(),
+                                            egui::Button::new("Remove"),
+                                        )
+                                        .on_hover_text("Remove selected region · Delete")
+                                        .clicked()
+                                    {
+                                        selection.multi.remove_selected(&mut selection.drag);
                                     }
-                                })
-                                .response
-                                .on_hover_text(
-                                    "Choose a capture type. Space switches Region / Window.",
-                                );
-                            if mode == CaptureMode::Text {
-                                ui.label(
-                                    egui::RichText::new("Text → clipboard").color(Color32::WHITE),
-                                );
-                            } else {
-                                destination_changed = crate::capture_panel::destination_picker(
-                                    ui,
-                                    &mut self.settings.capture_destination,
-                                );
-                            }
-                            ui.checkbox(
-                                &mut selection.magnifier,
-                                egui::RichText::new("Magnifier").color(Color32::WHITE),
-                            );
-                            if ui.button("Reset").clicked() {
-                                selection.drag = RegionDrag::default();
-                                selection.multi = MultiRegions::default();
-                                selection.window_id = None;
-                            }
-                            if ui.button("Cancel").clicked() {
-                                cancel = true;
-                            }
-                            if mode == CaptureMode::MultiRegion {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{}/32",
-                                        selection.multi.rects.len()
-                                    ))
-                                    .color(Color32::WHITE),
-                                );
+                                }
+                                let ready = mode == CaptureMode::FullScreen
+                                    || selection.drag.bounds().is_some()
+                                    || (mode == CaptureMode::MultiRegion
+                                        && !selection.multi.rects.is_empty());
                                 if ui
                                     .add_enabled(
-                                        selection.multi.selected.is_some(),
-                                        egui::Button::new("Remove"),
+                                        ready,
+                                        appearance::primary(
+                                            ui.ctx(),
+                                            if mode == CaptureMode::Scrolling {
+                                                "Start scrolling"
+                                            } else if mode == CaptureMode::Text {
+                                                "Copy text"
+                                            } else {
+                                                self.settings.capture_destination.capture_label()
+                                            },
+                                        ),
                                     )
-                                    .on_hover_text("Remove selected region · Delete")
                                     .clicked()
                                 {
-                                    selection.multi.remove_selected(&mut selection.drag);
+                                    accepted = Some(selection::PixelRect {
+                                        x: 0,
+                                        y: 0,
+                                        width: 0,
+                                        height: 0,
+                                    });
                                 }
-                            }
-                            let ready = selection.drag.bounds().is_some()
-                                || (mode == CaptureMode::MultiRegion
-                                    && !selection.multi.rects.is_empty());
-                            if ui
-                                .add_enabled(
-                                    ready,
-                                    appearance::primary(
-                                        ui.ctx(),
-                                        if mode == CaptureMode::Scrolling {
-                                            "Start scrolling"
-                                        } else if mode == CaptureMode::Text {
-                                            "Copy text"
-                                        } else {
-                                            self.settings.capture_destination.capture_label()
-                                        },
-                                    ),
-                                )
-                                .clicked()
-                            {
-                                accepted = Some(selection::PixelRect {
-                                    x: 0,
-                                    y: 0,
-                                    width: 0,
-                                    height: 0,
-                                });
-                            }
+                            });
                         });
-                    });
+                });
             })
             .response
             .rect;
@@ -611,6 +769,9 @@ impl MyImageApp {
                         selection.window_id = Some(w.id);
                         selection.drag.completed = true;
                     }
+                } else if mode == CaptureMode::FullScreen {
+                    confirm |= !placing_overlay && !menu_interaction && selection.pointer_ready && response.clicked()
+                        && pointer.is_some_and(|p| !bar.contains(p));
                 } else if !placing_overlay && selection.pointer_ready && !menu_interaction && mode == CaptureMode::Scrolling {
                     let windows: Vec<_> = selection
                         .windows
@@ -654,7 +815,7 @@ impl MyImageApp {
                     && !menu_interaction
                     && capture_on_completion(self.settings.capture_on_release, mode, selection.drag.completed);
                 let chosen = selection.drag.bounds().map(|r| r.intersect(bounds));
-                let selected = chosen.or_else(|| {
+                let selected = (mode == CaptureMode::FullScreen).then_some(bounds).or(chosen).or_else(|| {
                     (mode != CaptureMode::Text && !selection.drag.active)
                         .then(|| hovered_window.map(|w| window_rect(w).intersect(bounds)))
                         .flatten()
@@ -774,7 +935,7 @@ impl MyImageApp {
                     );
                 }
                 if selection.magnifier
-                    && mode != CaptureMode::Window
+                    && !matches!(mode, CaptureMode::Window | CaptureMode::FullScreen)
                     && (chosen.is_none() || selection.drag.active)
                     && let Some(p) = pointer.filter(|p| !bar.contains(*p))
                 {
@@ -782,7 +943,9 @@ impl MyImageApp {
                         .magnifier_preview
                         .paint(painter, p, bounds, bar, &selection.image);
                 }
-                let hint = if mode == CaptureMode::MultiRegion {
+                let hint = if mode == CaptureMode::FullScreen {
+                    "Click this screen to capture it · Move to any other screen to choose it · Esc cancels"
+                } else if mode == CaptureMode::MultiRegion {
                     "Drag to add regions · Drag a region to adjust · Delete removes · Enter captures"
                 } else if mode == CaptureMode::Text && self.settings.capture_on_release {
                     "Drag and release to copy text · Esc cancels"
@@ -803,7 +966,7 @@ impl MyImageApp {
                 };
                 let hintrect = Rect::from_center_size(
                     Pos2::new(bounds.center().x, 36.),
-                    Vec2::new(580_f32.min(bounds.width() - 16.), 30.),
+                    Vec2::new(700_f32.min(bounds.width() - 16.), 30.),
                 );
                 painter.rect_filled(hintrect, 8, appearance::palette(ui.ctx()).navy);
                 painter.text(
@@ -814,7 +977,10 @@ impl MyImageApp {
                     Color32::WHITE,
                 );
                 if confirm && !placing_overlay && !selection.drag.active {
-                    if mode == CaptureMode::MultiRegion {
+                    if mode == CaptureMode::FullScreen {
+                        accepted = Some(selection::PixelRect { x: 0, y: 0,
+                            width: selection.image.width(), height: selection.image.height() });
+                    } else if mode == CaptureMode::MultiRegion {
                         accepted_regions = selection.multi.rects.iter().filter_map(|rect|
                             selection::selection_to_pixels(
                                 [rect.left()-bounds.left(), rect.top()-bounds.top()],
@@ -855,24 +1021,23 @@ impl MyImageApp {
             self.persist_settings();
         }
         if cancel {
-            self.cancel_selection(ctx);
+            Some(SelectionAction::Cancel)
         } else if let Some((id, crop)) = window {
-            self.capture_selected_window(ctx, id, crop);
+            Some(SelectionAction::Window(id, crop))
         } else if !accepted_regions.is_empty() {
-            if let Some(selection) = self.selection.take() {
-                self.queue_capture_output(ctx, selection.captured_at, move || {
-                    selection::crop_regions(&selection.image, &accepted_regions)
-                });
-            }
-        } else if let Some(rect) = accepted {
-            self.accept_selection(ctx, rect);
+            Some(SelectionAction::Regions(accepted_regions))
+        } else {
+            accepted.map(SelectionAction::Region)
         }
     }
 
-    fn capture_selected_window(&mut self, ctx: &egui::Context, id: u32, crop: Option<[f32; 4]>) {
-        let Some(selection) = self.selection.take() else {
-            return;
-        };
+    fn capture_selected_window(
+        &mut self,
+        ctx: &egui::Context,
+        selection: Selection,
+        id: u32,
+        crop: Option<[f32; 4]>,
+    ) {
         self.pending_capture = Some(selection.return_hidden);
         self.generation += 1;
         let generation = self.generation;
@@ -918,6 +1083,7 @@ impl MyImageApp {
             });
             let _ = tx.send(WorkEvent::WindowCaptured(
                 generation,
+                selection.display,
                 id,
                 crop,
                 Local::now(),
@@ -958,20 +1124,12 @@ impl MyImageApp {
     pub(super) fn start_window_scroll(
         &mut self,
         ctx: &egui::Context,
+        display: DisplayInfo,
         id: u32,
         crop: Option<[f32; 4]>,
         image: image::RgbaImage,
         at: DateTime<Local>,
     ) {
-        let Some(display) = self
-            .displays
-            .iter()
-            .find(|d| Some(d.id) == self.settings.display_id)
-            .or(self.displays.first())
-            .cloned()
-        else {
-            return;
-        };
         let size = image.dimensions();
         let window_crop = crop.and_then(|[left, top, right, bottom]| {
             selection::selection_to_pixels([left, top], [right, bottom], [1., 1.], [size.0, size.1])
@@ -1297,6 +1455,248 @@ fn window_selection(area: Rect, window: Rect) -> Option<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_screens(ctx: &egui::Context, mode: CaptureMode) -> SelectionSession {
+        let frames = [
+            (1, 0, 0, 1., [240, 10, 20, 255]),
+            (2, -800, -600, 2., [10, 20, 240, 255]),
+        ]
+        .into_iter()
+        .map(|(id, x, y, scale, color)| CapturedFrame {
+            display: DisplayInfo {
+                id,
+                name: format!("Display {id}"),
+                x,
+                y,
+                width: 800,
+                height: 600,
+                scale_factor: scale,
+                is_primary: id == 1,
+            },
+            image: image::RgbaImage::from_pixel(
+                (800. * scale) as u32,
+                (600. * scale) as u32,
+                image::Rgba(color),
+            ),
+            windows: Vec::new(),
+        })
+        .collect();
+        let mut session = SelectionSession::new(ctx, frames, Local::now(), mode, false);
+        for screen in &mut session.screens {
+            screen.placement_frames = 5;
+            screen.magnifier = false;
+        }
+        session
+    }
+
+    fn overlay_frame(
+        app: &mut MyImageApp,
+        ctx: &egui::Context,
+        screen: &mut Selection,
+        events: Vec<egui::Event>,
+    ) -> Option<SelectionAction> {
+        let mut action = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800., 600.))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                action = app.selection_overlay_ui(ctx, screen);
+            },
+        );
+        action
+    }
+
+    fn pointer_button(pos: Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos,
+            pressed,
+            button: egui::PointerButton::Primary,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn either_display_selects_its_own_pixels_at_native_resolution() {
+        for index in 0..2 {
+            let ctx = egui::Context::default();
+            let mut app =
+                MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+            let mut session = test_screens(&ctx, CaptureMode::Region);
+            let screen = &mut session.screens[index];
+            let start = Pos2::new(100., 150.);
+            let end = Pos2::new(300., 270.);
+            overlay_frame(&mut app, &ctx, screen, vec![]);
+            overlay_frame(
+                &mut app,
+                &ctx,
+                screen,
+                vec![
+                    egui::Event::PointerMoved(start),
+                    pointer_button(start, true),
+                ],
+            );
+            overlay_frame(&mut app, &ctx, screen, vec![egui::Event::PointerMoved(end)]);
+            assert_eq!(
+                overlay_frame(&mut app, &ctx, screen, vec![pointer_button(end, false)]),
+                None
+            );
+            let action = overlay_frame(&mut app, &ctx, screen, vec![key(egui::Key::Enter)]);
+            let Some(SelectionAction::Region(rect)) = action else {
+                panic!("Expected region: {action:?}");
+            };
+            let scale = (index + 1) as u32;
+            assert_eq!(
+                (rect.x, rect.y, rect.width, rect.height),
+                (100 * scale, 150 * scale, 200 * scale, 120 * scale)
+            );
+            let cropped =
+                selection::crop_selection(&screen.image, rect, CaptureShape::Rectangle, 0).unwrap();
+            assert_eq!(
+                cropped.get_pixel(0, 0).0,
+                if index == 0 {
+                    [240, 10, 20, 255]
+                } else {
+                    [10, 20, 240, 255]
+                }
+            );
+            assert!(session.screens[1 - index].drag.bounds().is_none());
+        }
+    }
+
+    #[test]
+    fn full_screen_click_chooses_either_screen_and_its_native_size() {
+        for index in 0..2 {
+            let ctx = egui::Context::default();
+            let mut app =
+                MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+            let mut session = test_screens(&ctx, CaptureMode::FullScreen);
+            let screen = &mut session.screens[index];
+            overlay_frame(&mut app, &ctx, screen, vec![]);
+            overlay_frame(&mut app, &ctx, screen, vec![]);
+            let pos = Pos2::new(400., 300.);
+            assert_eq!(
+                overlay_frame(
+                    &mut app,
+                    &ctx,
+                    screen,
+                    vec![egui::Event::PointerMoved(pos), pointer_button(pos, true)]
+                ),
+                None
+            );
+            let action = overlay_frame(&mut app, &ctx, screen, vec![pointer_button(pos, false)]);
+            assert_eq!(
+                action,
+                Some(SelectionAction::Region(selection::PixelRect {
+                    x: 0,
+                    y: 0,
+                    width: screen.image.width(),
+                    height: screen.image.height(),
+                }))
+            );
+        }
+    }
+
+    #[test]
+    fn overlay_geometry_preserves_negative_origins_and_mixed_scaling() {
+        let ctx = egui::Context::default();
+        let session = test_screens(&ctx, CaptureMode::Region);
+        let display = &session.screens[1].display;
+        // macOS uses Quartz points; Windows uses physical pixels / per-screen DPI.
+        for divisor in [1., 1.25, 2., 2.3] {
+            let (position, size) = overlay_geometry(display, divisor);
+            assert!((position * divisor - Pos2::new(-800., -600.)).length() < 0.001);
+            assert!((size * divisor - Vec2::new(800., 600.)).length() < 0.001);
+        }
+    }
+
+    #[test]
+    fn leaving_overlay_clears_hover_and_unfinished_drag() {
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        let mut session = test_screens(&ctx, CaptureMode::Region);
+        let screen = &mut session.screens[0];
+        overlay_frame(&mut app, &ctx, screen, vec![]);
+        let pos = Pos2::new(100., 150.);
+        overlay_frame(
+            &mut app,
+            &ctx,
+            screen,
+            vec![egui::Event::PointerMoved(pos), pointer_button(pos, true)],
+        );
+        assert!(screen.drag.active && screen.pointer_ready);
+        overlay_frame(&mut app, &ctx, screen, vec![egui::Event::PointerGone]);
+        assert!(!screen.drag.active && !screen.pointer_ready);
+        assert_eq!(
+            overlay_frame(&mut app, &ctx, screen, vec![key(egui::Key::Escape)]),
+            Some(SelectionAction::Cancel)
+        );
+    }
+
+    #[test]
+    fn cancel_on_secondary_closes_all_overlays_and_restores_only_editor() {
+        use std::{cell::RefCell, rc::Rc};
+        let ctx = egui::Context::default();
+        ctx.set_embed_viewports(false);
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        let session = test_screens(&ctx, CaptureMode::Region);
+        let ids: Vec<_> = session
+            .screens
+            .iter()
+            .map(|s| overlay_id(&s.display))
+            .collect();
+        let secondary = ids[1];
+        let shown = Rc::new(RefCell::new(Vec::new()));
+        let shown_for_renderer = shown.clone();
+        egui::Context::set_immediate_viewport_renderer(move |ctx, mut viewport| {
+            shown_for_renderer.borrow_mut().push(viewport.ids.this);
+            let _ = ctx.run(
+                egui::RawInput {
+                    viewport_id: viewport.ids.this,
+                    viewports: [(viewport.ids.this, egui::ViewportInfo::default())]
+                        .into_iter()
+                        .collect(),
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800., 600.))),
+                    events: if viewport.ids.this == secondary {
+                        vec![key(egui::Key::Escape)]
+                    } else {
+                        vec![]
+                    },
+                    ..Default::default()
+                },
+                |ctx| (viewport.viewport_ui_cb)(ctx),
+            );
+        });
+        app.selection = Some(session);
+        let output = ctx.run(egui::RawInput::default(), |ctx| app.selection_ui(ctx));
+        assert_eq!(*shown.borrow(), vec![secondary]);
+        assert!(app.selection.is_none());
+        assert_eq!(app.status, "Capture canceled");
+        for id in ids.into_iter().skip(1) {
+            let commands = &output.viewport_output[&id].commands;
+            assert!(commands.contains(&ViewportCommand::Visible(false)));
+            assert!(commands.contains(&ViewportCommand::Close));
+            assert!(!commands.contains(&ViewportCommand::Decorations(true)));
+        }
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&ViewportCommand::Decorations(true))
+        );
+        ctx.set_embed_viewports(true);
+    }
+
     #[test]
     fn finish_without_scroll_keeps_session_open_and_warns_instead_of_saving() {
         let ctx = egui::Context::default();
@@ -1313,6 +1713,7 @@ mod tests {
         });
         app.start_window_scroll(
             &ctx,
+            app.displays[0].clone(),
             42,
             Some([0., 0., 1., 1.]),
             image::RgbaImage::new(300, 400),
@@ -1353,7 +1754,7 @@ mod tests {
         let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
         app.settings.capture_mode = CaptureMode::Text;
         let image = image::RgbaImage::new(800, 600);
-        app.selection = Some(Selection {
+        let mut screen = Selection {
             display: DisplayInfo {
                 id: 1,
                 name: "Test display".into(),
@@ -1385,7 +1786,7 @@ mod tests {
             magnifier: false,
             magnifier_preview: Default::default(),
             pointer_ready: true,
-        });
+        };
         let mut frame = |events| {
             ctx.run(
                 egui::RawInput {
@@ -1393,7 +1794,9 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ctx| app.selection_ui(ctx),
+                |ctx| {
+                    app.selection_overlay_ui(ctx, &mut screen);
+                },
             )
         };
         frame(vec![]);
@@ -1425,10 +1828,7 @@ mod tests {
         frame(vec![egui::Event::PointerMoved(start), button(start, true)]);
         frame(vec![egui::Event::PointerMoved(end)]);
         frame(vec![button(end, false)]);
-        let selection = app
-            .selection
-            .as_ref()
-            .expect("confirmation stays enabled by default");
+        let selection = &screen;
         assert_eq!(selection.mode, CaptureMode::Text);
         assert_eq!(
             selection.drag.bounds(),

@@ -511,12 +511,7 @@ fn launcher_content(
     display_ui.spacing_mut().combo_width = 296.;
     display_ui.style_mut().visuals.widgets.inactive.bg_stroke =
         Stroke::new(0.6, p.border.lerp_to_gamma(p.paper, 0.4));
-    let name = displays
-        .iter()
-        .enumerate()
-        .find(|(_, d)| Some(d.id) == settings.display_id)
-        .map(|(i, d)| crate::capture_panel::display_label(i, d))
-        .unwrap_or_else(|| "No display".into());
+    let name = crate::capture_panel::selected_display_label(settings, displays);
     let popup_visuals = display_ui.visuals().clone();
     egui::ComboBox::from_id_salt("launcher-display")
         .selected_text(egui::RichText::new(name).size(12.))
@@ -525,15 +520,7 @@ fn launcher_content(
             style.visuals = popup_visuals.clone()
         }))
         .show_ui(&mut display_ui, |ui| {
-            for (i, d) in displays.iter().enumerate() {
-                changed |= ui
-                    .selectable_value(
-                        &mut settings.display_id,
-                        Some(d.id),
-                        crate::capture_panel::display_label(i, d),
-                    )
-                    .changed();
-            }
+            changed |= crate::capture_panel::display_choices(ui, settings, displays);
         });
 
     ui.painter().rect(

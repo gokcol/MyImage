@@ -35,6 +35,54 @@ pub fn display_label(index: usize, display: &DisplayInfo) -> String {
         if display.is_primary { " · Main" } else { "" }
     )
 }
+pub fn selected_display_label(settings: &Settings, displays: &[DisplayInfo]) -> String {
+    if settings.capture_all_displays {
+        "Any display".into()
+    } else {
+        displays
+            .iter()
+            .enumerate()
+            .find(|(_, d)| Some(d.id) == settings.display_id)
+            .map(|(i, d)| display_label(i, d))
+            .unwrap_or_else(|| "No display available".into())
+    }
+}
+
+pub fn display_choices(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    displays: &[DisplayInfo],
+) -> bool {
+    let before = (settings.capture_all_displays, settings.display_id);
+    if ui
+        .selectable_label(settings.capture_all_displays, "Any display")
+        .on_hover_text("Start capture, then select on any connected screen")
+        .clicked()
+    {
+        settings.capture_all_displays = true;
+    }
+    for (i, display) in displays.iter().enumerate() {
+        if ui
+            .selectable_label(
+                !settings.capture_all_displays && settings.display_id == Some(display.id),
+                display_label(i, display),
+            )
+            .on_hover_text(format!(
+                "{} · {} × {} · {:.0}%",
+                display.name,
+                display.width,
+                display.height,
+                display.scale_factor * 100.
+            ))
+            .clicked()
+        {
+            settings.capture_all_displays = false;
+            settings.display_id = Some(display.id);
+        }
+    }
+    before != (settings.capture_all_displays, settings.display_id)
+}
+
 pub fn delay_label(seconds: u32) -> String {
     match seconds {
         0 => "No delay".into(),
@@ -43,11 +91,7 @@ pub fn delay_label(seconds: u32) -> String {
     }
 }
 pub fn menu_summary(settings: &Settings, _shape: CaptureShape, displays: &[DisplayInfo]) -> String {
-    let display = displays
-        .iter()
-        .position(|d| Some(d.id) == settings.display_id)
-        .map(|i| format!("Display {}", i + 1))
-        .unwrap_or_else(|| "No display".into());
+    let display = selected_display_label(settings, displays);
     format!(
         "{} · {display} · {} · {}",
         settings.capture_mode.label(),
@@ -115,13 +159,9 @@ pub fn ui(
                                     if ui.small_button("Refresh").on_hover_text("Find connected displays").clicked() { result.action = Some(Action::RefreshDisplays); }
                                 });
                             });
-                            let label = displays.iter().enumerate().find(|(_,d)| Some(d.id) == settings.display_id)
-                                .map(|(i,d)| display_label(i,d)).unwrap_or_else(|| "No display available".into());
+                            let label = selected_display_label(settings, displays);
                             egui::ComboBox::from_id_salt("capture-display").selected_text(label).width(ui.available_width()).show_ui(ui, |ui| {
-                                for (i,d) in displays.iter().enumerate() {
-                                    result.changed |= ui.selectable_value(&mut settings.display_id, Some(d.id), display_label(i,d))
-                                        .on_hover_text(format!("{} · {} × {} · {:.0}%", d.name, d.width, d.height, d.scale_factor * 100.)).changed();
-                                }
+                                result.changed |= display_choices(ui, settings, displays);
                             });
                             ui.horizontal(|ui| {
                                 ui.label("Timer");
