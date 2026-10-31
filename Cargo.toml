@@ -35,6 +35,7 @@ tiff = "=0.11.3"
 resvg = { version = "=0.45.1", default-features = false, features = ["text"] }
 roxmltree = "=0.20.0"
 arboard = "=3.7.0"
+zip = { version = "=9.0.4", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "=0.2.191"
@@ -43,12 +44,14 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"
 block2 = "0.6"
 objc2-screen-capture-kit = "0.3.2"
 objc2-foundation = "0.3.2"
+objc2-core-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"
+objc2-image-io = { version = "0.3.2", default-features = false, features = ["std", "CGImageDestination", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-core-ml = { version = "0.3.2", default-features = false, features = ["std", "MLCPUComputeDevice", "MLComputeDeviceProtocol"] }
 objc2-vision = { version = "0.3.2", default-features = false, features = ["std", "block2", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "VNObservation", "VNTypes", "objc2-core-foundation", "objc2-core-ml"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "ApplicationModel", "Win32_Storage_Packaging_Appx", "Win32_System_Registry", "Media_Ocr", "Graphics_Imaging", "Storage_Streams", "Globalization", "Win32_System_WinRT"] }
+windows = { version = "=0.61.3", features = ["Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell", "Win32_System_Com", "ApplicationModel", "Win32_Storage_Packaging_Appx", "Win32_System_Registry", "Media_Ocr", "Foundation", "Graphics_Imaging", "Storage_Streams", "Globalization", "Win32_System_WinRT"] }
 
 # Keep local builds compact. Tests inherit these development settings.
 # Retain file/line backtraces for workspace code without full debug metadata.

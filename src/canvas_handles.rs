@@ -70,12 +70,13 @@ fn hit(rect: Rect, position: Pos2) -> Option<Edge> {
         .map(|(edge, _)| edge)
 }
 
-fn resized_output(size: Vec2, edge: Edge, delta: Vec2, lock_aspect: bool) -> Rect {
+fn resized_output(size: Vec2, edge: Edge, delta: Vec2, lock_aspect: bool, centered: bool) -> Rect {
     let mut rect = Rect::from_min_size(Pos2::ZERO, size);
+    let multiplier = if centered { 2. } else { 1. };
     if lock_aspect && edge.is_corner() {
-        // The more deliberate axis drives the resize. Keep the opposite corner
-        // fixed, and derive both dimensions from the gesture's original ratio.
-        let relative = delta * egui::vec2(edge.0 as f32, edge.1 as f32) / size;
+        // The more deliberate axis drives the resize. Derive both dimensions
+        // from the original ratio, with the opposite corner or center fixed.
+        let relative = delta * egui::vec2(edge.0 as f32, edge.1 as f32) * multiplier / size;
         let change = if relative.x.abs() >= relative.y.abs() {
             relative.x
         } else {
@@ -83,6 +84,9 @@ fn resized_output(size: Vec2, edge: Edge, delta: Vec2, lock_aspect: bool) -> Rec
         };
         let scale = (1. + change).max((1. / size.x).max(1. / size.y));
         let next = (size * scale).round().max(Vec2::splat(1.));
+        if centered {
+            return Rect::from_center_size(rect.center(), next);
+        }
         if edge.0 < 0 {
             rect.min.x = size.x - next.x;
         } else {
@@ -96,6 +100,10 @@ fn resized_output(size: Vec2, edge: Edge, delta: Vec2, lock_aspect: bool) -> Rec
         return rect;
     }
     let delta = delta.round();
+    if centered {
+        let change = delta * egui::vec2(edge.0 as f32, edge.1 as f32) * multiplier;
+        return Rect::from_center_size(rect.center(), (size + change).max(Vec2::splat(1.)));
+    }
     if edge.0 < 0 {
         rect.min.x = delta.x.min(size.x - 1.);
     }
@@ -163,7 +171,7 @@ impl EditorState {
         history: &mut EditHistory,
         rect: Rect,
         scale: f32,
-        viewport: Vec2,
+        _viewport: Vec2,
     ) -> (bool, bool) {
         if !ui.is_enabled() {
             return (false, false);
@@ -218,23 +226,21 @@ impl EditorState {
         let Some(drag) = &mut self.canvas_resize else {
             return (false, false);
         };
-        if ui.input_mut(|i| {
-            i.consume_key(Modifiers::NONE, Key::Escape)
-                || i.consume_key(Modifiers::SHIFT, Key::Escape)
-        }) || !ui.input(|i| i.focused)
-        {
+        if ui.input_mut(|i| i.consume_key(i.modifiers, Key::Escape)) || !ui.input(|i| i.focused) {
             self.canvas_resize = None;
             self.focus_canvas = true;
             ui.ctx().request_repaint();
             return (true, false);
         }
         let aspect_locked = drag.edge.is_corner() && ui.input(|i| i.modifiers.shift);
+        let centered = ui.input(|i| i.modifiers.command);
         if let Some(position) = ui.input(|i| i.pointer.interact_pos()) {
             let output = resized_output(
                 drag.size,
                 drag.edge,
                 (position - drag.press) / drag.scale,
                 aspect_locked,
+                centered,
             );
             if output != drag.output || drag.error.is_some() {
                 let mut next = document.clone();
@@ -261,15 +267,12 @@ impl EditorState {
         }
         let mut display = document.clone();
         display.geometry = drag.geometry;
-        let paint_rect = if self.fit {
-            let zoom = fit_scale(viewport, drag.output.size());
-            Rect::from_center_size(drag.frame.center(), drag.output.size() * zoom)
-        } else {
-            Rect::from_min_max(
-                drag.frame.min + drag.output.min.to_vec2() * drag.scale,
-                drag.frame.min + drag.output.max.to_vec2() * drag.scale,
-            )
-        };
+        // Keep artwork and the opposite edge anchored during the gesture, even
+        // in Fit mode. The normal canvas layout may refit after release.
+        let paint_rect = Rect::from_min_max(
+            drag.frame.min + drag.output.min.to_vec2() * drag.scale,
+            drag.frame.min + drag.output.max.to_vec2() * drag.scale,
+        );
         // Render a fixed source-coordinate texture once. Changing only the UV
         // window during the drag avoids resampling shimmer and black flashes.
         let view = display.geometry.view_rect(original_size(document));
@@ -329,7 +332,7 @@ impl EditorState {
         let message = drag.error.as_deref().map_or_else(
             || {
                 format!(
-                    "{} × {} px{} · Esc to cancel",
+                    "{} × {} px{}{} · Esc to cancel",
                     drag.output.width() as u32,
                     drag.output.height() as u32,
                     if aspect_locked {
@@ -337,6 +340,7 @@ impl EditorState {
                     } else {
                         ""
                     },
+                    if centered { " · From center" } else { "" },
                 )
             },
             |_| "Canvas limit reached · Esc to cancel".to_owned(),
@@ -387,7 +391,7 @@ impl EditorState {
                 Sense::hover(),
             )
             .on_hover_text(
-                "Drag to resize canvas. Hold Shift on a corner to keep its aspect ratio. Artwork keeps its size; hidden content is preserved.",
+                "Drag to resize canvas. Hold Shift on a corner to keep its aspect ratio; hold Command/Ctrl to resize from the center. Artwork keeps its size; hidden content is preserved.",
             );
         }
     }
@@ -482,6 +486,282 @@ mod tests {
         )
     }
 
+    fn canvas_border(output: &egui::FullOutput) -> Rect {
+        output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Rect(shape)
+                    if shape.stroke.width == 1.
+                        && shape.stroke.color == Color32::from_gray(141) =>
+                {
+                    Some(shape.rect.shrink(0.5))
+                }
+                _ => None,
+            })
+            .expect("painted canvas boundary")
+    }
+
+    fn assert_resize_pixels_stay_anchored(output: &egui::FullOutput, drag: &CanvasResize) {
+        let texture = drag.texture.as_ref().unwrap().id();
+        let source = drag.source.as_ref().unwrap();
+        let bounds = source.geometry.canvas_rect(original_size(source));
+        let mesh = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == texture => Some(mesh),
+                _ => None,
+            })
+            .expect("painted composition mesh");
+        assert!(!mesh.vertices.is_empty());
+        for vertex in &mesh.vertices {
+            let source_pixel = egui::vec2(bounds.x as f32, bounds.y as f32)
+                + vertex.uv.to_vec2() * egui::vec2(bounds.width as f32, bounds.height as f32);
+            let expected = drag.frame.min + source_pixel * drag.scale;
+            assert!(
+                vertex.pos.distance(expected) < 0.002,
+                "Composition pixels must retain their original screen positions and scale"
+            );
+        }
+    }
+
+    #[test]
+    fn centered_handles_keep_center_and_shift_ratio_with_positive_minimum_dimensions() {
+        let size = egui::vec2(200., 140.);
+        for edge in EDGES {
+            let delta = egui::vec2(edge.0 as f32 * 32., edge.1 as f32 * 24.);
+            let centered = resized_output(size, edge, delta, false, true);
+            assert_eq!(centered.center(), (size * 0.5).to_pos2());
+            assert_eq!(
+                centered.size(),
+                size + egui::vec2(edge.0.abs() as f32 * 64., edge.1.abs() as f32 * 48.)
+            );
+            for locked in [false, true] {
+                let centered = resized_output(size, edge, delta, locked, true);
+                assert_eq!(centered.center(), (size * 0.5).to_pos2());
+                if locked && edge.is_corner() {
+                    // Height is the more deliberate axis: 48 / 140 > 64 / 200.
+                    assert_eq!(centered.size(), egui::vec2(269., 188.));
+                } else {
+                    assert_eq!(centered, resized_output(size, edge, delta, false, true));
+                }
+                for ratio in [1., 20.] {
+                    let output = resized_output(
+                        size,
+                        edge,
+                        -size * egui::vec2(edge.0 as f32, edge.1 as f32) * ratio,
+                        locked,
+                        true,
+                    );
+                    assert_eq!(output.center(), (size * 0.5).to_pos2());
+                    assert!(output.width() >= 1. && output.height() >= 1.);
+                    if edge.0 == 0 {
+                        assert_eq!(output.width(), size.x);
+                    }
+                    if edge.1 == 0 {
+                        assert_eq!(output.height(), size.y);
+                    }
+                    let mut document = fixture();
+                    apply_output_rect(&mut document, output).unwrap();
+                    assert_eq!(
+                        document.output_size(),
+                        [output.width() as u32, output.height() as u32]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fit_canvas_drag_keeps_painted_edges_and_pixels_fixed_until_release() {
+        for edge in EDGES {
+            let mut document = Document {
+                image: Arc::new(image::RgbaImage::from_pixel(
+                    800,
+                    560,
+                    image::Rgba([25, 75, 150, 255]),
+                )),
+                annotations: vec![],
+                geometry: Default::default(),
+            };
+            let before = document.edit_state();
+            let pixels = document.image.clone();
+            let mut editor = EditorState {
+                fit: true,
+                tool: Tool::Arrow,
+                ..Default::default()
+            };
+            let mut history = EditHistory::new(before.clone());
+            let ctx = egui::Context::default();
+            let initial = frame(&ctx, &mut editor, &mut document, &mut history, vec![]);
+            let original_rect = canvas_border(&initial);
+            let zoom = editor.zoom;
+            assert!(zoom < 1., "Fixture must exercise a genuinely fitted image");
+            let start = edge.position(original_rect);
+            let end = start + egui::vec2(edge.0 as f32 * 23., edge.1 as f32 * 17.);
+            frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                vec![egui::Event::PointerMoved(start), button(start, true)],
+            );
+            for _ in 0..3 {
+                let output = frame(
+                    &ctx,
+                    &mut editor,
+                    &mut document,
+                    &mut history,
+                    vec![egui::Event::PointerMoved(end)],
+                );
+                let drag = editor.canvas_resize.as_ref().unwrap();
+                let expected = Rect::from_min_max(
+                    original_rect.min + drag.output.min.to_vec2() * zoom,
+                    original_rect.min + drag.output.max.to_vec2() * zoom,
+                );
+                assert_eq!(canvas_border(&output), expected);
+                assert_eq!(editor.zoom, zoom);
+                let opposite = Edge(-edge.0, -edge.1);
+                assert!(
+                    opposite
+                        .position(expected)
+                        .distance(opposite.position(original_rect))
+                        < 0.002
+                );
+                assert_resize_pixels_stay_anchored(&output, drag);
+                assert_eq!(document.edit_state(), before);
+                assert!(!history.can_undo());
+            }
+            let release = frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                vec![button(end, false)],
+            );
+            assert!(editor.canvas_resize.is_none());
+            assert!(editor.fit);
+            assert!(
+                canvas_border(&release)
+                    .center()
+                    .distance(original_rect.center())
+                    < 0.002
+            );
+            assert!(Arc::ptr_eq(&pixels, &document.image));
+            assert!(history.undo(&mut document));
+            assert_eq!(document.edit_state(), before);
+            assert!(!history.can_undo());
+        }
+    }
+
+    #[test]
+    fn centered_and_ratio_modifiers_toggle_without_drift_and_cancel_or_commit_once() {
+        for cancel in [false, true] {
+            let mut document = fixture();
+            let before = document.edit_state();
+            let pixels = document.image.clone();
+            let mut editor = EditorState {
+                fit: false,
+                zoom: 1.,
+                tool: Tool::Arrow,
+                ..Default::default()
+            };
+            let mut history = EditHistory::new(before.clone());
+            let ctx = egui::Context::default();
+            let initial = frame(&ctx, &mut editor, &mut document, &mut history, vec![]);
+            let original_rect = canvas_border(&initial);
+            let start = Edge(1, 1).position(original_rect);
+            let end = start + egui::vec2(100., 10.);
+            frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                vec![egui::Event::PointerMoved(start), button(start, true)],
+            );
+            frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                vec![egui::Event::PointerMoved(end)],
+            );
+            let centered_ratio = Modifiers::COMMAND | Modifiers::SHIFT;
+            for modifiers in [
+                Modifiers::COMMAND,
+                centered_ratio,
+                Modifiers::SHIFT,
+                Modifiers::NONE,
+                centered_ratio,
+                centered_ratio,
+            ] {
+                let output = frame_with_modifiers(
+                    &ctx,
+                    &mut editor,
+                    &mut document,
+                    &mut history,
+                    vec![],
+                    modifiers,
+                );
+                let drag = editor.canvas_resize.as_ref().unwrap();
+                assert_eq!(
+                    drag.output.size(),
+                    match (modifiers.command, modifiers.shift) {
+                        (true, true) => egui::vec2(400., 280.),
+                        (true, false) => egui::vec2(400., 160.),
+                        (false, true) => egui::vec2(300., 210.),
+                        (false, false) => egui::vec2(300., 150.),
+                    }
+                );
+                if modifiers.command {
+                    assert_eq!(drag.output.center(), egui::pos2(100., 70.));
+                }
+                assert_resize_pixels_stay_anchored(&output, drag);
+                assert_eq!(document.edit_state(), before);
+                assert!(!history.can_undo());
+            }
+            if cancel {
+                frame_with_modifiers(
+                    &ctx,
+                    &mut editor,
+                    &mut document,
+                    &mut history,
+                    vec![egui::Event::Key {
+                        key: Key::Escape,
+                        physical_key: Some(Key::Escape),
+                        pressed: true,
+                        repeat: false,
+                        modifiers: centered_ratio,
+                    }],
+                    centered_ratio,
+                );
+            }
+            frame_with_modifiers(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                vec![button(end, false)],
+                centered_ratio,
+            );
+            assert!(editor.canvas_resize.is_none());
+            assert!(Arc::ptr_eq(&pixels, &document.image));
+            assert!(document.annotations.is_empty());
+            if cancel {
+                assert_eq!(document.edit_state(), before);
+                assert!(!history.can_undo());
+            } else {
+                assert_eq!(document.output_size(), [400, 280]);
+                assert!(history.undo(&mut document));
+                assert_eq!(document.edit_state(), before);
+                assert!(!history.can_undo());
+                assert!(history.redo(&mut document));
+                assert_eq!(document.output_size(), [400, 280]);
+            }
+        }
+    }
+
     #[test]
     fn shift_corners_keep_displayed_ratio_and_opposite_corner_fixed() {
         for turns in 0..4 {
@@ -494,7 +774,7 @@ mod tests {
             for edge in EDGES {
                 for amount in [-0.4, 0., 0.5, 2.] {
                     let delta = egui::vec2(edge.0 as f32 * size.x * amount, 0.);
-                    let output = resized_output(size, edge, delta, true);
+                    let output = resized_output(size, edge, delta, true, false);
                     if edge.is_corner() {
                         let expected = size * (1. + amount);
                         assert!((output.size() - expected).abs().max_elem() <= 0.5);
@@ -512,7 +792,7 @@ mod tests {
                         assert!(d.annotations.is_empty());
                         d.geometry = original.geometry;
                     } else {
-                        assert_eq!(output, resized_output(size, edge, delta, false));
+                        assert_eq!(output, resized_output(size, edge, delta, false, false));
                     }
                 }
                 let smallest = resized_output(
@@ -520,6 +800,7 @@ mod tests {
                     edge,
                     -size * egui::vec2(edge.0 as f32, edge.1 as f32) * 10.,
                     true,
+                    false,
                 );
                 assert!(smallest.width() >= 1. && smallest.height() >= 1.);
             }

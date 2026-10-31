@@ -14,22 +14,42 @@ pub enum ExportFormat {
     #[default]
     Png,
     Jpeg,
+    Gif,
+    Heif,
     WebP,
     Tiff,
     Pdf,
 }
 
 impl ExportFormat {
-    pub const ALL: [Self; 5] = [Self::Png, Self::Jpeg, Self::WebP, Self::Tiff, Self::Pdf];
+    #[cfg(test)]
+    pub const ALL: [Self; 7] = [
+        Self::Png,
+        Self::Jpeg,
+        Self::Gif,
+        Self::Heif,
+        Self::WebP,
+        Self::Tiff,
+        Self::Pdf,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Png => "PNG",
             Self::Jpeg => "JPEG",
+            Self::Gif => "GIF",
+            Self::Heif => "HEIF",
             Self::WebP => "WebP",
             Self::Tiff => "TIFF",
             Self::Pdf => "PDF",
         }
+    }
+
+    pub fn supports_transparency(self) -> bool {
+        matches!(
+            self,
+            Self::Png | Self::WebP | Self::Tiff | Self::Gif | Self::Pdf
+        )
     }
 
     pub fn extension(self) -> &'static str {
@@ -40,6 +60,8 @@ impl ExportFormat {
         match self {
             Self::Png => &["png"],
             Self::Jpeg => &["jpg", "jpeg"],
+            Self::Gif => &["gif"],
+            Self::Heif => &["heif", "heic"],
             Self::WebP => &["webp"],
             Self::Tiff => &["tiff", "tif"],
             Self::Pdf => &["pdf"],
@@ -51,6 +73,7 @@ impl ExportFormat {
 pub struct ExportOptions {
     pub format: ExportFormat,
     pub jpeg_quality: u8,
+    pub preserve_transparency: bool,
     pub jpeg_background: [u8; 3],
     pub pdf_page_size: PdfPageSize,
 }
@@ -60,6 +83,7 @@ impl Default for ExportOptions {
         Self {
             format: ExportFormat::Png,
             jpeg_quality: 90,
+            preserve_transparency: true,
             jpeg_background: [255; 3],
             pdf_page_size: PdfPageSize::Image,
         }
@@ -76,7 +100,7 @@ fn validate_extension(path: &Path, format: ExportFormat) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Please use a .{} filename for {} export. Save project creates an editable .myimage file.",
+            "Please use a .{} filename for {}. Choose .myimage to save an editable project.",
             format.extension(),
             format.label()
         ))
@@ -87,7 +111,7 @@ fn validate_extension(path: &Path, format: ExportFormat) -> Result<(), String> {
 /// native save dialog's overwrite confirmation for the resulting full path.
 pub fn checked_export_path(mut path: PathBuf, format: ExportFormat) -> Result<PathBuf, String> {
     if path.file_name().is_none() {
-        return Err("Please choose a filename for the export.".into());
+        return Err("Please choose a filename.".into());
     }
     if path.extension().is_none() {
         path.set_extension(format.extension());
@@ -106,8 +130,10 @@ pub fn checked_export_path(mut path: PathBuf, format: ExportFormat) -> Result<Pa
 /// Call on an I/O worker: large captures and annotations can take time to encode.
 pub fn save(document: &Document, path: &Path, options: ExportOptions) -> Result<(), String> {
     validate_extension(path, options.format)?;
-    if options.format == ExportFormat::Jpeg && !(1..=100).contains(&options.jpeg_quality) {
-        return Err("JPEG quality must be between 1 and 100.".into());
+    if matches!(options.format, ExportFormat::Jpeg | ExportFormat::Heif)
+        && !(1..=100).contains(&options.jpeg_quality)
+    {
+        return Err("Image quality must be between 1 and 100.".into());
     }
     if options.format == ExportFormat::WebP
         && document.output_size().into_iter().any(|side| side > 16_384)
@@ -122,23 +148,27 @@ pub fn save(document: &Document, path: &Path, options: ExportOptions) -> Result<
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)
-        .map_err(|error| format!("Cannot create an export in {}: {error}", parent.display()))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(|error| {
+        format!(
+            "Cannot create a saved copy in {}: {error}",
+            parent.display()
+        )
+    })?;
     {
         let mut writer = BufWriter::new(temporary.as_file_mut());
         encode(&image, options, &mut writer)
-            .map_err(|error| format!("{} export failed: {error}", options.format.label()))?;
+            .map_err(|error| format!("{} save failed: {error}", options.format.label()))?;
         writer
             .flush()
-            .map_err(|error| format!("Cannot finish the export: {error}"))?;
+            .map_err(|error| format!("Cannot finish saving the file: {error}"))?;
     }
     temporary
         .as_file()
         .sync_all()
-        .map_err(|error| format!("Cannot flush the export to disk: {error}"))?;
+        .map_err(|error| format!("Cannot flush the saved copy to disk: {error}"))?;
     temporary
         .persist(path)
-        .map_err(|error| format!("Cannot export {}: {}", path.display(), error.error))?;
+        .map_err(|error| format!("Cannot save {}: {}", path.display(), error.error))?;
     Ok(())
 }
 
@@ -147,6 +177,12 @@ fn encode(
     options: ExportOptions,
     writer: &mut (impl Write + Seek),
 ) -> Result<(), String> {
+    let opaque = if !options.preserve_transparency && options.format.supports_transparency() {
+        Some(opaque_rgba(image, options.jpeg_background))
+    } else {
+        None
+    };
+    let image = opaque.as_ref().unwrap_or(image);
     let (width, height) = image.dimensions();
     match options.format {
         ExportFormat::Png => image::codecs::png::PngEncoder::new(writer)
@@ -157,6 +193,20 @@ fn encode(
             image::codecs::jpeg::JpegEncoder::new_with_quality(writer, options.jpeg_quality)
                 .encode(rgb.as_raw(), width, height, ExtendedColorType::Rgb8)
                 .map_err(|error| error.to_string())
+        }
+        ExportFormat::Gif => {
+            let binary = gif_pixels(
+                image,
+                options.jpeg_background,
+                options.preserve_transparency,
+            );
+            image::codecs::gif::GifEncoder::new_with_speed(writer, 10)
+                .encode(binary.as_raw(), width, height, ExtendedColorType::Rgba8)
+                .map_err(|error| error.to_string())
+        }
+        ExportFormat::Heif => {
+            let bytes = crate::heif::encode(image, options.jpeg_quality, options.jpeg_background)?;
+            writer.write_all(&bytes).map_err(|error| error.to_string())
         }
         ExportFormat::WebP => image::codecs::webp::WebPEncoder::new_lossless(writer)
             .write_image(image.as_raw(), width, height, ExtendedColorType::Rgba8)
@@ -185,16 +235,35 @@ fn write_tiff(image: &RgbaImage, writer: &mut (impl Write + Seek)) -> tiff::Tiff
     encoded_image.write_data(image.as_raw())
 }
 
+fn matte_pixel(pixel: &image::Rgba<u8>, background: [u8; 3]) -> [u8; 3] {
+    let alpha = u32::from(pixel[3]);
+    std::array::from_fn(|channel| {
+        ((u32::from(pixel[channel]) * alpha + u32::from(background[channel]) * (255 - alpha) + 127)
+            / 255) as u8
+    })
+}
+fn opaque_rgba(image: &RgbaImage, background: [u8; 3]) -> RgbaImage {
+    RgbaImage::from_fn(image.width(), image.height(), |x, y| {
+        let p = matte_pixel(image.get_pixel(x, y), background);
+        image::Rgba([p[0], p[1], p[2], 255])
+    })
+}
+/// GIF has one transparent palette index rather than partial alpha. Keep fully
+/// transparent pixels, matte partial transparency, and quantize only this flattened snapshot.
+fn gif_pixels(image: &RgbaImage, background: [u8; 3], transparency: bool) -> RgbaImage {
+    RgbaImage::from_fn(image.width(), image.height(), |x, y| {
+        let source = image.get_pixel(x, y);
+        if transparency && source[3] == 0 {
+            image::Rgba([0; 4])
+        } else {
+            let p = matte_pixel(source, background);
+            image::Rgba([p[0], p[1], p[2], 255])
+        }
+    })
+}
 fn composite_opaque(image: &RgbaImage, background: [u8; 3]) -> RgbImage {
     RgbImage::from_fn(image.width(), image.height(), |x, y| {
-        let pixel = image.get_pixel(x, y);
-        let alpha = u32::from(pixel[3]);
-        image::Rgb(std::array::from_fn(|channel| {
-            ((u32::from(pixel[channel]) * alpha
-                + u32::from(background[channel]) * (255 - alpha)
-                + 127)
-                / 255) as u8
-        }))
+        image::Rgb(matte_pixel(image.get_pixel(x, y), background))
     })
 }
 
@@ -278,6 +347,19 @@ mod tests {
         }
     }
 
+    fn formats() -> Vec<ExportFormat> {
+        ExportFormat::ALL
+            .into_iter()
+            .filter(|f| *f != ExportFormat::Heif || crate::heif::available())
+            .collect()
+    }
+    fn decode_copy(path: &Path, format: ExportFormat) -> RgbaImage {
+        if format == ExportFormat::Heif {
+            crate::heif::load(path).unwrap()
+        } else {
+            image::open(path).unwrap().into_rgba8()
+        }
+    }
     #[test]
     fn lossless_formats_include_annotations_and_preserve_all_rgba_pixels() {
         let directory = tempfile::tempdir().unwrap();
@@ -360,6 +442,99 @@ mod tests {
     }
 
     #[test]
+    fn gif_is_static_palette_encoded_with_binary_transparency_and_partial_alpha_matte() {
+        use image::AnimationDecoder;
+        let directory = tempfile::tempdir().unwrap();
+        let mut doc = sample_document();
+        doc.annotations.clear();
+        doc.image = Arc::new(RgbaImage::from_fn(96, 32, |x, _| {
+            Rgba([
+                200,
+                40,
+                120,
+                if x < 32 {
+                    0
+                } else if x < 64 {
+                    128
+                } else {
+                    255
+                },
+            ])
+        }));
+        for preserve in [true, false] {
+            let path = directory.path().join(format!("alpha-{preserve}.gif"));
+            let settings = ExportOptions {
+                preserve_transparency: preserve,
+                jpeg_background: [16, 96, 48],
+                ..options(ExportFormat::Gif)
+            };
+            save(&doc, &path, settings).unwrap();
+            let bytes = fs::read(&path).unwrap();
+            assert!(bytes.starts_with(b"GIF89a") || bytes.starts_with(b"GIF87a"));
+            let frames = image::codecs::gif::GifDecoder::new(std::io::BufReader::new(
+                fs::File::open(&path).unwrap(),
+            ))
+            .unwrap()
+            .into_frames()
+            .collect_frames()
+            .unwrap();
+            assert_eq!(frames.len(), 1);
+            let decoded = frames[0].buffer();
+            let expected = gif_pixels(&doc.image, settings.jpeg_background, preserve);
+            for x in [16, 48, 80] {
+                assert_eq!(decoded.get_pixel(x, 16), expected.get_pixel(x, 16));
+            }
+        }
+    }
+    #[test]
+    fn transparency_off_mattes_every_lossless_raster_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = sample_document();
+        let flattened = crate::render::flatten(&doc).unwrap();
+        let matte = [16, 96, 48];
+        let expected = opaque_rgba(&flattened, matte);
+        for format in [ExportFormat::Png, ExportFormat::WebP, ExportFormat::Tiff] {
+            let path = dir.path().join(format!("opaque.{}", format.extension()));
+            save(
+                &doc,
+                &path,
+                ExportOptions {
+                    preserve_transparency: false,
+                    jpeg_background: matte,
+                    ..options(format)
+                },
+            )
+            .unwrap();
+            assert_eq!(decode_copy(&path, format), expected);
+        }
+    }
+    #[test]
+    fn heif_quality_errors_and_codec_failures_never_replace_existing_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("existing.heif");
+        fs::write(&path, b"keep").unwrap();
+        let doc = sample_document();
+        for quality in [0, 101, 255] {
+            assert!(
+                save(
+                    &doc,
+                    &path,
+                    ExportOptions {
+                        jpeg_quality: quality,
+                        ..options(ExportFormat::Heif)
+                    }
+                )
+                .is_err()
+            );
+            assert_eq!(fs::read(&path).unwrap(), b"keep");
+        }
+        if !crate::heif::available() {
+            assert!(save(&doc, &path, options(ExportFormat::Heif)).is_err());
+            assert_eq!(fs::read(&path).unwrap(), b"keep");
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+    #[test]
     fn tiff_declares_straight_alpha_and_lossless_deflate_compression() {
         use tiff::tags::{CompressionMethod, ExtraSamples, Tag};
 
@@ -385,7 +560,7 @@ mod tests {
         let document = sample_document();
         save_project(&document, &project_path).unwrap();
         let original_bytes = fs::read(&project_path).unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             let path = directory
                 .path()
                 .join(format!("copy.{}", format.extension()));
@@ -477,7 +652,7 @@ mod tests {
     fn extension_aliases_and_case_are_accepted_but_project_paths_are_protected() {
         let directory = tempfile::tempdir().unwrap();
         let document = sample_document();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             for extension in format.extensions() {
                 let path = directory
                     .path()
@@ -488,7 +663,7 @@ mod tests {
         }
         let project = directory.path().join("keep.myimage");
         fs::write(&project, b"editable project").unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             assert!(checked_export_path(project.clone(), format).is_err());
             assert!(save(&document, &project, options(format)).is_err());
             assert_eq!(fs::read(&project).unwrap(), b"editable project");
@@ -509,7 +684,7 @@ mod tests {
     #[test]
     fn inferred_extensions_cannot_bypass_overwrite_confirmation() {
         let directory = tempfile::tempdir().unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             let bare = directory.path().join(format!("capture-{}", format.label()));
             let full = bare.with_extension(format.extension());
             assert_eq!(checked_export_path(bare.clone(), format).unwrap(), full);
@@ -550,7 +725,7 @@ mod tests {
         let before = fs::read(&project).unwrap();
         let state = document.edit_state();
         let flattened = crate::render::flatten(&document).unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             let path = directory
                 .path()
                 .join(format!("transformed.{}", format.extension()));
@@ -560,9 +735,12 @@ mod tests {
                 let source = String::from_utf8_lossy(&bytes);
                 assert!(source.contains("/MediaBox [0 0 45 75]"));
             } else {
-                let image = image::open(&path).unwrap().into_rgba8();
+                let image = decode_copy(&path, format);
                 assert_eq!(image.dimensions(), (60, 100));
-                if format != ExportFormat::Jpeg {
+                if matches!(
+                    format,
+                    ExportFormat::Png | ExportFormat::WebP | ExportFormat::Tiff
+                ) {
                     assert_eq!(image, flattened);
                 }
             }
@@ -621,7 +799,7 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let document = review_document();
         save_project(&document, &directory.join("export-review.myimage")).unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             let path = directory.join(format!("export-review.{}", format.extension()));
             save(&document, &path, options(format)).unwrap();
         }
@@ -711,7 +889,7 @@ mod tests {
             resize: Some([420, 620]),
         };
         save_project(&document, &directory.join("geometry-review.myimage")).unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             save(
                 &document,
                 &directory.join(format!("geometry-review.{}", format.extension())),
@@ -884,7 +1062,7 @@ mod tests {
         save_project(&document, &path).unwrap();
         let before = fs::read(&path).unwrap();
         let expected = crate::render::flatten(&document).unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             let export = directory
                 .path()
                 .join(format!("privacy.{}", format.extension()));
@@ -910,8 +1088,8 @@ mod tests {
                         .collect::<Vec<_>>()
                 );
             } else {
-                let pixels = image::open(&export).unwrap().into_rgba8();
-                if format == ExportFormat::Jpeg {
+                let pixels = decode_copy(&export, format);
+                if matches!(format, ExportFormat::Jpeg | ExportFormat::Heif) {
                     let opaque = composite_opaque(&expected, [255; 3]);
                     let error: u64 = pixels
                         .pixels()
@@ -925,6 +1103,19 @@ mod tests {
                         })
                         .sum();
                     assert!(error / (96 * 64 * 3) < 8);
+                } else if format == ExportFormat::Gif {
+                    let reference = gif_pixels(&expected, [255; 3], true);
+                    assert_eq!(pixels.dimensions(), reference.dimensions());
+                    let mut error = 0u64;
+                    for (actual, expected) in pixels.pixels().zip(reference.pixels()) {
+                        assert_eq!(actual[3], expected[3]);
+                        if expected[3] > 0 {
+                            for c in 0..3 {
+                                error += u64::from(actual[c].abs_diff(expected[c]));
+                            }
+                        }
+                    }
+                    assert!(error / (96 * 64 * 3) < 12);
                 } else {
                     assert_eq!(pixels, expected);
                 }
@@ -956,7 +1147,7 @@ mod tests {
             .image
             .save(directory.join("privacy-original.png"))
             .unwrap();
-        for format in ExportFormat::ALL {
+        for format in formats() {
             save(
                 &document,
                 &directory.join(format!("privacy-review.{}", format.extension())),

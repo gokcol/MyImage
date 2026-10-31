@@ -85,7 +85,7 @@ impl MyImageApp {
             || self.pending_action.is_some()
             || self.selection.is_some()
             || self.scroll_session.is_some()
-            || self.export_panel.open
+            || self.save_as_panel.open
             || self.file_dialog.is_some()
             || !self.editor.autosave_ready()
             || ctx.input(|i| i.pointer.any_down())
@@ -162,6 +162,56 @@ mod tests {
             app.handle_events(ctx);
         }
         assert!(!app.busy);
+    }
+    #[test]
+    fn snagit_open_imports_editable_objects_and_autosaves_one_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("Snagit original.snagx");
+        let bytes = crate::snagit_import::test_project_bytes();
+        std::fs::write(&source, &bytes).unwrap();
+        let (mut app, ctx) = app(&dir.path().join("Library"));
+        app.begin_open(&ctx, source.clone(), true);
+        finish(&mut app, &ctx);
+        let imported = app.document.as_ref().unwrap().edit_state();
+        assert_eq!(imported.annotations.len(), 1);
+        assert_eq!(
+            imported.annotations[0].kind,
+            document::AnnotationKind::Arrow
+        );
+        assert!(app.project_path.is_none());
+        assert!(
+            app.file_dialog.is_none(),
+            "Faithful imports need no warning prompt"
+        );
+        app.autosave_project(&ctx);
+        finish(&mut app, &ctx);
+        let project = app.project_path.clone().unwrap();
+        assert_eq!(app.settings.recent_files, vec![project.clone()]);
+        assert_eq!(
+            document::load_project(&project).unwrap().edit_state(),
+            imported
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), bytes);
+        assert_eq!(
+            app.settings.project_sources[&crate::project_store::source_key(&source)],
+            project
+        );
+        // Reopening the original resumes its existing MyImage project.
+        let doc = app.document.as_mut().unwrap();
+        let before = doc.edit_state();
+        doc.annotations[0].color = [25, 100, 225, 255];
+        app.history.commit(before, doc);
+        app.save_project(&ctx, false);
+        finish(&mut app, &ctx);
+        app.begin_open(&ctx, source.clone(), true);
+        finish(&mut app, &ctx);
+        assert_eq!(app.project_path.as_ref(), Some(&project));
+        assert_eq!(
+            app.document.as_ref().unwrap().annotations[0].color,
+            [25, 100, 225, 255]
+        );
+        assert_eq!(app.settings.recent_files, vec![project]);
+        assert_eq!(std::fs::read(source).unwrap(), bytes);
     }
     #[test]
     fn import_autosaves_one_project_reopens_it_and_export_stays_out_of_recents() {

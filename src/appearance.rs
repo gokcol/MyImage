@@ -433,7 +433,6 @@ pub enum Icon {
     Copy,
     Save,
     SaveAs,
-    Export,
     CalendarYear,
     CalendarMonth,
     CalendarDay,
@@ -459,7 +458,7 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
         Icon::Open | Icon::OpenProject | Icon::Favorite => Family::Amber,
         Icon::View | Icon::Eye | Icon::Search => Family::Teal,
         Icon::Create | Icon::Edit | Icon::TextSize => Family::Violet,
-        Icon::Home | Icon::Save | Icon::SaveAs | Icon::Export => Family::Cobalt,
+        Icon::Home | Icon::Save | Icon::SaveAs => Family::Cobalt,
         _ => Family::Neutral,
     };
     let color = icon_style::color(p.ctx(), color, family);
@@ -780,26 +779,6 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
                     Stroke::new(2.5, color),
                 );
             }
-        }
-        Icon::Export => {
-            p.line(
-                vec![
-                    r.left_top() + Vec2::new(0., size * 0.4),
-                    r.left_bottom(),
-                    r.right_bottom(),
-                    r.right_top() + Vec2::new(0., size * 0.4),
-                ],
-                s,
-            );
-            p.line_segment([center + Vec2::new(0., size * 0.2), r.center_top()], s);
-            p.line(
-                vec![
-                    r.center_top() + Vec2::new(-size * 0.25, size * 0.25),
-                    r.center_top(),
-                    r.center_top() + Vec2::new(size * 0.25, size * 0.25),
-                ],
-                s,
-            );
         }
         Icon::Library => {
             let cell = (size - 5.0) / 2.0;

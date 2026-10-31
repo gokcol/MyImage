@@ -152,11 +152,7 @@ impl EditorState {
     pub(super) fn open_resize(&mut self, document: &mut Document, history: &mut EditHistory) {
         self.finish_gesture(document, history);
         let size = document.output_size();
-        self.resize = Some(ResizeDraft {
-            size,
-            ratio: size[0] as f64 / size[1] as f64,
-            locked: true,
-        });
+        self.resize = Some(ResizeDraft::new(size));
     }
     fn quick_resize(
         &mut self,
@@ -179,7 +175,7 @@ impl EditorState {
         }
         applied
     }
-    fn confirm_resize(&mut self, document: &Document) {
+    pub(super) fn confirm_resize(&mut self, document: &Document) {
         self.resize_feedback = Some((
             document.output_size(),
             std::time::Instant::now() + std::time::Duration::from_secs(3),

@@ -17,7 +17,7 @@ use crate::{
     document::{self, Document, EditHistory},
     editor::EditorState,
     export::{self, ExportFormat},
-    export_panel::ExportPanel,
+    export_panel::{SaveAsPanel, SaveFormat},
     library_panel::{LibraryAction, LibraryPanel},
     privacy_preview::PrivacyPreview,
     render,
@@ -190,7 +190,7 @@ pub struct MyImageApp {
     image_loader: Option<crate::image_loading::Loader>,
     create_panel: crate::templates::CreatePanel,
     draft_title: String,
-    export_panel: ExportPanel,
+    save_as_panel: SaveAsPanel,
     privacy_preview: PrivacyPreview,
     zoom: f32,
     fit: bool,
@@ -326,7 +326,7 @@ impl MyImageApp {
             image_loader: None,
             create_panel: Default::default(),
             draft_title: "Untitled image".into(),
-            export_panel: ExportPanel::default(),
+            save_as_panel: SaveAsPanel::default(),
             privacy_preview: PrivacyPreview::default(),
             zoom: 1.0,
             fit: true,
@@ -343,7 +343,7 @@ impl MyImageApp {
     }
     fn open_project(&mut self, ctx: &egui::Context) {
         if self.busy
-            || self.export_panel.open
+            || self.save_as_panel.open
             || self.editor.has_modal()
             || !self.can_replace_image(ctx, PendingAction::OpenProject)
         {
@@ -351,7 +351,9 @@ impl MyImageApp {
         }
         if let Some(path) = rfd::FileDialog::new()
             .set_title("Open editable project")
+            .add_filter("Editable projects", &["myimage", "snagx"])
             .add_filter("MyImage project", &["myimage"])
+            .add_filter("Snagit project", &["snagx"])
             .pick_file()
         {
             self.begin_open(ctx, path, true);
@@ -360,7 +362,7 @@ impl MyImageApp {
     fn create_image(&mut self, ctx: &egui::Context, spec: crate::templates::Spec) {
         if self.busy
             || self.editor.has_modal()
-            || self.export_panel.open
+            || self.save_as_panel.open
             || !self.can_replace_image(ctx, PendingAction::Create(spec.clone()))
         {
             return;
@@ -433,7 +435,7 @@ impl MyImageApp {
         }
         self.finish_edit();
         self.source_textures.clear();
-        self.export_panel.open = false;
+        self.save_as_panel.open = false;
         self.remember_window(ctx);
         self.last_texture = None;
         self.privacy_preview.clear();
@@ -470,7 +472,7 @@ impl MyImageApp {
             || self.appearance_open
             || self.guide_open
             || self.pending_action.is_some()
-            || self.export_panel.open
+            || self.save_as_panel.open
             || self.editor.has_modal()
             || self.screen_text.open
         {
@@ -750,7 +752,7 @@ impl MyImageApp {
     }
 
     fn open_image(&mut self, ctx: &egui::Context) {
-        if self.busy || self.export_panel.open || self.editor.has_modal() {
+        if self.busy || self.save_as_panel.open || self.editor.has_modal() {
             return;
         }
         if !self.can_replace_image(ctx, PendingAction::Open) {
@@ -760,13 +762,17 @@ impl MyImageApp {
             .add_filter(
                 "Images and editable projects",
                 &[
-                    "myimage", "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif",
+                    "myimage", "snagx", "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif",
+                    "heif", "heic",
                 ],
             )
             .add_filter("MyImage projects", &["myimage"])
+            .add_filter("Snagit projects", &["snagx"])
             .add_filter(
                 "Images",
-                &["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif"],
+                &[
+                    "png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff", "gif", "heif", "heic",
+                ],
             )
             .pick_file()
         else {
@@ -777,7 +783,7 @@ impl MyImageApp {
 
     fn open_path(&mut self, ctx: &egui::Context, path: PathBuf, edit: bool) {
         if self.busy
-            || self.export_panel.open
+            || self.save_as_panel.open
             || self.editor.has_modal()
             || !self.can_replace_image(
                 ctx,
@@ -865,7 +871,10 @@ impl MyImageApp {
     }
 
     fn save_project(&mut self, ctx: &egui::Context, save_as: bool) -> bool {
-        if self.busy || self.document.is_none() || self.export_panel.open || self.editor.has_modal()
+        if self.busy
+            || self.document.is_none()
+            || self.save_as_panel.open
+            || self.editor.has_modal()
         {
             return false;
         }
@@ -943,7 +952,7 @@ impl MyImageApp {
         true
     }
 
-    fn begin_export(&mut self) {
+    fn begin_save_as(&mut self) {
         if self.busy
             || self.document.is_none()
             || self.recovery.prompt
@@ -956,16 +965,17 @@ impl MyImageApp {
             return;
         }
         self.finish_edit();
-        self.export_panel.begin();
+        self.save_as_panel.options = self.settings.image_save.options();
+        self.save_as_panel.begin();
     }
 
-    fn export_copy(&mut self, ctx: &egui::Context) {
+    fn save_image_copy(&mut self, ctx: &egui::Context) {
         if self.busy || self.document.is_none() {
             return;
         }
         self.finish_edit();
-        self.export_panel.error = None;
-        let options = self.export_panel.options;
+        self.save_as_panel.error = None;
+        let options = self.save_as_panel.options;
         let format = options.format;
         let source = self.project_path.as_ref().or(self.last_path.as_ref());
         let directory = source
@@ -977,9 +987,9 @@ impl MyImageApp {
             .and_then(|s| s.to_str())
             .unwrap_or("Untitled");
         let Some(path) = rfd::FileDialog::new()
-            .set_title(format!("Export {} copy", format.label()))
+            .set_title(format!("Save As {}", format.label()))
             .set_directory(directory)
-            .set_file_name(format!("{stem}-annotated.{}", format.extension()))
+            .set_file_name(format!("{stem}.{}", format.extension()))
             .add_filter(format.label(), format.extensions())
             .save_file()
         else {
@@ -988,16 +998,16 @@ impl MyImageApp {
         let path = match export::checked_export_path(path, format) {
             Ok(path) => path,
             Err(error) => {
-                self.export_panel.error = Some(error);
+                self.save_as_panel.error = Some(error);
                 return;
             }
         };
         let document = self.document.as_ref().unwrap().clone();
         let tx = self.work_tx.clone();
         let ctx = ctx.clone();
-        self.export_panel.open = false;
+        self.save_as_panel.open = false;
         self.busy = true;
-        self.status = format!("Exporting {}…", format.label());
+        self.status = format!("Saving {} copy…", format.label());
         std::thread::spawn(move || {
             let result = export::save(&document, &path, options);
             let _ = tx.send(WorkEvent::Exported(path, format, result));
@@ -1050,7 +1060,7 @@ impl MyImageApp {
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
-                        && !self.export_panel.open
+                        && !self.save_as_panel.open
                         && !self.editor.has_modal()
                     {
                         match event {
@@ -1308,6 +1318,10 @@ impl MyImageApp {
                     self.busy = false;
                     match result {
                         Ok(prepared) => {
+                            let imported_snagit = path
+                                .extension()
+                                .is_some_and(|e| e.eq_ignore_ascii_case("snagx"));
+                            let warnings = prepared.warnings;
                             let project_path = is_project_path(&path).then(|| path.clone());
                             self.install_document(prepared.document, project_path);
                             self.last_texture =
@@ -1323,8 +1337,16 @@ impl MyImageApp {
                             self.remember_opened_recent(path.clone());
                             self.last_path = Some(path);
                             self.view = View::Editor;
-                            self.status = "Image opened".into();
+                            self.status = if imported_snagit {
+                                "Snagit project imported · original file unchanged"
+                            } else {
+                                "Image opened"
+                            }
+                            .into();
                             self.error = None;
+                            if !warnings.is_empty() {
+                                self.file_dialog = Some(FileDialog::ImportNotes(warnings));
+                            }
                         }
                         Err(error) => {
                             self.error = Some(error);
@@ -1395,12 +1417,16 @@ impl MyImageApp {
                     match result {
                         Ok(()) => {
                             self.status =
-                                format!("{} exported to {}", format.label(), path.display());
+                                format!("{} copy saved to {}", format.label(), path.display());
+                            self.settings.image_save = storage::ImageSavePreferences::from_options(
+                                self.save_as_panel.options,
+                            );
                             self.error = None;
+                            self.persist_settings();
                         }
                         Err(error) => {
                             self.error = Some(error);
-                            self.status = format!("{} export failed", format.label());
+                            self.status = format!("Could not save {} copy", format.label());
                         }
                     }
                     if std::mem::take(&mut self.quit_after_work) {
@@ -1453,7 +1479,7 @@ impl MyImageApp {
             }
             return;
         }
-        self.export_panel.open = false;
+        self.save_as_panel.open = false;
         if self.busy {
             self.quit_after_work = true;
             self.status = "Finishing the current file operation before quitting…".into();
@@ -1814,7 +1840,7 @@ impl MyImageApp {
             && !self.recovery.prompt
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
-            && !self.export_panel.open;
+            && !self.save_as_panel.open;
         ui.scope(|ui| {
             if self.project_session.saving && unobscured {
                 // Saving blocks edits, but must not fade the image after every
@@ -1922,7 +1948,7 @@ impl eframe::App for MyImageApp {
                     && !self.recovery.prompt
                     && self.pending_action.is_none()
                     && self.file_dialog.is_none()
-                    && !self.export_panel.open
+                    && !self.save_as_panel.open
                     && !self.editor.has_modal(),
             );
         }
@@ -1967,7 +1993,7 @@ impl eframe::App for MyImageApp {
             && !self.recovery.prompt
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
-            && !self.export_panel.open
+            && !self.save_as_panel.open
             && !self.editor.has_modal()
         {
             let save = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::S);
@@ -1976,7 +2002,7 @@ impl eframe::App for MyImageApp {
                 egui::Key::S,
             );
             if ctx.input_mut(|i| i.consume_shortcut(&save_as)) {
-                self.save_project(ctx, true);
+                self.begin_save_as();
             } else if ctx.input_mut(|i| i.consume_shortcut(&save)) {
                 self.save_project(ctx, false);
             }
@@ -2046,7 +2072,7 @@ impl eframe::App for MyImageApp {
                                 && !self.recovery.prompt
                                 && self.pending_action.is_none()
                                 && self.file_dialog.is_none()
-                                && !self.export_panel.open
+                                && !self.save_as_panel.open
                                 && !self.editor.has_modal(),
                             |ui| {
                                 let has_doc = self.document.is_some();
@@ -2061,17 +2087,6 @@ impl eframe::App for MyImageApp {
                                     .clicked()
                                     {
                                         self.save_project(ctx, false);
-                                    }
-                                    if appearance::action_button(
-                                        ui,
-                                        "Export…",
-                                        Icon::Export,
-                                        has_doc,
-                                        false,
-                                    )
-                                    .clicked()
-                                    {
-                                        self.begin_export();
                                     }
                                     if self.view == View::Editor {
                                         ui.add_enabled_ui(has_doc, |ui| {
@@ -2092,14 +2107,14 @@ impl eframe::App for MyImageApp {
                                     }
                                     if appearance::action_button(
                                         ui,
-                                        "Save as…",
+                                        "Save As…",
                                         Icon::SaveAs,
                                         has_doc,
                                         false,
                                     )
                                     .clicked()
                                     {
-                                        self.save_project(ctx, true);
+                                        self.begin_save_as();
                                     }
                                 }
                                 if appearance::action_button(
@@ -2136,7 +2151,7 @@ impl eframe::App for MyImageApp {
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
-                        && !self.export_panel.open
+                        && !self.save_as_panel.open
                         && !self.editor.has_modal(),
                     |ui| {
                         ui.horizontal(|ui| {
@@ -2233,7 +2248,7 @@ impl eframe::App for MyImageApp {
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
                         && self.file_dialog.is_none()
-                        && !self.export_panel.open
+                        && !self.save_as_panel.open
                         && !self.editor.has_modal();
                     let enabled = !self.busy && unobscured;
                     if self.project_session.saving && unobscured {
@@ -2317,8 +2332,19 @@ impl eframe::App for MyImageApp {
                 .annotations
                 .iter()
                 .any(|a| a.visible() && a.kind.is_effect());
-            if self.export_panel.show(ctx, size, has_privacy) {
-                self.export_copy(ctx);
+            if self.save_as_panel.show(ctx, size, has_privacy) {
+                match self.save_as_panel.format {
+                    SaveFormat::Project => {
+                        self.save_as_panel.open = false;
+                        if !self.save_project(ctx, true) {
+                            self.save_as_panel.open = true;
+                        }
+                    }
+                    SaveFormat::Image(format) => {
+                        self.save_as_panel.options.format = format;
+                        self.save_image_copy(ctx);
+                    }
+                }
             }
         }
         self.file_dialog_ui(ctx);
@@ -2336,7 +2362,7 @@ impl eframe::App for MyImageApp {
         }
         if self.pending_action.is_none()
             && self.file_dialog.is_none()
-            && !self.export_panel.open
+            && !self.save_as_panel.open
             && !self.editor.has_modal()
         {
             self.calico.paint(ctx);

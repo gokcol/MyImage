@@ -110,7 +110,13 @@ fn pen_paths_survive_exports_geometry_privacy_and_project_reediting() {
     let original = Arc::clone(&document.image);
     let expected = render::flatten(&document).unwrap();
     assert_eq!(expected.dimensions(), (280, 712));
-    for format in ExportFormat::ALL {
+    // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+    for format in ExportFormat::ALL.into_iter().filter(|format| {
+        !matches!(
+            format,
+            crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+        )
+    }) {
         let output = directory.path().join(format!("pen.{}", format.extension()));
         export::save(
             &document,
@@ -200,7 +206,12 @@ fn freehand_review_fixture() {
         .image
         .save(directory.join("freehand-original.png"))
         .unwrap();
-    for format in ExportFormat::ALL {
+    for format in ExportFormat::ALL.into_iter().filter(|format| {
+        !matches!(
+            format,
+            crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+        )
+    }) {
         export::save(
             &document,
             &directory.join(format!("freehand-review.{}", format.extension())),

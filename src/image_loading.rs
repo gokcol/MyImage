@@ -17,6 +17,7 @@ const CACHE_FILES: usize = 4;
 #[derive(Clone)]
 pub struct PreparedDocument {
     pub document: Document,
+    pub warnings: Vec<String>,
     pub source: Arc<ColorImage>,
     pub composition: Option<Arc<ColorImage>>,
     pub max_side: u32,
@@ -42,6 +43,7 @@ impl PreparedDocument {
         };
         Ok(Self {
             document,
+            warnings: Vec::new(),
             source,
             composition,
             max_side,
@@ -51,6 +53,7 @@ impl PreparedDocument {
     fn bytes(&self) -> usize {
         self.document.image.len()
             + document::state_bytes(&self.document.edit_state())
+            + self.warnings.iter().map(String::len).sum::<usize>()
             + self.source.pixels.len() * 4
             + self
                 .composition
@@ -140,11 +143,28 @@ impl LoadCache {
             }
             self.bytes -= file.bytes;
         }
+        let mut warnings = Vec::new();
         let document = if path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("myimage"))
         {
             document::load_project(&canonical)?
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("snagx"))
+        {
+            let imported = crate::snagit_import::import(&canonical)?;
+            warnings = imported.warnings;
+            imported.document
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("heif") || e.eq_ignore_ascii_case("heic"))
+        {
+            Document {
+                image: Arc::new(crate::heif::load(&canonical)?),
+                annotations: Vec::new(),
+                geometry: Default::default(),
+            }
         } else {
             Document {
                 // Preserve decoder allocation limits and the complete original pixels.
@@ -162,7 +182,8 @@ impl LoadCache {
             }
         };
         let decoded = started.elapsed();
-        let prepared = PreparedDocument::prepare(document, max_side)?;
+        let mut prepared = PreparedDocument::prepare(document, max_side)?;
+        prepared.warnings = warnings;
         // A file replaced while decoding must not be cached as the newer version.
         if version != FileVersion::read(&canonical) {
             return Err("The file changed while opening. Please open it again.".into());

@@ -93,7 +93,13 @@ fn groups_preserve_output_in_all_formats_and_reopen_as_editable_members() {
     let path = directory.path().join("groups.myimage");
     document::save_project(&grouped, &path).unwrap();
     let bytes = fs::read(&path).unwrap();
-    for format in ExportFormat::ALL {
+    // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+    for format in ExportFormat::ALL.into_iter().filter(|format| {
+        !matches!(
+            format,
+            crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+        )
+    }) {
         let a = directory
             .path()
             .join(format!("grouped.{}", format.extension()));
@@ -140,7 +146,12 @@ fn group_review_fixture() {
     let d = fixture();
     document::save_project(&d, &p.join("groups-review.myimage")).unwrap();
     d.image.save(p.join("groups-original.png")).unwrap();
-    for format in ExportFormat::ALL {
+    for format in ExportFormat::ALL.into_iter().filter(|format| {
+        !matches!(
+            format,
+            crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+        )
+    }) {
         export::save(
             &d,
             &p.join(format!("groups-review.{}", format.extension())),

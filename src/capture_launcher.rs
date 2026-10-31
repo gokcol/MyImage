@@ -141,7 +141,7 @@ impl MyImageApp {
             && !self.appearance_open
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
-            && !self.export_panel.open
+            && !self.save_as_panel.open
             && !self.editor.has_modal();
         let enabled = enabled && !self.screen_text.open;
         let builder = egui::ViewportBuilder::default()

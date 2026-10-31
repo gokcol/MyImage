@@ -169,7 +169,16 @@ fn fill_projects_exports_geometry_and_undo_keep_original_pixels() {
     let read = document::load_project(&path).unwrap();
     assert_eq!(read.edit_state(), d.edit_state());
     assert_eq!(*read.image, *original);
-    for format in crate::export::ExportFormat::ALL {
+    // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+    for format in crate::export::ExportFormat::ALL
+        .into_iter()
+        .filter(|format| {
+            !matches!(
+                format,
+                crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+            )
+        })
+    {
         let path = dir.path().join(format!("fill.{}", format.extension()));
         crate::export::save(
             &d,

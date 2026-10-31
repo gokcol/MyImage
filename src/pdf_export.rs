@@ -12,7 +12,8 @@ const POINTS_PER_PIXEL: f32 = 72.0 / 96.0;
 const MAX_PAGE_POINTS: f32 = 14_400.0;
 const PAGE_MARGIN: f32 = 24.0;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PdfPageSize {
     #[default]
     Image,

@@ -486,7 +486,13 @@ mod tests {
         let path = dir.path().join("layout.myimage");
         document::save_project(&d, &path).unwrap();
         let state = d.edit_state();
-        for format in export::ExportFormat::ALL {
+        // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+        for format in export::ExportFormat::ALL.into_iter().filter(|format| {
+            !matches!(
+                format,
+                crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+            )
+        }) {
             let output = dir.path().join(format!("layout.{}", format.extension()));
             export::save(
                 &d,

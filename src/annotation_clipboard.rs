@@ -1709,11 +1709,7 @@ mod tests {
         assert_eq!(d.edit_state(), before);
         assert!(!h.can_undo());
         assert!(e.image_error.is_none());
-        e.resize = Some(ResizeDraft {
-            size: [800, 600],
-            ratio: 4. / 3.,
-            locked: true,
-        });
+        e.resize = Some(ResizeDraft::new([800, 600]));
         frame(
             &mut e,
             &mut d,

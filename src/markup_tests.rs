@@ -79,7 +79,7 @@ fn review_document() -> Document {
                 48.0,
                 580.0,
                 21.0,
-                "Original pixels remain in .myimage. Export creates a finished copy.",
+                "Original pixels remain in .myimage. Save As creates a finished image copy.",
             ),
         ],
         geometry: Default::default(),
@@ -125,7 +125,13 @@ fn markup_exports_and_library_preserve_editable_objects_with_geometry_and_privac
     let original = Arc::clone(&document.image);
     let expected = render::flatten(&document).unwrap();
     assert_eq!(expected.dimensions(), (284, 744));
-    for format in ExportFormat::ALL {
+    // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+    for format in ExportFormat::ALL.into_iter().filter(|format| {
+        !matches!(
+            format,
+            crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+        )
+    }) {
         let path = directory
             .path()
             .join(format!("markup.{}", format.extension()));
@@ -212,7 +218,12 @@ fn markup_review_fixture() {
         .image
         .save(directory.join("markup-original.png"))
         .unwrap();
-    for format in ExportFormat::ALL {
+    for format in ExportFormat::ALL.into_iter().filter(|format| {
+        !matches!(
+            format,
+            crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+        )
+    }) {
         export::save(
             &document,
             &directory.join(format!("markup-review.{}", format.extension())),

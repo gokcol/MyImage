@@ -123,7 +123,16 @@ fn svg_text_and_alpha_export_from_editable_source() {
     assert!(flat.pixels().any(|p| p[3] > 0));
     assert_eq!(flat.get_pixel(0, 0)[3], 0);
     let dir = tempfile::tempdir().unwrap();
-    for format in crate::export::ExportFormat::ALL {
+    // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+    for format in crate::export::ExportFormat::ALL
+        .into_iter()
+        .filter(|format| {
+            !matches!(
+                format,
+                crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+            )
+        })
+    {
         let path = dir.path().join(format!("svg.{}", format.extension()));
         crate::export::save(
             &doc,

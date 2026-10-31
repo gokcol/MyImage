@@ -664,7 +664,13 @@ mod tests {
             render::privacy_preview(&visible, 200).unwrap()
         );
         let dir = tempfile::tempdir().unwrap();
-        for format in export::ExportFormat::ALL {
+        // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+        for format in export::ExportFormat::ALL.into_iter().filter(|format| {
+            !matches!(
+                format,
+                crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+            )
+        }) {
             let a = dir.path().join(format!("layers.{}", format.extension()));
             let b = dir.path().join(format!("visible.{}", format.extension()));
             let options = export::ExportOptions {

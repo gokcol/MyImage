@@ -40,6 +40,47 @@ impl UiTextSize {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
+pub struct ImageSavePreferences {
+    pub quality: u8,
+    pub preserve_transparency: bool,
+    pub background: [u8; 3],
+    pub pdf_page_size: crate::pdf_export::PdfPageSize,
+}
+
+impl Default for ImageSavePreferences {
+    fn default() -> Self {
+        Self {
+            quality: 90,
+            preserve_transparency: true,
+            background: [255; 3],
+            pdf_page_size: Default::default(),
+        }
+    }
+}
+
+impl ImageSavePreferences {
+    pub fn options(&self) -> crate::export::ExportOptions {
+        crate::export::ExportOptions {
+            jpeg_quality: self.quality.clamp(1, 100),
+            jpeg_background: self.background,
+            preserve_transparency: self.preserve_transparency,
+            pdf_page_size: self.pdf_page_size,
+            ..Default::default()
+        }
+    }
+
+    pub fn from_options(options: crate::export::ExportOptions) -> Self {
+        Self {
+            quality: options.jpeg_quality.clamp(1, 100),
+            preserve_transparency: options.preserve_transparency,
+            background: options.jpeg_background,
+            pdf_page_size: options.pdf_page_size,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub guide_version: u8,
     pub ui_text_size: UiTextSize,
@@ -66,6 +107,7 @@ pub struct Settings {
     pub editor_tool_order: Vec<String>,
     pub editor_tools: crate::editor::ToolPreferences,
     pub editor_inspector: crate::editor::InspectorPreferences,
+    pub image_save: ImageSavePreferences,
     #[serde(default)]
     pub toolbar_layout_version: u8,
 }
@@ -101,6 +143,7 @@ impl Default for Settings {
             editor_tool_order: Vec::new(),
             editor_tools: Default::default(),
             editor_inspector: Default::default(),
+            image_save: Default::default(),
             toolbar_layout_version: 2,
         }
     }
@@ -184,6 +227,31 @@ mod tests {
     use super::*;
     use chrono::{Local, TimeZone};
     use std::sync::Arc;
+
+    #[test]
+    fn image_save_defaults_and_preferences_survive_existing_settings() {
+        let mut settings: Settings = serde_json::from_str(r#"{"include_pointer":true}"#).unwrap();
+        let initial = settings.image_save.options();
+        assert_eq!(initial.jpeg_quality, 90);
+        assert!(initial.preserve_transparency);
+        assert_eq!(initial.jpeg_background, [255; 3]);
+        settings.image_save = ImageSavePreferences {
+            quality: 82,
+            preserve_transparency: false,
+            background: [20, 40, 60],
+            pdf_page_size: crate::pdf_export::PdfPageSize::A4,
+        };
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        let options = restored.image_save.options();
+        assert_eq!(options.jpeg_quality, 82);
+        assert!(!options.preserve_transparency);
+        assert_eq!(options.jpeg_background, [20, 40, 60]);
+        assert_eq!(options.pdf_page_size, crate::pdf_export::PdfPageSize::A4);
+        assert!(restored.include_pointer);
+        settings.image_save.quality = 0;
+        assert_eq!(settings.image_save.options().jpeg_quality, 1);
+    }
 
     #[test]
     fn existing_settings_enable_any_display_and_explicit_choice_survives_reload() {

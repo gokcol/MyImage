@@ -175,9 +175,12 @@ pub fn remap_settings(settings: &mut Settings, links: &BTreeMap<PathBuf, PathBuf
     settings.library.favorites = settings.library.favorites.iter().map(remap).collect();
     settings.library.hidden_recents = settings.library.hidden_recents.iter().map(remap).collect();
     let root = source_key(&settings.output_dir);
-    settings
-        .managed_image_sources
-        .extend(links.keys().filter(|p| p.starts_with(&root)).cloned());
+    settings.managed_image_sources.extend(
+        links
+            .keys()
+            .filter(|p| p.starts_with(&root) && !is_snagit_source(p))
+            .cloned(),
+    );
     settings.project_sources = links.clone();
 }
 
@@ -192,9 +195,15 @@ pub fn owned_companions(settings: &Settings, projects: &[PathBuf]) -> Vec<PathBu
                 && projects.contains(project)
                 && source.is_file()
                 && !is_project(source)
+                && !is_snagit_source(source)
         })
         .map(|(source, _)| source.clone())
         .collect()
+}
+
+fn is_snagit_source(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("snagx"))
 }
 
 pub fn retire_verified_captures(settings: &Settings) -> Vec<String> {
@@ -245,6 +254,37 @@ mod tests {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         pixels(value).save(&path).unwrap();
         path
+    }
+    #[test]
+    fn imported_snagit_sources_are_never_owned_deletion_companions() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("Original.SNAGX");
+        fs::write(&source, b"original Snagit project").unwrap();
+        let capture = fixture(dir.path(), "capture.png", 40);
+        let project = dir.path().join("Imported.myimage");
+        let links = BTreeMap::from([
+            (source_key(&source), project.clone()),
+            (source_key(&capture), project.clone()),
+        ]);
+        let mut settings = Settings {
+            output_dir: dir.path().to_owned(),
+            recent_files: vec![source.clone()],
+            ..Default::default()
+        };
+        remap_settings(&mut settings, &links);
+        assert_eq!(settings.recent_files, vec![project.clone()]);
+        assert!(
+            !settings
+                .managed_image_sources
+                .contains(&source_key(&source))
+        );
+        // Even an old preference claiming ownership cannot retire a Snagit original.
+        settings.managed_image_sources.insert(source_key(&source));
+        assert_eq!(
+            owned_companions(&settings, &[project]),
+            vec![source_key(&capture)]
+        );
+        assert_eq!(fs::read(source).unwrap(), b"original Snagit project");
     }
     #[test]
     fn migration_reuses_edited_projects_verifies_pixels_and_is_idempotent() {

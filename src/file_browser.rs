@@ -4,6 +4,7 @@ use crate::dialogs::{self, Dialog};
 use crate::library_files::{self, Operation, Outcome};
 
 pub(super) enum FileDialog {
+    ImportNotes(Vec<String>),
     Storage,
     ChangeStorage {
         destination: PathBuf,
@@ -293,6 +294,7 @@ impl MyImageApp {
         let mut choose_storage = false;
         let mut storage_change = None;
         let (title, icon) = match &dialog {
+            FileDialog::ImportNotes(_) => ("Snagit import notes".to_owned(), Icon::Info),
             FileDialog::Storage => ("Storage folder".to_owned(), Icon::OpenProject),
             FileDialog::ChangeStorage { .. } => {
                 ("Change storage folder".to_owned(), Icon::OpenProject)
@@ -304,8 +306,20 @@ impl MyImageApp {
             FileDialog::Rename { .. } => ("Rename file".to_owned(), Icon::Edit),
             FileDialog::Info(_) => ("File info".to_owned(), Icon::Info),
         };
-        let shown=Dialog::new(&title, "Your MyImage library.", icon, 470.).modal(ctx,egui::Id::new("library-file-dialog"),|ui| {
+        let subtitle = if matches!(&dialog, FileDialog::ImportNotes(_)) {
+            "Your original .snagx file is unchanged."
+        } else {
+            "Your MyImage library."
+        };
+        let shown=Dialog::new(&title, subtitle, icon, 470.).modal(ctx,egui::Id::new("library-file-dialog"),|ui| {
             match &mut dialog {
+                FileDialog::ImportNotes(notes) => {
+                    egui::ScrollArea::vertical().max_height(260.).show(ui, |ui| {
+                        for note in notes { ui.label(note.as_str()); ui.add_space(6.); }
+                    });
+                    ui.weak("Continue to edit and save the imported content as a MyImage project.");
+                    if dialogs::primary(ui, "Continue", DialogIcon::Check).clicked() { close = true; }
+                }
                 FileDialog::Storage => {
 
                     ui.label("Each project contains its original image and editable changes. PNG/JPEG files are created only when you export.");

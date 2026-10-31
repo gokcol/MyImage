@@ -101,6 +101,7 @@ mod tests {
                 paths[1].clone(),
                 Ok(crate::image_loading::PreparedDocument {
                     document: document(),
+                    warnings: Vec::new(),
                     source: Arc::new(egui::ColorImage::new([1, 1], vec![Color32::TRANSPARENT])),
                     composition: None,
                     max_side: 100,

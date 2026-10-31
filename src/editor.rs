@@ -199,14 +199,55 @@ struct CropDraft {
     drag_start: Option<Point>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ResizeUnits {
+    #[default]
+    Pixels,
+    Percent,
+}
+
 #[derive(Clone)]
 struct ResizeDraft {
+    // Pixel dimensions are canonical: changing units never rounds the draft again.
     size: [u32; 2],
+    base: [u32; 2],
+    units: ResizeUnits,
     ratio: f64,
     locked: bool,
 }
 
 impl ResizeDraft {
+    fn new(size: [u32; 2]) -> Self {
+        Self {
+            size,
+            base: size,
+            units: ResizeUnits::Pixels,
+            ratio: size[0] as f64 / size[1] as f64,
+            locked: true,
+        }
+    }
+
+    fn value(&self, axis: usize) -> f64 {
+        match self.units {
+            ResizeUnits::Pixels => self.size[axis] as f64,
+            ResizeUnits::Percent => self.size[axis] as f64 * 100. / self.base[axis] as f64,
+        }
+    }
+
+    fn set_value(&mut self, axis: usize, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
+        let pixels = match self.units {
+            ResizeUnits::Pixels => value,
+            ResizeUnits::Percent => value * self.base[axis] as f64 / 100.,
+        };
+        self.size[axis] = pixels.round().clamp(1., 32_768.) as u32;
+        if self.locked {
+            self.constrain_axis(axis);
+        }
+    }
+
     fn constrain_axis(&mut self, axis: usize) {
         let ratio = if axis == 0 {
             self.ratio
@@ -1034,36 +1075,60 @@ impl EditorState {
         let mut cancel = false;
         let mut candidate = document.geometry;
         let original = original_size(document);
-        let modal = Dialog::new("Resize image", "Scale the image and its editable annotations.", DialogIcon::Resize, 420.).modal(ctx, egui::Id::new("resize-image"), |ui| {
-            ui.label(format!("Original: {} × {} px", original[0], original[1]));
-            ui.label(format!("Current output: {} × {} px", document.output_size()[0], document.output_size()[1]));
-            ui.add_space(16.0);
-            egui::Grid::new("resize-dimensions").spacing(Vec2::new(16.0, 12.0)).show(ui, |ui| {
-                ui.label("Width");
-                if ui.add(egui::DragValue::new(&mut draft.size[0]).range(1..=32_768).speed(1).suffix(" px")).changed() && draft.locked {
-                    draft.constrain_axis(0);
-                }
-                ui.end_row();
-                ui.label("Height");
-                if ui.add(egui::DragValue::new(&mut draft.size[1]).range(1..=32_768).speed(1).suffix(" px")).changed() && draft.locked {
-                    draft.constrain_axis(1);
-                }
-                ui.end_row();
+        let modal = Dialog::new("Resize image", "Scale the image and its editable annotations.", DialogIcon::Resize, 390.).modal(ctx, egui::Id::new("resize-image"), |ui| {
+            ui.weak(format!("Current: {} × {} px", draft.base[0], draft.base[1]));
+            ui.horizontal(|ui| {
+                ui.label("Units");
+                let units = egui::ComboBox::from_id_salt("resize-units")
+                    .selected_text(if draft.units == ResizeUnits::Pixels { "Pixels" } else { "Percent" })
+                    .width(112.)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut draft.units, ResizeUnits::Pixels, "Pixels");
+                        ui.selectable_value(&mut draft.units, ResizeUnits::Percent, "Percent");
+                    });
+                units.response.widget_info(|| {
+                    let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, ui.is_enabled(), "Image units");
+                    info.current_text_value = Some(if draft.units == ResizeUnits::Pixels { "Pixels" } else { "Percent" }.to_owned());
+                    info
+                });
             });
-            ui.add_space(8.0);
+            egui::Grid::new("resize-dimensions").spacing(Vec2::new(16.0, 8.0)).show(ui, |ui| {
+                for (axis, label) in ["Width", "Height"].iter().enumerate() {
+                    ui.label(*label);
+                    let mut value = draft.value(axis);
+                    let (minimum, maximum, suffix) = match draft.units {
+                        ResizeUnits::Pixels => (1., 32_768., " px"),
+                        ResizeUnits::Percent => (100. / draft.base[axis] as f64, 3_276_800. / draft.base[axis] as f64, " %"),
+                    };
+                    let field = ui.add(egui::DragValue::new(&mut value)
+                        .range(minimum..=maximum).speed(if draft.units == ResizeUnits::Pixels { 1. } else { 0.1 })
+                        .max_decimals(if draft.units == ResizeUnits::Pixels { 0 } else { 2 }).suffix(suffix));
+                    field.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, ui.is_enabled(), format!("Image {label}")));
+                    if field.changed() {
+                        draft.set_value(axis, value);
+                    }
+                    ui.end_row();
+                }
+            });
             if ui.checkbox(&mut draft.locked, "Lock aspect ratio").changed() && draft.locked {
                 draft.ratio = draft.size[0] as f64 / draft.size[1] as f64;
             }
-            ui.add_space(8.0);
+            if draft.units == ResizeUnits::Percent {
+                ui.small("100% is the image size when this dialog opened.");
+            }
             ui.horizontal_wrapped(|ui| {
                 ui.label("Presets:");
                 for percent in [25, 50, 125, 150, 100] {
                     let label = if percent == 100 { "Set to original".to_owned() } else { format!("{percent}%") };
-                    let size = canvas_menu::scaled_size(document, percent, false);
+                    let size = canvas_menu::scaled_size(document, percent, percent != 100);
                     let mut geometry = document.geometry;
                     geometry.resize = Some(size);
                     if ui.add_enabled(geometry.validate(original).is_ok(), egui::Button::new(label))
-                        .on_hover_text("Percentage of the unscaled image; keeps the current crop and rotation. Apply resize to confirm.")
+                        .on_hover_text(if percent == 100 {
+                            "Restore unscaled dimensions, keeping crop and rotation. Apply resize to confirm."
+                        } else {
+                            "Percentage of the image size when this dialog opened. Apply resize to confirm."
+                        })
                         .clicked() {
                         draft.size = size;
                         draft.ratio = size[0] as f64 / size[1] as f64;
@@ -1072,19 +1137,20 @@ impl EditorState {
             });
             candidate.resize = (draft.size != candidate.rotated_size(original)).then_some(draft.size);
             let validation = candidate.validate(original);
-            ui.add_space(14.0);
-            ui.label("The original pixels stay in your project. Annotations scale with the image and remain editable.");
+            ui.strong(format!("New size: {} × {} px", draft.size[0], draft.size[1]));
+            ui.small("Original pixels and editable annotations stay in your project.");
             if let Err(error) = &validation {
-                ui.add_space(8.0);
                 dialogs::notice(ui, DialogIcon::Info, "Check dimensions", error, true);
             }
-            ui.add_space(16.0);
             dialogs::actions(ui, |ui| {
                 cancel = dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked();
                 apply = dialogs::button(ui, "Apply resize", DialogIcon::Resize, dialogs::Action::Primary, validation.is_ok()).clicked();
             });
         });
+        let fit = self.fit;
         if apply && self.apply_geometry(document, history, candidate) {
+            self.fit = fit;
+            self.confirm_resize(document);
             self.resize = None;
         } else if cancel || modal.should_close() {
             self.resize = None;
@@ -1234,7 +1300,7 @@ impl EditorState {
         let viewport = ui.available_size().max(Vec2::splat(1.0));
         let [width, height] = document.output_size();
         let image_size = Vec2::new(width as f32, height as f32);
-        if self.fit {
+        if self.fit && self.canvas_resize.is_none() {
             self.zoom = canvas_handles::fit_scale(viewport, image_size);
         }
         let pinch_offset = crate::canvas_zoom::prepare_with_gutter(
@@ -5443,8 +5509,7 @@ mod tests {
             }),
             resize: Some(ResizeDraft {
                 size: [500, 300],
-                ratio: 5.0 / 3.0,
-                locked: true,
+                ..ResizeDraft::new([500, 300])
             }),
             ..Default::default()
         };
@@ -5510,7 +5575,7 @@ mod tests {
         let mut draft = ResizeDraft {
             size: [32_768, 100],
             ratio: 0.25,
-            locked: true,
+            ..ResizeDraft::new([32_768, 100])
         };
         draft.constrain_axis(0);
         assert_eq!(draft.size, [8192, 32_768]);

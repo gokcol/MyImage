@@ -1218,10 +1218,11 @@ mod tests {
             "resize feedback disappears without changing the image"
         );
         for (label, size) in [
-            ("25%", [300, 200]),
-            ("50%", [600, 400]),
-            ("125%", [1500, 1000]),
-            ("150%", [1800, 1200]),
+            // Each new dialog starts from the current output, including rounding.
+            ("25%", [327, 218]),
+            ("50%", [164, 109]),
+            ("125%", [205, 136]),
+            ("150%", [308, 204]),
             ("Set to original", [1200, 800]),
         ] {
             open_menu(&mut w);

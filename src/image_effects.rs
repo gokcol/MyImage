@@ -375,7 +375,16 @@ mod tests {
             annotations: vec![],
             geometry: Default::default(),
         };
-        for format in crate::export::ExportFormat::ALL {
+        // Quantized GIF and native HEIF have separate codec/flattened-copy tests.
+        for format in crate::export::ExportFormat::ALL
+            .into_iter()
+            .filter(|format| {
+                !matches!(
+                    format,
+                    crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+                )
+            })
+        {
             let actual = dir.path().join(format!("actual.{}", format.extension()));
             let expected = dir.path().join(format!("expected.{}", format.extension()));
             let options = crate::export::ExportOptions {
@@ -610,7 +619,15 @@ mod tests {
             annotations: vec![],
             geometry: Default::default(),
         };
-        for format in crate::export::ExportFormat::ALL {
+        for format in crate::export::ExportFormat::ALL
+            .into_iter()
+            .filter(|format| {
+                !matches!(
+                    format,
+                    crate::export::ExportFormat::Gif | crate::export::ExportFormat::Heif
+                )
+            })
+        {
             let actual = dir.path().join(format!("styled.{}", format.extension()));
             let expected = dir.path().join(format!("flattened.{}", format.extension()));
             let options = crate::export::ExportOptions {
