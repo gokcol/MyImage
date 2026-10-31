@@ -2,7 +2,7 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 2.2.0 · build 86](https://github.com/gokcol/MyImage/releases/tag/v2.2.0-build86) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending. Microsoft Store packages are submitted separately for certification.
+[Download MyImage 2.2.0 · build 87](https://github.com/gokcol/MyImage/releases/tag/v2.2.0-build87) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending. Microsoft Store packages are submitted separately for certification.
 
 MyImage opens in **Home**, with **Editor**, **Library**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
@@ -11,6 +11,8 @@ MyImage automatically creates and saves **`.myimage` projects**, keeping each or
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
 
 ## New in 2.2
+
+**Build 87:** Canvas resizing keeps artwork stable while dragging, with relative dimensions and placement controls. Open supported single-page `.snagx` projects as editable MyImage projects. The unified **Save As…** dialog saves projects or JPG, PNG, GIF, HEIF, TIFF, WebP and PDF copies; HEIF availability depends on native OS codecs.
 
 **Build 86:** Capture starts on **Any display** by default. Move to either connected screen and select a region or window; in Full screen mode, click the screen you want. Fixed-display selection remains available. Each screen keeps its native capture resolution, and finishing or canceling restores the editor window.
 
