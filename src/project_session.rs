@@ -382,6 +382,150 @@ mod tests {
     }
 
     #[test]
+    fn opening_from_strip_keeps_the_whole_workspace_steady() {
+        use eframe::App as _;
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        // Exercise the real update/render path without starting native windows,
+        // hotkeys, capture, recovery, or the user's preferences.
+        app.initialized = true;
+        app.guide_open = false;
+        app.view = View::Editor;
+        app.settings.recents_open = true;
+        let old = dir.path().join("old.myimage");
+        let next = dir.path().join("next.myimage");
+        for path in [&old, &next] {
+            document::save_project(app.document.as_ref().unwrap(), path).unwrap();
+        }
+        app.project_path = Some(old.clone());
+        app.settings.recent_files = vec![old.clone(), next.clone()];
+        let (release, gate) = mpsc::channel();
+        let tx = app.work_tx.clone();
+        app.image_loader = Some(
+            crate::image_loading::Loader::start(move |path, result| {
+                if gate.recv().is_ok() {
+                    let _ = tx.send(WorkEvent::Prepared(path, result));
+                }
+            })
+            .unwrap(),
+        );
+        let draw = |app: &mut MyImageApp, events| {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 900.))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.update(ctx, &mut eframe::Frame::_new_kittest()),
+            );
+            let status = egui::containers::panel::PanelState::load(&ctx, egui::Id::new("status"))
+                .unwrap()
+                .rect;
+            output
+                .shapes
+                .into_iter()
+                .filter(|entry| {
+                    let bounds = entry.shape.visual_bounding_rect();
+                    bounds.is_positive() && bounds.max.y <= status.top()
+                })
+                .collect::<Vec<_>>()
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while ctx
+            .tex_manager()
+            .read()
+            .allocated()
+            .filter(|(_, meta)| meta.name.starts_with("library-"))
+            .count()
+            < 2
+        {
+            draw(&mut app, vec![]);
+            assert!(Instant::now() < deadline, "both thumbnails must be ready");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        for _ in 0..4 {
+            draw(&mut app, vec![]);
+        }
+        let normal = draw(&mut app, vec![]);
+        assert!(
+            normal.len() > 50,
+            "exercise the header, ribbon, inspector, canvas and strip"
+        );
+        assert_eq!(
+            draw(&mut app, vec![]),
+            normal,
+            "idle controls should be stable"
+        );
+        // Save-before-switch has the same temporary input lock. In particular,
+        // unavailable Undo/Redo controls must not brighten during that lock.
+        app.busy = true;
+        app.project_session.saving = true;
+        assert_eq!(
+            draw(&mut app, vec![]),
+            normal,
+            "saving must keep the workspace steady"
+        );
+        app.busy = false;
+        app.project_session.saving = false;
+        app.library_action(&ctx, LibraryAction::Open(next.clone()));
+        assert!(app.busy && app.opening_image);
+        let loading = draw(&mut app, vec![]);
+        assert_eq!(
+            loading.len(),
+            normal.len(),
+            "opening changed workspace paint geometry"
+        );
+        for (index, (actual, expected)) in loading.iter().zip(&normal).enumerate() {
+            assert!(
+                actual == expected,
+                "workspace shape {index} changed while opening: {actual:?} versus {expected:?}"
+            );
+        }
+        // A ribbon click and a browse key must not navigate during loading.
+        let home = normal
+            .iter()
+            .find_map(|entry| match &entry.shape {
+                egui::Shape::Text(text) if text.galley.job.text == "Home" => {
+                    Some(text.pos + egui::vec2(4., 4.))
+                }
+                _ => None,
+            })
+            .unwrap();
+        for pressed in [true, false] {
+            draw(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(home),
+                    egui::Event::PointerButton {
+                        pos: home,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        draw(
+            &mut app,
+            vec![
+                egui::Event::PointerGone,
+                egui::Event::Key {
+                    key: egui::Key::ArrowRight,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert!(app.view == View::Editor);
+        assert_eq!(app.project_path.as_ref(), Some(&old));
+        release.send(()).unwrap();
+        finish(&mut app, &ctx);
+        assert_eq!(app.project_path, Some(next));
+    }
+
+    #[test]
     fn opening_a_project_keeps_the_current_canvas_steady_until_the_replacement_is_ready() {
         let dir = tempfile::tempdir().unwrap();
         let (mut app, ctx) = app(dir.path());

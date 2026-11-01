@@ -1837,14 +1837,18 @@ impl MyImageApp {
             });
     }
 
-    fn workspace_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        let unobscured = !self.guide_open
+    fn workspace_unobscured(&self) -> bool {
+        !self.guide_open
             && !self.about_open
             && !self.appearance_open
             && !self.recovery.prompt
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
-            && !self.save_as_panel.open;
+            && !self.save_as_panel.open
+    }
+
+    fn workspace_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let unobscured = self.workspace_unobscured();
         let animate_canvas = self.view == View::Editor
             && self.document.is_some()
             && unobscured
@@ -1854,13 +1858,11 @@ impl MyImageApp {
         }
         let paint_start =
             (animate_canvas && self.opening_image).then(|| ui.painter().add(egui::Shape::Noop).0);
-        ui.scope(|ui| {
-            if (self.project_session.saving || self.opening_image) && unobscured {
-                // Keep the current image steady while saving or preparing its
-                // replacement. Input stays blocked; dialogs still dim the image.
-                ui.visuals_mut().disabled_alpha = 1.;
-            }
-            ui.add_enabled_ui(!self.busy && unobscured, |ui| match self.view {
+        appearance::input_scope(
+            ui,
+            !self.busy && unobscured,
+            (self.project_session.saving || self.opening_image) && unobscured,
+            |ui| match self.view {
                 View::Home => self.home_ui(ui, ctx),
                 View::Capture => self.capture_ui(ui, ctx),
                 View::Library => self.library_ui(ui, ctx),
@@ -1871,8 +1873,8 @@ impl MyImageApp {
                         self.create_image(ctx, spec);
                     }
                 }
-            });
-        });
+            },
+        );
         if animate_canvas
             && let Some(viewport) = crate::canvas_zoom::viewport(ctx, "annotation-canvas-scroll")
         {
@@ -2095,16 +2097,11 @@ impl eframe::App for MyImageApp {
                         );
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_enabled_ui(
-                            !self.busy
-                                && !self.guide_open
-                                && !self.about_open
-                                && !self.appearance_open
-                                && !self.recovery.prompt
-                                && self.pending_action.is_none()
-                                && self.file_dialog.is_none()
-                                && !self.save_as_panel.open
-                                && !self.editor.has_modal(),
+                        let unobscured = self.workspace_unobscured() && !self.editor.has_modal();
+                        appearance::input_scope(
+                            ui,
+                            !self.busy && unobscured,
+                            (self.project_session.saving || self.opening_image) && unobscured,
                             |ui| {
                                 let has_doc = self.document.is_some();
                                 if matches!(self.view, View::Viewer | View::Editor) {
@@ -2174,16 +2171,11 @@ impl eframe::App for MyImageApp {
             .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(5))
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(3., 3.);
-                ui.add_enabled_ui(
-                    !self.busy
-                        && !self.guide_open
-                        && !self.about_open
-                        && !self.appearance_open
-                        && !self.recovery.prompt
-                        && self.pending_action.is_none()
-                        && self.file_dialog.is_none()
-                        && !self.save_as_panel.open
-                        && !self.editor.has_modal(),
+                let unobscured = self.workspace_unobscured() && !self.editor.has_modal();
+                appearance::input_scope(
+                    ui,
+                    !self.busy && unobscured,
+                    (self.project_session.saving || self.opening_image) && unobscured,
                     |ui| {
                         ui.horizontal(|ui| {
                             for (view, label, icon) in [

@@ -312,6 +312,7 @@ impl LibraryPanel {
         ui: &mut egui::Ui,
         open: &mut bool,
         enabled: bool,
+        keep_appearance: bool,
         image_controls: impl FnOnce(&mut egui::Ui),
     ) -> Option<LibraryAction> {
         let mut chosen = None;
@@ -337,7 +338,7 @@ impl LibraryPanel {
             let count = self.recent_selection.paths.len();
             if *open && count > 0 {
                 ui.small(format!("{count} selected"));
-                ui.add_enabled_ui(enabled, |ui| {
+                appearance::input_scope(ui, enabled, keep_appearance, |ui| {
                     if appearance::icon_button(ui, "Move selected files to Trash…", appearance::Icon::Trash).clicked() {
                         chosen = Some(LibraryAction::Trash(self.recent_selection.list()));
                     }

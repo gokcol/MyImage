@@ -1110,6 +1110,27 @@ pub fn icon_button(ui: &mut egui::Ui, label: &str, kind: Icon) -> egui::Response
     response.on_hover_text(label)
 }
 
+/// Block interaction during file I/O without flashing the surrounding UI.
+/// Restore only this scope's opacity: individually unavailable child controls
+/// still use their usual disabled appearance, and dialogs can still dim it.
+pub fn input_scope<R>(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    keep_appearance: bool,
+    contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    ui.scope(|ui| {
+        if !enabled {
+            let opacity = ui.opacity();
+            ui.disable();
+            if keep_appearance {
+                ui.set_opacity(opacity);
+            }
+        }
+        contents(ui)
+    })
+}
+
 pub fn action_button(
     ui: &mut egui::Ui,
     label: &str,
@@ -1151,7 +1172,7 @@ pub fn action_button(
             },
             egui::StrokeKind::Inside,
         );
-        if primary && ui.is_enabled() {
+        if primary {
             satin(
                 ui.painter(),
                 rect,
