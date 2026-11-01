@@ -54,6 +54,52 @@ impl MyImageApp {
                         self.library_action(ctx, action);
                     }
                 });
+            self.prefetch_recent(ctx);
+        }
+    }
+
+    pub(super) fn remember_browse_direction(&mut self, next: &std::path::Path) {
+        let paths = self.library.recent_paths(&self.settings.recent_files);
+        let active = self.project_path.as_ref().or(self.last_path.as_ref());
+        if let (Some(previous), Some(next)) = (
+            paths.iter().position(|p| Some(p) == active),
+            paths.iter().position(|p| p == next),
+        ) && previous != next
+        {
+            self.recent_browse_forward = next > previous;
+        }
+    }
+
+    fn prefetch_recent(&self, ctx: &egui::Context) {
+        if self.busy
+            || !self.settings.recents_open
+            || !matches!(self.view, View::Editor | View::Viewer)
+            || !self.workspace_unobscured()
+            || self.editor.has_modal()
+            || self.hidden.load(Ordering::Relaxed)
+        {
+            return;
+        }
+        let Some(loader) = &self.image_loader else {
+            return;
+        };
+        let paths = self.library.recent_paths(&self.settings.recent_files);
+        let active = self.project_path.as_ref().or(self.last_path.as_ref());
+        let Some(index) = paths.iter().position(|p| Some(p) == active) else {
+            return;
+        };
+        let next = paths.get(index + 1);
+        let previous = index.checked_sub(1).and_then(|i| paths.get(i));
+        let candidate = if self.recent_browse_forward {
+            next.or(previous)
+        } else {
+            previous.or(next)
+        };
+        if let Some(path) = candidate {
+            loader.prefetch(
+                path.clone(),
+                ctx.input(|i| i.max_texture_side).max(1) as u32,
+            );
         }
     }
 
@@ -159,8 +205,9 @@ impl MyImageApp {
     pub(super) fn remember_opened_recent(&mut self, path: PathBuf) {
         let visible = self.library.recent_paths(&self.settings.recent_files);
         self.library.unhide_recent(&path);
-        storage::remember_opened_recent(&mut self.settings, path, &visible);
-        self.persist_settings();
+        if storage::remember_opened_recent(&mut self.settings, path, &visible) {
+            self.persist_settings();
+        }
     }
 
     pub(super) fn promote_edited_recent(&mut self, ctx: &egui::Context) {
@@ -222,6 +269,46 @@ mod tests {
             Some(paths[0].clone()),
         );
         (dir, app, ctx, paths)
+    }
+
+    #[test]
+    fn strip_prefetch_follows_direction_and_skips_hidden_projects_without_editing_history() {
+        let (_dir, mut app, ctx, paths) = strip_app();
+        app.begin_open(&ctx, paths[2].clone(), true);
+        finish_recent_open(&mut app, &ctx);
+        app.prefetch_recent(&ctx);
+        let (candidate, _) = app
+            .image_loader
+            .as_ref()
+            .unwrap()
+            .warmed
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(candidate, std::fs::canonicalize(&paths[3]).unwrap());
+        let order = app.settings.recent_files.clone();
+        let state = app.document.as_ref().unwrap().edit_state();
+        assert!(!app.busy && !app.has_unsaved_edits());
+        assert_eq!(app.project_path.as_ref(), Some(&paths[2]));
+        assert_eq!(app.document.as_ref().unwrap().edit_state(), state);
+        app.begin_open(&ctx, paths[3].clone(), true);
+        finish_recent_open(&mut app, &ctx);
+        app.begin_open(&ctx, paths[2].clone(), true);
+        finish_recent_open(&mut app, &ctx);
+        assert!(!app.recent_browse_forward);
+        app.settings.library.hidden_recents.insert(paths[1].clone());
+        app.library = LibraryPanel::with_preferences(app.settings.library.clone());
+        app.prefetch_recent(&ctx);
+        let (candidate, _) = app
+            .image_loader
+            .as_ref()
+            .unwrap()
+            .warmed
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(candidate, std::fs::canonicalize(&paths[0]).unwrap());
+        assert_eq!(app.settings.recent_files, order);
+        assert_eq!(app.project_path.as_ref(), Some(&paths[2]));
+        assert!(!app.busy && !app.has_unsaved_edits());
     }
 
     fn strip_frame(

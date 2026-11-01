@@ -655,6 +655,12 @@ fn write_contents(
 }
 
 pub fn load_project(path: &Path) -> Result<Document, String> {
+    load_project_with_budget(path, MAX_PROJECT_BYTES)
+}
+
+/// Speculative browsing can impose a smaller decode budget than an explicit open.
+pub(crate) fn load_project_with_budget(path: &Path, budget: u64) -> Result<Document, String> {
+    let budget = budget.min(MAX_PROJECT_BYTES);
     let file = File::open(path)
         .map_err(|error| format!("Cannot open project {}: {error}", path.display()))?;
     let file_bytes = file
@@ -873,7 +879,7 @@ pub fn load_project(path: &Path) -> Result<Document, String> {
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(MAX_IMAGE_SIDE);
     limits.max_image_height = Some(MAX_IMAGE_SIDE);
-    limits.max_alloc = Some(MAX_PROJECT_BYTES);
+    limits.max_alloc = Some(budget);
     png_reader.limits(limits);
     let decoder = png_reader
         .into_decoder()
@@ -883,7 +889,7 @@ pub fn load_project(path: &Path) -> Result<Document, String> {
     if (width, height) != (metadata.width, metadata.height) {
         return Err("The project's original image does not match its metadata.".into());
     }
-    if decoder.total_bytes() > MAX_PROJECT_BYTES {
+    if decoder.total_bytes() > budget || u64::from(width) * u64::from(height) * 4 > budget {
         return Err("The project's original image is too large to decode.".into());
     }
     let image = image::DynamicImage::from_decoder(decoder)

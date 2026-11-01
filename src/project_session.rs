@@ -623,7 +623,7 @@ mod tests {
             .unwrap()
             .expect("Prepared privacy pixels must be ready on the first frame");
         let ready = ctx.input(|i| i.time) + 1.;
-        for (elapsed, old_alpha) in [(0., Some(255)), (0.06, Some(128)), (0.13, None)] {
+        for (elapsed, old_alpha) in [(0., Some(255)), (0.04, Some(128)), (0.09, None)] {
             let meshes = workspace_meshes(&mut app, &ctx, Some(ready + elapsed), vec![]);
             let painted = meshes
                 .iter()

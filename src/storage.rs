@@ -172,7 +172,8 @@ pub fn remember_recent(settings: &mut Settings, path: PathBuf) {
 
 /// Opening an existing thumbnail preserves the complete visible strip, including
 /// library entries not yet in persisted history. Only a new file joins the front.
-pub fn remember_opened_recent(settings: &mut Settings, path: PathBuf, visible: &[PathBuf]) {
+/// Returns whether persistent history or hidden-item preferences changed.
+pub fn remember_opened_recent(settings: &mut Settings, path: PathBuf, visible: &[PathBuf]) -> bool {
     let mut ordered = Vec::new();
     if !visible.contains(&path) {
         ordered.push(path.clone());
@@ -182,8 +183,12 @@ pub fn remember_opened_recent(settings: &mut Settings, path: PathBuf, visible: &
     let mut seen = std::collections::HashSet::new();
     ordered.retain(|p| seen.insert(p.clone()));
     ordered.truncate(24);
-    settings.library.hidden_recents.remove(&path);
+    let unhidden = settings.library.hidden_recents.remove(&path);
+    if settings.recent_files == ordered {
+        return unhidden;
+    }
     settings.recent_files = ordered;
+    true
 }
 
 fn settings_path() -> Result<PathBuf, String> {
@@ -229,6 +234,34 @@ mod tests {
     use super::*;
     use chrono::{Local, TimeZone};
     use std::sync::Arc;
+
+    #[test]
+    fn browsing_unchanged_recents_does_not_require_a_settings_write() {
+        let mut settings = Settings::default();
+        let paths: Vec<_> = (0..4)
+            .map(|i| PathBuf::from(format!("{i}.myimage")))
+            .collect();
+        settings.recent_files = paths.clone();
+        let before = serde_json::to_vec(&settings).unwrap();
+        for path in &paths {
+            assert!(!remember_opened_recent(&mut settings, path.clone(), &paths));
+        }
+        assert_eq!(before, serde_json::to_vec(&settings).unwrap());
+        settings.library.hidden_recents.insert(paths[1].clone());
+        assert!(remember_opened_recent(
+            &mut settings,
+            paths[1].clone(),
+            &paths
+        ));
+        assert!(!settings.library.hidden_recents.contains(&paths[1]));
+        assert!(remember_opened_recent(
+            &mut settings,
+            PathBuf::from("new.myimage"),
+            &paths
+        ));
+        assert_eq!(settings.recent_files[0], PathBuf::from("new.myimage"));
+        assert_eq!(&settings.recent_files[1..], &paths);
+    }
 
     #[test]
     fn trash_confirmation_defaults_on_and_remembers_an_explicit_opt_out() {

@@ -180,6 +180,7 @@ pub struct MyImageApp {
     scroll_session: Option<ScrollSession>,
     busy: bool,
     opening_image: bool,
+    recent_browse_forward: bool,
     open_transition: crate::open_transition::OpenTransition,
     error: Option<String>,
     status: String,
@@ -322,6 +323,7 @@ impl MyImageApp {
             scroll_session: None,
             busy: false,
             opening_image: false,
+            recent_browse_forward: true,
             open_transition: Default::default(),
             error,
             status: "Ready to edit".into(),
@@ -1328,6 +1330,7 @@ impl MyImageApp {
                             let imported_snagit = path
                                 .extension()
                                 .is_some_and(|e| e.eq_ignore_ascii_case("snagx"));
+                            self.remember_browse_direction(&path);
                             let warnings = prepared.warnings;
                             let project_path = is_project_path(&path).then(|| path.clone());
                             let previous = self.open_transition.take_loading();

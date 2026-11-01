@@ -4,7 +4,7 @@ use crate::document::Document;
 use eframe::egui::{self, Rect, Shape, TextureHandle, TextureId, epaint::ClippedShape};
 use std::{collections::HashSet, sync::Arc};
 
-const DURATION: f64 = 0.12;
+const DURATION: f64 = 0.08;
 
 pub struct CanvasFrame {
     shapes: Vec<ClippedShape>,
@@ -219,7 +219,7 @@ mod tests {
         let ctx = egui::Context::default();
         let doc = document();
         let (mut transition, id, viewport) = begin(&ctx, &doc);
-        for (time, expected_alpha) in [(1., Some(255)), (1.06, Some(128)), (1.13, None)] {
+        for (time, expected_alpha) in [(1., Some(255)), (1.04, Some(128)), (1.09, None)] {
             let output = ctx.run(input(time), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| transition.paint(ui, viewport, &doc));
             });
