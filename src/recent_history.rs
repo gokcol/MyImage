@@ -2,6 +2,45 @@
 use super::*;
 
 impl MyImageApp {
+    pub(super) fn recents_after_trash(
+        &self,
+        active: &std::path::Path,
+        removed: &[PathBuf],
+    ) -> std::collections::VecDeque<PathBuf> {
+        let visible = self.library.recent_paths(&self.settings.recent_files);
+        let pivot = visible.iter().position(|path| path == active);
+        let (before, after) = match pivot {
+            Some(index) => (&visible[..index], &visible[index + 1..]),
+            None => (&visible[..0], visible.as_slice()),
+        };
+        // Follow the visible strip: next to the right, then nearest to the left.
+        // Exclude every removed/missing item in a batch, including companions.
+        after
+            .iter()
+            .chain(before.iter().rev())
+            .filter(|path| !removed.contains(path))
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn open_next_recent_after_trash(&mut self, ctx: &egui::Context) {
+        if self.quit_after_work {
+            self.remaining_recents_after_trash = None;
+            return;
+        }
+        let Some(remaining) = &mut self.remaining_recents_after_trash else {
+            return;
+        };
+        if let Some(path) = remaining.pop_front() {
+            self.begin_open(ctx, path, true);
+            if !self.busy {
+                self.remaining_recents_after_trash = None;
+            }
+        } else {
+            self.remaining_recents_after_trash = None;
+        }
+    }
+
     pub(super) fn remember_opened_recent(&mut self, path: PathBuf) {
         let visible = self.library.recent_paths(&self.settings.recent_files);
         self.library.unhide_recent(&path);
@@ -38,6 +77,280 @@ mod tests {
             geometry: Default::default(),
             annotations: vec![],
         }
+    }
+
+    fn finish_recent_open(app: &mut MyImageApp, ctx: &egui::Context) {
+        while app.busy {
+            let event = app.work_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            app.work_tx.send(event).unwrap();
+            app.handle_events(ctx);
+        }
+    }
+
+    #[test]
+    fn deleting_an_open_recent_advances_right_then_left_without_reordering_the_strip() {
+        for (active, deleted, expected) in [
+            (0, vec![0], Some(1)),
+            (1, vec![1], Some(2)),
+            (3, vec![3], Some(2)),
+            (1, vec![0, 1, 2], Some(3)),
+            (2, vec![2, 3], Some(1)),
+            (1, vec![0, 1, 2, 3], None),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let paths: Vec<_> = (0..4)
+                .map(|i| dir.path().join(format!("{i}.myimage")))
+                .collect();
+            for (i, path) in paths.iter().enumerate() {
+                let mut doc = document();
+                doc.image = Arc::new(image::RgbaImage::from_pixel(
+                    4,
+                    4,
+                    image::Rgba([i as u8, 50, 100, 255]),
+                ));
+                document::save_project(&doc, path).unwrap();
+            }
+            let ctx = egui::Context::default();
+            let mut app =
+                MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+            app.install_document_state(
+                document::load_project(&paths[active]).unwrap(),
+                Some(paths[active].clone()),
+            );
+            app.last_path = Some(paths[active].clone());
+            app.settings.recent_files = paths.clone();
+            app.view = View::Editor;
+            let removed: Vec<_> = deleted.iter().map(|&i| paths[i].clone()).collect();
+            for path in &removed {
+                std::fs::remove_file(path).unwrap();
+            }
+            app.file_operation_finished(
+                &ctx,
+                crate::library_files::Outcome {
+                    removed: removed.clone(),
+                    ..Default::default()
+                },
+            );
+            assert!(matches!(app.view, View::Editor));
+            assert!(app.document.is_none());
+            assert_eq!(app.busy, expected.is_some());
+            finish_recent_open(&mut app, &ctx);
+            assert!(matches!(app.view, View::Editor));
+            assert_eq!(app.project_path.as_ref(), expected.map(|i| &paths[i]));
+            if let Some(index) = expected {
+                assert_eq!(
+                    app.document.as_ref().unwrap().image.get_pixel(0, 0)[0],
+                    index as u8
+                );
+                assert!(app.last_texture.is_some());
+            }
+            assert!(!app.has_unsaved_edits());
+            assert!(app.remaining_recents_after_trash.is_none());
+            let remaining: Vec<_> = paths
+                .iter()
+                .filter(|path| !removed.contains(path))
+                .cloned()
+                .collect();
+            assert_eq!(
+                app.library.recent_paths(&app.settings.recent_files),
+                remaining
+            );
+            app.autosave_project(&ctx);
+            assert!(!app.busy);
+            assert!(removed.iter().all(|path| !path.exists()));
+        }
+    }
+
+    #[test]
+    fn next_recent_skips_hidden_and_newly_missing_files_and_keeps_partial_delete_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = ["deleted", "hidden", "missing", "next"]
+            .iter()
+            .map(|name| dir.path().join(format!("{name}.myimage")))
+            .collect();
+        document::save_project(&document(), &paths[1]).unwrap();
+        document::save_project(&document(), &paths[3]).unwrap();
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.install_document_state(document(), Some(paths[0].clone()));
+        app.settings.recent_files = paths.clone();
+        app.settings.library.hidden_recents.insert(paths[1].clone());
+        app.library = LibraryPanel::with_preferences(app.settings.library.clone());
+        app.view = View::Editor;
+        app.file_operation_finished(
+            &ctx,
+            crate::library_files::Outcome {
+                removed: vec![paths[0].clone()],
+                errors: vec!["A different selected file could not be moved to Trash".into()],
+                ..Default::default()
+            },
+        );
+        finish_recent_open(&mut app, &ctx);
+        assert_eq!(app.project_path.as_ref(), Some(&paths[3]));
+        assert!(!app.settings.recent_files.contains(&paths[2]));
+        assert_eq!(
+            app.library
+                .recent_paths(&app.settings.recent_files)
+                .as_slice(),
+            std::slice::from_ref(&paths[3])
+        );
+        assert!(
+            app.error
+                .as_ref()
+                .unwrap()
+                .contains("could not be moved to Trash")
+        );
+        assert!(paths[1].exists());
+        assert!(app.remaining_recents_after_trash.is_none());
+    }
+
+    #[test]
+    fn failed_delete_or_pending_quit_does_not_open_a_different_recent() {
+        let ctx = egui::Context::default();
+        for quitting in [false, true] {
+            let mut app =
+                MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+            let active = PathBuf::from("active.myimage");
+            app.install_document_state(document(), Some(active.clone()));
+            app.settings.recent_files = vec![active.clone(), PathBuf::from("next.myimage")];
+            app.view = View::Editor;
+            app.quit_after_work = quitting;
+            app.file_operation_finished(
+                &ctx,
+                if quitting {
+                    crate::library_files::Outcome {
+                        removed: vec![active.clone()],
+                        ..Default::default()
+                    }
+                } else {
+                    crate::library_files::Outcome {
+                        errors: vec!["Permission denied".into()],
+                        ..Default::default()
+                    }
+                },
+            );
+            assert!(!app.busy);
+            assert!(app.remaining_recents_after_trash.is_none());
+            assert!(app.work_rx.try_recv().is_err());
+            if !quitting {
+                assert_eq!(app.project_path.as_ref(), Some(&active));
+                assert!(app.document.is_some());
+                assert_eq!(app.error.as_deref(), Some("Permission denied"));
+            }
+        }
+    }
+
+    #[test]
+    fn a_corrupt_next_recent_reports_the_open_failure_without_removing_that_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let removed = dir.path().join("deleted.myimage");
+        let corrupt = dir.path().join("corrupt.myimage");
+        std::fs::write(&corrupt, b"not a project").unwrap();
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.install_document_state(document(), Some(removed.clone()));
+        app.settings.recent_files = vec![removed.clone(), corrupt.clone()];
+        app.view = View::Editor;
+        app.file_operation_finished(
+            &ctx,
+            crate::library_files::Outcome {
+                removed: vec![removed],
+                ..Default::default()
+            },
+        );
+        finish_recent_open(&mut app, &ctx);
+        assert!(app.error.is_some());
+        assert!(matches!(app.view, View::Editor));
+        assert!(app.remaining_recents_after_trash.is_none());
+        assert!(app.document.is_none());
+        assert!(app.settings.recent_files.contains(&corrupt));
+        assert_eq!(std::fs::read(&corrupt).unwrap(), b"not a project");
+    }
+
+    #[test]
+    fn deleting_the_last_open_project_keeps_editor_visible_and_does_not_recreate_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let removed = dir.path().join("deleted.myimage");
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.guide_open = false;
+        app.install_document_state(document(), Some(removed.clone()));
+        app.last_path = Some(removed.clone());
+        app.settings.recent_files = vec![removed.clone()];
+        app.view = View::Editor;
+        // Simulate a completed Trash operation; no real user files are moved.
+        app.file_operation_finished(
+            &ctx,
+            crate::library_files::Outcome {
+                removed: vec![removed.clone()],
+                ..Default::default()
+            },
+        );
+        assert!(matches!(app.view, View::Editor));
+        assert!(app.document.is_none());
+        assert!(app.project_path.is_none());
+        assert!(app.last_image.is_none());
+        assert!(!app.has_unsaved_edits());
+        app.autosave_project(&ctx);
+        assert!(!app.busy);
+        assert!(app.work_rx.try_recv().is_err());
+        assert!(!removed.exists());
+        assert!(app.settings.recent_files.is_empty());
+        for busy in [false, true] {
+            app.busy = busy;
+            app.status = "Opening image…".into();
+            for _ in 0..3 {
+                let frame = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 800.))),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| app.workspace_ui(ui, ctx));
+                    },
+                );
+                let text: String = frame
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| {
+                        if let egui::Shape::Text(text) = &shape.shape {
+                            Some(text.galley.job.text.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                assert!(!text.contains("Open a recent image, capture your screen"));
+                assert!(!text.contains("Start from a template"));
+                assert!(text.contains(if busy {
+                    "Opening image…"
+                } else {
+                    "Select an image from Recents"
+                }));
+            }
+        }
+    }
+
+    #[test]
+    fn deleting_the_open_project_from_library_keeps_library_and_remaining_recents() {
+        let removed = PathBuf::from("deleted.myimage");
+        let retained = PathBuf::from("retained.myimage");
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.install_document_state(document(), Some(removed.clone()));
+        app.settings.recent_files = vec![removed.clone(), retained.clone()];
+        app.view = View::Library;
+        app.file_operation_finished(
+            &ctx,
+            crate::library_files::Outcome {
+                removed: vec![removed],
+                ..Default::default()
+            },
+        );
+        assert!(matches!(app.view, View::Library));
+        assert!(app.document.is_none());
+        assert!(!app.busy);
+        assert_eq!(app.settings.recent_files, vec![retained]);
     }
 
     #[test]
@@ -95,12 +408,15 @@ mod tests {
         let edited = doc.edit_state();
         let revision = app.history.revision();
         let image = doc.image.clone();
-        app.file_operation_finished(crate::library_files::Outcome {
-            removed: vec![paths[1].clone()],
-            missing: vec![paths[3].clone()],
-            errors: vec!["failed.myimage: permission denied".into()],
-            ..Default::default()
-        });
+        app.file_operation_finished(
+            &ctx,
+            crate::library_files::Outcome {
+                removed: vec![paths[1].clone()],
+                missing: vec![paths[3].clone()],
+                errors: vec!["failed.myimage: permission denied".into()],
+                ..Default::default()
+            },
+        );
         assert_eq!(
             app.settings.recent_files,
             [paths[0].clone(), paths[2].clone()]

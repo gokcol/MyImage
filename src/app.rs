@@ -191,6 +191,7 @@ pub struct MyImageApp {
     editor: EditorState,
     library: LibraryPanel,
     image_loader: Option<crate::image_loading::Loader>,
+    remaining_recents_after_trash: Option<std::collections::VecDeque<PathBuf>>,
     create_panel: crate::templates::CreatePanel,
     draft_title: String,
     save_as_panel: SaveAsPanel,
@@ -328,6 +329,7 @@ impl MyImageApp {
             editor,
             library,
             image_loader: None,
+            remaining_recents_after_trash: None,
             create_panel: Default::default(),
             draft_title: "Untitled image".into(),
             save_as_panel: SaveAsPanel::default(),
@@ -1097,7 +1099,7 @@ impl MyImageApp {
                     }
                 }
                 WorkEvent::Files(result) => {
-                    self.file_operation_finished(result);
+                    self.file_operation_finished(ctx, result);
                     if std::mem::take(&mut self.quit_after_work) {
                         self.request_quit(ctx);
                     }
@@ -1282,12 +1284,14 @@ impl MyImageApp {
                 WorkEvent::MissingOpen(path) => {
                     self.busy = false;
                     self.settings.recent_files.retain(|p| p != &path);
-                    self.library.forget_paths(&[path]);
+                    self.library.files_removed(std::slice::from_ref(&path));
                     self.sync_library_references();
-                    self.library.refresh();
-                    self.error = None;
+                    if self.remaining_recents_after_trash.is_none() {
+                        self.error = None;
+                    }
                     self.status =
                         "That file is no longer on disk. Its missing entry was removed.".into();
+                    self.open_next_recent_after_trash(ctx);
                     if std::mem::take(&mut self.quit_after_work) {
                         self.request_quit(ctx);
                     }
@@ -1296,6 +1300,8 @@ impl MyImageApp {
                     self.busy = false;
                     match result {
                         Ok(prepared) => {
+                            let followed_trash =
+                                self.remaining_recents_after_trash.take().is_some();
                             let imported_snagit = path
                                 .extension()
                                 .is_some_and(|e| e.eq_ignore_ascii_case("snagx"));
@@ -1321,12 +1327,15 @@ impl MyImageApp {
                                 "Image opened"
                             }
                             .into();
-                            self.error = None;
+                            if !followed_trash {
+                                self.error = None;
+                            }
                             if !warnings.is_empty() {
                                 self.file_dialog = Some(FileDialog::ImportNotes(warnings));
                             }
                         }
                         Err(error) => {
+                            self.remaining_recents_after_trash = None;
                             self.error = Some(error);
                             self.status = "Could not open the file".into();
                         }
@@ -1852,7 +1861,13 @@ impl MyImageApp {
             }
         }
         let Some(document) = &mut self.document else {
-            self.home_ui(ui, ctx);
+            ui.centered_and_justified(|ui| {
+                ui.weak(if self.busy {
+                    self.status.as_str()
+                } else {
+                    "Select an image from Recents, or open or capture an image to edit."
+                });
+            });
             return;
         };
         if self.last_texture.is_none() {

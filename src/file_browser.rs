@@ -227,12 +227,27 @@ impl MyImageApp {
             ctx.request_repaint();
         });
     }
-    pub(super) fn file_operation_finished(&mut self, result: Outcome) {
+    pub(super) fn file_operation_finished(&mut self, ctx: &egui::Context, result: Outcome) {
         self.busy = false;
         let removed_active = result
             .removed
             .iter()
             .any(|p| self.project_path.as_ref() == Some(p) || self.last_path.as_ref() == Some(p));
+        let removed: Vec<_> = result
+            .removed
+            .iter()
+            .chain(&result.missing)
+            .cloned()
+            .collect();
+        self.remaining_recents_after_trash =
+            if removed_active && self.view == View::Editor && !self.quit_after_work {
+                self.project_path
+                    .as_ref()
+                    .or(self.last_path.as_ref())
+                    .map(|active| self.recents_after_trash(active, &removed))
+            } else {
+                None
+            };
         if removed_active {
             self.clear_recovery();
             self.document = None;
@@ -247,12 +262,6 @@ impl MyImageApp {
         self.settings
             .recent_files
             .retain(|p| !result.removed.contains(p) && !result.missing.contains(p));
-        let removed: Vec<_> = result
-            .removed
-            .iter()
-            .chain(&result.missing)
-            .cloned()
-            .collect();
         self.library.files_removed(&removed);
         for (old, new) in &result.renamed {
             for target in self.settings.project_sources.values_mut() {
@@ -300,9 +309,8 @@ impl MyImageApp {
         } else {
             "No files changed".into()
         };
-        if !result.errors.is_empty() {
-            self.error = Some(result.errors.join("\n"));
-        }
+        self.error = (!result.errors.is_empty()).then(|| result.errors.join("\n"));
+        self.open_next_recent_after_trash(ctx);
     }
     pub(super) fn file_dialog_ui(&mut self, ctx: &egui::Context) {
         let Some(mut dialog) = self.file_dialog.take() else {
@@ -541,7 +549,7 @@ mod tests {
             panic!("Expected completed file operation");
         };
         assert_eq!(result.missing.as_slice(), std::slice::from_ref(&missing));
-        app.file_operation_finished(result);
+        app.file_operation_finished(&ctx, result);
 
         app.library_action(&ctx, LibraryAction::Trash(vec![missing.clone()]));
         assert!(app.file_dialog.is_none());
@@ -549,7 +557,7 @@ mod tests {
         else {
             panic!("Expected operation without confirmation");
         };
-        app.file_operation_finished(result);
+        app.file_operation_finished(&ctx, result);
         app.appearance_open = true;
         click(&mut app, &ctx, "Ask before moving files to Trash");
         assert!(app.settings.confirm_trash);
