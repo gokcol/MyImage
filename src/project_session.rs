@@ -343,15 +343,16 @@ mod tests {
         assert_eq!(thumbnails().get(other_name), before.get(other_name));
     }
 
-    fn workspace_canvas(
+    fn workspace_meshes(
         app: &mut MyImageApp,
         ctx: &egui::Context,
-        texture: egui::TextureId,
+        time: Option<f64>,
         events: Vec<egui::Event>,
-    ) -> egui::Mesh {
+    ) -> Vec<egui::Mesh> {
         let output = ctx.run(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900., 700.))),
+                time,
                 events,
                 ..Default::default()
             },
@@ -361,11 +362,251 @@ mod tests {
         );
         ctx.tessellate(output.shapes, output.pixels_per_point)
             .into_iter()
-            .find_map(|primitive| match primitive.primitive {
-                egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture => Some(mesh),
+            .filter_map(|primitive| match primitive.primitive {
+                egui::epaint::Primitive::Mesh(mesh) => Some(mesh),
                 _ => None,
             })
+            .collect()
+    }
+
+    fn workspace_canvas(
+        app: &mut MyImageApp,
+        ctx: &egui::Context,
+        texture: egui::TextureId,
+        events: Vec<egui::Event>,
+    ) -> egui::Mesh {
+        workspace_meshes(app, ctx, None, events)
+            .into_iter()
+            .find(|mesh| mesh.texture_id == texture)
             .expect("the original image stays painted")
+    }
+
+    #[test]
+    fn opening_a_project_keeps_the_current_canvas_steady_until_the_replacement_is_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        app.guide_open = false;
+        app.view = View::Editor;
+        let old_path = dir.path().join("old.myimage");
+        let next_path = dir.path().join("next.myimage");
+        let doc = Document {
+            image: Arc::new(image::RgbaImage::from_pixel(
+                320,
+                240,
+                image::Rgba([60, 130, 210, 255]),
+            )),
+            annotations: vec![crate::markup_tests::object(
+                document::AnnotationKind::Arrow,
+                [80., 80.],
+                [240., 160.],
+            )],
+            geometry: Default::default(),
+        };
+        document::save_project(&doc, &old_path).unwrap();
+        app.install_document_state(doc, Some(old_path.clone()));
+        let source = load_texture(
+            &ctx,
+            "opening baseline",
+            &app.document.as_ref().unwrap().image,
+        );
+        app.last_texture = Some(source.clone());
+        app.settings.recent_files = vec![old_path.clone(), next_path.clone()];
+        let target = Document {
+            image: Arc::new(image::RgbaImage::from_fn(64, 48, |x, y| {
+                image::Rgba([x as u8 * 3, y as u8 * 4, 80, 255])
+            })),
+            annotations: vec![crate::markup_tests::object(
+                document::AnnotationKind::Pixelate,
+                [0., 0.],
+                [64., 48.],
+            )],
+            geometry: Default::default(),
+        };
+        document::save_project(&target, &next_path).unwrap();
+        let (release, gate) = mpsc::channel();
+        let tx = app.work_tx.clone();
+        app.image_loader = Some(
+            crate::image_loading::Loader::start(move |path, result| {
+                if gate.recv().is_ok() {
+                    let _ = tx.send(WorkEvent::Prepared(path, result));
+                }
+            })
+            .unwrap(),
+        );
+        for _ in 0..3 {
+            let _ = workspace_canvas(&mut app, &ctx, source.id(), vec![]);
+        }
+        let normal = workspace_canvas(&mut app, &ctx, source.id(), vec![]);
+        assert!(
+            normal
+                .vertices
+                .iter()
+                .all(|vertex| vertex.color == Color32::WHITE)
+        );
+        let old_state = app.document.as_ref().unwrap().edit_state();
+        app.library_action(&ctx, LibraryAction::Open(next_path.clone()));
+        assert!(app.busy);
+        assert!(!app.project_session.saving);
+        let position = normal.vertices[0].pos + egui::vec2(40., 40.);
+        for pressed in [true, false] {
+            let events = vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            assert_eq!(
+                workspace_canvas(&mut app, &ctx, source.id(), events),
+                normal,
+                "Loading must not fade, blank, or shift the old image"
+            );
+            assert_eq!(app.document.as_ref().unwrap().edit_state(), old_state);
+            assert_eq!(app.project_path.as_ref(), Some(&old_path));
+        }
+        release.send(()).unwrap();
+        finish(&mut app, &ctx);
+        assert_eq!(app.project_path.as_ref(), Some(&next_path));
+        assert_eq!(
+            app.document.as_ref().unwrap().edit_state(),
+            target.edit_state()
+        );
+        let composition = app
+            .privacy_preview
+            .texture(&ctx, app.document.as_ref().unwrap())
+            .unwrap()
+            .expect("Prepared privacy pixels must be ready on the first frame");
+        let ready = ctx.input(|i| i.time) + 1.;
+        for (elapsed, old_alpha) in [(0., Some(255)), (0.06, Some(128)), (0.13, None)] {
+            let meshes = workspace_meshes(&mut app, &ctx, Some(ready + elapsed), vec![]);
+            let painted = meshes
+                .iter()
+                .find(|mesh| mesh.texture_id == composition.id())
+                .expect("the protected composition is painted from the first ready frame");
+            assert!(painted.vertices.iter().all(|v| v.color == Color32::WHITE));
+            assert!(
+                !meshes
+                    .iter()
+                    .any(|mesh| mesh.texture_id == app.last_texture.as_ref().unwrap().id()),
+                "the target's unprocessed source must never flash during a transition"
+            );
+            let previous = meshes.iter().find(|mesh| mesh.texture_id == source.id());
+            if let Some(alpha) = old_alpha {
+                let previous = previous.expect("old image dissolves over the prepared target");
+                assert_eq!(
+                    previous
+                        .vertices
+                        .iter()
+                        .map(|v| (v.pos, v.uv))
+                        .collect::<Vec<_>>(),
+                    normal
+                        .vertices
+                        .iter()
+                        .map(|v| (v.pos, v.uv))
+                        .collect::<Vec<_>>()
+                );
+                assert!(
+                    previous
+                        .vertices
+                        .iter()
+                        .all(|v| v.color.a().abs_diff(alpha) <= 1)
+                );
+            } else {
+                assert!(
+                    previous.is_none(),
+                    "old pixels are released at the end of the transition"
+                );
+            }
+        }
+        assert!(!app.has_unsaved_edits());
+        assert_eq!(app.settings.recent_files, [old_path, next_path]);
+    }
+
+    #[test]
+    fn opening_keeps_the_recent_strip_bright_and_failed_opens_restore_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut app, ctx) = app(dir.path());
+        app.guide_open = false;
+        app.view = View::Editor;
+        app.settings.recents_open = true;
+        let old = dir.path().join("old.myimage");
+        let next = dir.path().join("next.myimage");
+        for path in [&old, &next] {
+            document::save_project(app.document.as_ref().unwrap(), path).unwrap();
+        }
+        app.project_path = Some(old.clone());
+        app.settings.recent_files = vec![old.clone(), next];
+        let draw = |app: &mut MyImageApp| {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900., 700.))),
+                    ..Default::default()
+                },
+                |ctx| {
+                    app.recents_panel(ctx);
+                    egui::CentralPanel::default().show(ctx, |ui| app.workspace_ui(ui, ctx));
+                },
+            );
+            let thumbnails: Vec<_> = ctx
+                .tex_manager()
+                .read()
+                .allocated()
+                .filter(|(_, meta)| meta.name.starts_with("library-"))
+                .map(|(id, _)| *id)
+                .collect();
+            ctx.tessellate(output.shapes, output.pixels_per_point)
+                .into_iter()
+                .filter_map(|p| match p.primitive {
+                    egui::epaint::Primitive::Mesh(mesh)
+                        if thumbnails.contains(&mesh.texture_id) =>
+                    {
+                        Some(mesh)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while draw(&mut app).len() < 2 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let normal = draw(&mut app);
+        assert_eq!(normal.len(), 2);
+        assert!(
+            normal
+                .iter()
+                .all(|m| m.vertices.iter().all(|v| v.color == Color32::WHITE))
+        );
+        // Gate delivery so both the genuine waiting frame and the error path are exercised.
+        let (release, gate) = mpsc::channel();
+        let tx = app.work_tx.clone();
+        app.image_loader = Some(
+            crate::image_loading::Loader::start(move |path, result| {
+                if gate.recv().is_ok() {
+                    let _ = tx.send(WorkEvent::Prepared(path, result));
+                }
+            })
+            .unwrap(),
+        );
+        let broken = dir.path().join("broken.myimage");
+        std::fs::write(&broken, b"invalid project").unwrap();
+        let previous = app.document.as_ref().unwrap().edit_state();
+        app.begin_open(&ctx, broken, true);
+        assert!(app.busy && app.opening_image);
+        assert_eq!(
+            draw(&mut app),
+            normal,
+            "opening must not dim or reorder thumbnails"
+        );
+        release.send(()).unwrap();
+        finish(&mut app, &ctx);
+        assert!(!app.opening_image);
+        assert!(app.error.is_some());
+        assert_eq!(app.project_path, Some(old));
+        assert_eq!(app.document.as_ref().unwrap().edit_state(), previous);
+        assert_eq!(draw(&mut app), normal);
     }
 
     #[test]

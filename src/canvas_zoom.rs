@@ -13,6 +13,11 @@ pub fn remember(ui: &egui::Ui, salt: &str, image: Rect, viewport: Rect) {
     });
 }
 
+pub fn viewport(ctx: &egui::Context, salt: &str) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<Frame>(Id::new(salt).with("zoom-frame")))
+        .map(|frame| frame.viewport)
+}
+
 pub fn prepare(
     ui: &egui::Ui,
     salt: &str,

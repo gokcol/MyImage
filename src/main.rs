@@ -37,6 +37,7 @@ mod library_panel;
 mod magnify_ui;
 mod ocr;
 mod onboarding;
+mod open_transition;
 mod pdf_export;
 mod pointer_style;
 mod presets;

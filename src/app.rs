@@ -176,6 +176,8 @@ pub struct MyImageApp {
     selection: Option<SelectionSession>,
     scroll_session: Option<ScrollSession>,
     busy: bool,
+    opening_image: bool,
+    open_transition: crate::open_transition::OpenTransition,
     error: Option<String>,
     status: String,
     last_image: Option<Arc<image::RgbaImage>>,
@@ -314,6 +316,8 @@ impl MyImageApp {
             selection: None,
             scroll_session: None,
             busy: false,
+            opening_image: false,
+            open_transition: Default::default(),
             error,
             status: "Ready to edit".into(),
             last_image: None,
@@ -440,6 +444,7 @@ impl MyImageApp {
             return;
         }
         self.finish_edit();
+        self.open_transition.clear();
         self.source_textures.clear();
         self.save_as_panel.open = false;
         self.remember_window(ctx);
@@ -838,6 +843,8 @@ impl MyImageApp {
         match self.image_loader.as_ref().unwrap().open(path, side) {
             Ok(()) => {
                 self.busy = true;
+                self.opening_image = true;
+                self.open_transition.clear();
                 self.status = "Opening image…".into();
             }
             Err(error) => self.error = Some(error),
@@ -864,6 +871,8 @@ impl MyImageApp {
     }
 
     fn install_document_state(&mut self, document: Document, project_path: Option<PathBuf>) {
+        self.opening_image = false;
+        self.open_transition.clear();
         self.project_session = Default::default();
         self.last_image = Some(Arc::clone(&document.image));
         self.last_texture = None;
@@ -1283,6 +1292,8 @@ impl MyImageApp {
                 WorkEvent::CaptureFinished(output) => self.finish_capture_output(ctx, output),
                 WorkEvent::MissingOpen(path) => {
                     self.busy = false;
+                    self.opening_image = false;
+                    self.open_transition.clear();
                     self.settings.recent_files.retain(|p| p != &path);
                     self.library.files_removed(std::slice::from_ref(&path));
                     self.sync_library_references();
@@ -1298,6 +1309,7 @@ impl MyImageApp {
                 }
                 WorkEvent::Prepared(path, result) => {
                     self.busy = false;
+                    self.opening_image = false;
                     match result {
                         Ok(prepared) => {
                             let followed_trash =
@@ -1307,6 +1319,7 @@ impl MyImageApp {
                                 .is_some_and(|e| e.eq_ignore_ascii_case("snagx"));
                             let warnings = prepared.warnings;
                             let project_path = is_project_path(&path).then(|| path.clone());
+                            let previous = self.open_transition.take_loading();
                             self.install_document(prepared.document, project_path);
                             self.last_texture =
                                 Some(self.source_textures.get(ctx, prepared.source));
@@ -1318,6 +1331,8 @@ impl MyImageApp {
                                     composition,
                                 );
                             }
+                            self.open_transition
+                                .start(previous, self.document.as_ref().unwrap());
                             self.remember_opened_recent(path.clone());
                             self.last_path = Some(path);
                             self.view = View::Editor;
@@ -1336,6 +1351,7 @@ impl MyImageApp {
                         }
                         Err(error) => {
                             self.remaining_recents_after_trash = None;
+                            self.open_transition.clear();
                             self.error = Some(error);
                             self.status = "Could not open the file".into();
                         }
@@ -1347,6 +1363,7 @@ impl MyImageApp {
                 #[cfg(test)]
                 WorkEvent::Opened(path, _edit, result) => {
                     self.busy = false;
+                    self.opening_image = false;
                     match result {
                         Ok(document) => {
                             let project_path = is_project_path(&path).then(|| path.clone());
@@ -1828,10 +1845,19 @@ impl MyImageApp {
             && self.pending_action.is_none()
             && self.file_dialog.is_none()
             && !self.save_as_panel.open;
+        let animate_canvas = self.view == View::Editor
+            && self.document.is_some()
+            && unobscured
+            && !self.editor.has_modal();
+        if !animate_canvas {
+            self.open_transition.clear();
+        }
+        let paint_start =
+            (animate_canvas && self.opening_image).then(|| ui.painter().add(egui::Shape::Noop).0);
         ui.scope(|ui| {
-            if self.project_session.saving && unobscured {
-                // Saving blocks edits, but must not fade the image after every
-                // annotation change. Other busy states and dialogs still dim.
+            if (self.project_session.saving || self.opening_image) && unobscured {
+                // Keep the current image steady while saving or preparing its
+                // replacement. Input stays blocked; dialogs still dim the image.
                 ui.visuals_mut().disabled_alpha = 1.;
             }
             ui.add_enabled_ui(!self.busy && unobscured, |ui| match self.view {
@@ -1847,6 +1873,18 @@ impl MyImageApp {
                 }
             });
         });
+        if animate_canvas
+            && let Some(viewport) = crate::canvas_zoom::viewport(ctx, "annotation-canvas-scroll")
+        {
+            if let Some(start) = paint_start {
+                self.open_transition.capture_loading(ui, start, viewport);
+            } else if !self.busy && !self.editor.has_modal() {
+                self.open_transition
+                    .paint(ui, viewport, self.document.as_ref().unwrap());
+            } else {
+                self.open_transition.clear();
+            }
+        }
     }
 
     fn editor_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -2230,65 +2268,7 @@ impl eframe::App for MyImageApp {
                 });
             });
         });
-        if matches!(self.view, View::Home | View::Editor | View::Viewer) {
-            egui::TopBottomPanel::bottom("recents")
-                .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(4))
-                .show(ctx, |ui| {
-                    ui.spacing_mut().item_spacing.y = 3.;
-                    let unobscured = !self.guide_open
-                        && !self.about_open
-                        && !self.appearance_open
-                        && !self.recovery.prompt
-                        && self.pending_action.is_none()
-                        && self.file_dialog.is_none()
-                        && !self.save_as_panel.open
-                        && !self.editor.has_modal();
-                    let enabled = !self.busy && unobscured;
-                    if self.project_session.saving && unobscured {
-                        // Saving still blocks input, but should not flash the
-                        // entire thumbnail strip between normal and dimmed.
-                        ui.visuals_mut().disabled_alpha = 1.;
-                    }
-                    let was_open = self.settings.recents_open;
-                    let mut chosen = self.library.recents_header(
-                        ui,
-                        &mut self.settings.recents_open,
-                        enabled,
-                        |ui| {
-                            if self.view == View::Editor
-                                && let Some(document) = &mut self.document
-                            {
-                                ui.add_enabled_ui(enabled, |ui| {
-                                    self.editor.image_controls(ui, document, &mut self.history);
-                                });
-                            }
-                        },
-                    );
-                    if was_open != self.settings.recents_open {
-                        self.persist_settings();
-                    }
-                    if self.settings.recents_open {
-                        let dirty = self.has_unsaved_edits();
-                        let active = self.project_path.as_deref().or(self.last_path.as_deref());
-                        chosen = ui
-                            .add_enabled_ui(enabled, |ui| {
-                                self.library.recents_ui(
-                                    ui,
-                                    &self.settings.output_dir,
-                                    &self.settings.recent_files,
-                                    active,
-                                    dirty,
-                                )
-                            })
-                            .inner
-                            .or(chosen);
-                        self.sync_library_references();
-                    }
-                    if let Some(action) = chosen {
-                        self.library_action(ctx, action);
-                    }
-                });
-        }
+        self.recents_panel(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(error) = &self.error {

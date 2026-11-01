@@ -2,6 +2,68 @@
 use super::*;
 
 impl MyImageApp {
+    pub(super) fn recents_panel(&mut self, ctx: &egui::Context) {
+        if matches!(self.view, View::Home | View::Editor | View::Viewer) {
+            egui::TopBottomPanel::bottom("recents")
+                .frame(egui::Frame::NONE.fill(Color32::WHITE).inner_margin(4))
+                .show(ctx, |ui| {
+                    ui.spacing_mut().item_spacing.y = 3.;
+                    let unobscured = !self.guide_open
+                        && !self.about_open
+                        && !self.appearance_open
+                        && !self.recovery.prompt
+                        && self.pending_action.is_none()
+                        && self.file_dialog.is_none()
+                        && !self.save_as_panel.open
+                        && !self.editor.has_modal();
+                    let enabled = !self.busy && unobscured;
+                    if (self.project_session.saving || self.opening_image) && unobscured {
+                        // Thumbnail brightness stays stable across both autosaves
+                        // and project opens, while input remains blocked.
+                        ui.visuals_mut().disabled_alpha = 1.;
+                    }
+                    let was_open = self.settings.recents_open;
+                    let mut chosen = self.library.recents_header(
+                        ui,
+                        &mut self.settings.recents_open,
+                        enabled,
+                        |ui| {
+                            if self.view == View::Editor
+                                && let Some(document) = &mut self.document
+                            {
+                                ui.add_enabled_ui(enabled, |ui| {
+                                    self.editor.image_controls(ui, document, &mut self.history);
+                                });
+                            }
+                        },
+                    );
+                    if was_open != self.settings.recents_open {
+                        self.persist_settings();
+                    }
+                    if self.settings.recents_open {
+                        let dirty = self.has_unsaved_edits();
+                        let active = self.project_path.as_deref().or(self.last_path.as_deref());
+                        chosen = ui
+                            .add_enabled_ui(enabled, |ui| {
+                                self.library.recents_ui(
+                                    ui,
+                                    &self.settings.output_dir,
+                                    &self.settings.recent_files,
+                                    active,
+                                    dirty,
+                                )
+                            })
+                            .inner
+                            .or(chosen);
+                        self.sync_library_references();
+                    }
+                    if let Some(action) = chosen {
+                        self.library_action(ctx, action);
+                    }
+                });
+        }
+    }
+
     pub(super) fn recents_after_trash(
         &self,
         active: &std::path::Path,
