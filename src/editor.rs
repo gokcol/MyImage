@@ -299,6 +299,7 @@ pub struct EditorState {
     selected: Option<usize>,
     additional: Vec<usize>,
     focus_canvas: bool,
+    canvas_focus_ids: Option<[egui::Id; 2]>,
     object_press: bool,
     snapping: bool,
     snap_guides: Vec<annotation_layout::SnapGuide>,
@@ -373,6 +374,7 @@ impl Default for EditorState {
             selected: None,
             additional: Vec::new(),
             focus_canvas: false,
+            canvas_focus_ids: None,
             object_press: false,
             snapping: true,
             snap_guides: Vec::new(),
@@ -473,6 +475,23 @@ impl EditorState {
             && self.area_drag.is_none()
             && !self.extra_tools.busy()
             && !self.fill_tool.busy()
+    }
+
+    /// Empty canvas arrow keys may browse Recents; editable controls and active
+    /// selections retain their own keyboard behavior.
+    pub fn can_browse_recents(&self, ctx: &egui::Context, document: &Document) -> bool {
+        let focused = ctx.memory(|memory| memory.focused());
+        let canvas_focus =
+            focused.is_none_or(|id| self.canvas_focus_ids.is_some_and(|ids| ids.contains(&id)));
+        canvas_focus
+            && self.autosave_ready()
+            && !self.has_modal()
+            && self.selected_indices(document).is_empty()
+            && self.area_bounds(document).is_none()
+            && self.crop.is_none()
+            && !self.precision_active()
+            && self.clipboard_job.is_none()
+            && !self.property_interacting
     }
 
     pub fn has_modal(&self) -> bool {
@@ -1372,6 +1391,19 @@ impl EditorState {
                     ui.id().with("annotation-canvas"),
                     Sense::click_and_drag(),
                 );
+                self.canvas_focus_ids = Some([response.id, margin_response.id]);
+                for id in [response.id, margin_response.id] {
+                    ui.memory_mut(|memory| {
+                        memory.set_focus_lock_filter(
+                            id,
+                            egui::EventFilter {
+                                horizontal_arrows: true,
+                                vertical_arrows: true,
+                                ..Default::default()
+                            },
+                        )
+                    });
+                }
                 if self.focus_canvas {
                     response.request_focus();
                     self.focus_canvas = false;

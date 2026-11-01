@@ -16,6 +16,9 @@ impl MyImageApp {
                         && self.file_dialog.is_none()
                         && !self.save_as_panel.open
                         && !self.editor.has_modal();
+                    if unobscured {
+                        self.recents_keyboard(ctx);
+                    }
                     let enabled = !self.busy && unobscured;
                     if (self.project_session.saving || self.opening_image) && unobscured {
                         // Thumbnail brightness stays stable across both autosaves
@@ -61,6 +64,66 @@ impl MyImageApp {
                         self.library_action(ctx, action);
                     }
                 });
+        }
+    }
+
+    fn recents_keyboard(&mut self, ctx: &egui::Context) {
+        if self.busy
+            || !self.settings.recents_open
+            || !matches!(self.view, View::Editor | View::Viewer)
+            || self.guide_open
+            || self.about_open
+            || self.appearance_open
+            || self.recovery.prompt
+            || self.pending_action.is_some()
+            || self.file_dialog.is_some()
+            || self.save_as_panel.open
+            || self.editor.has_modal()
+            || !self.editor.autosave_ready()
+            || egui::Popup::is_any_open(ctx)
+            || ctx.input(|input| !input.focused || input.pointer.any_down())
+        {
+            return;
+        }
+        let Some(document) = &self.document else {
+            return;
+        };
+        let keyboard_scope = self.library.recents_have_focus(ctx)
+            || if self.view == View::Editor {
+                self.editor.can_browse_recents(ctx, document)
+            } else {
+                ctx.memory(|memory| memory.focused().is_none())
+            };
+        if !keyboard_scope {
+            return;
+        }
+        let Some(key) = ctx.input(|input| {
+            input.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key: key @ (egui::Key::ArrowLeft | egui::Key::ArrowRight),
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.is_none() => Some(*key),
+                _ => None,
+            })
+        }) else {
+            return;
+        };
+        let visible = self.library.recent_paths(&self.settings.recent_files);
+        let active = self.project_path.as_ref().or(self.last_path.as_ref());
+        let Some(index) = visible.iter().position(|path| Some(path) == active) else {
+            return;
+        };
+        ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
+        let next = if key == egui::Key::ArrowRight {
+            visible.get(index + 1)
+        } else {
+            index.checked_sub(1).and_then(|index| visible.get(index))
+        };
+        if let Some(path) = next.cloned() {
+            self.library.navigate_recent_to(path.clone());
+            self.library_action(ctx, LibraryAction::Open(path));
         }
     }
 
@@ -147,6 +210,284 @@ mod tests {
             app.work_tx.send(event).unwrap();
             app.handle_events(ctx);
         }
+    }
+
+    fn strip_app() -> (tempfile::TempDir, MyImageApp, egui::Context, Vec<PathBuf>) {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = (0..12)
+            .map(|i| dir.path().join(format!("Image-{i:02}.myimage")))
+            .collect();
+        for path in &paths {
+            document::save_project(&document(), path).unwrap();
+        }
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.settings.output_dir = dir.path().to_owned();
+        app.settings.recent_files = paths.clone();
+        app.settings.recents_open = true;
+        app.guide_open = false;
+        app.view = View::Editor;
+        app.install_document_state(
+            document::load_project(&paths[0]).unwrap(),
+            Some(paths[0].clone()),
+        );
+        (dir, app, ctx, paths)
+    }
+
+    fn strip_frame(
+        app: &mut MyImageApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        let time = ctx.input(|input| input.time) + 0.2;
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(900., 700.))),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                app.recents_panel(ctx);
+                egui::CentralPanel::default().show(ctx, |ui| app.workspace_ui(ui, ctx));
+            },
+        )
+    }
+
+    fn arrow(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+        [true, false]
+            .into_iter()
+            .map(|pressed| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers,
+            })
+            .collect()
+    }
+
+    fn strip_label(output: &egui::FullOutput, path: &std::path::Path) -> Option<Pos2> {
+        let name = path.file_name().unwrap().to_string_lossy();
+        output.shapes.iter().find_map(|entry| {
+            if let egui::Shape::Text(text) = &entry.shape {
+                let center = text.pos + text.galley.size() * 0.5;
+                (text.galley.job.text == name && entry.clip_rect.contains(center)).then_some(center)
+            } else {
+                None
+            }
+        })
+    }
+
+    fn click_strip_point(app: &mut MyImageApp, ctx: &egui::Context, pos: Pos2) {
+        for pressed in [true, false] {
+            strip_frame(
+                app,
+                ctx,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn strip_arrows_open_neighbors_keep_order_and_scroll_without_wrapping() {
+        let (_dir, mut app, ctx, paths) = strip_app();
+        app.settings.library.hidden_recents.insert(paths[1].clone());
+        let visible: Vec<_> = paths.iter().filter(|p| **p != paths[1]).cloned().collect();
+        app.library = LibraryPanel::with_preferences(app.settings.library.clone());
+        for _ in 0..3 {
+            strip_frame(&mut app, &ctx, vec![]);
+        }
+        let output = strip_frame(&mut app, &ctx, vec![]);
+        click_strip_point(&mut app, &ctx, strip_label(&output, &paths[0]).unwrap());
+        strip_frame(&mut app, &ctx, vec![]);
+        assert!(app.library.recents_have_focus(&ctx));
+        strip_frame(
+            &mut app,
+            &ctx,
+            arrow(egui::Key::ArrowLeft, egui::Modifiers::NONE),
+        );
+        assert!(!app.busy, "Left stays at the first thumbnail");
+        for path in &paths[2..] {
+            strip_frame(
+                &mut app,
+                &ctx,
+                arrow(egui::Key::ArrowRight, egui::Modifiers::NONE),
+            );
+            assert!(app.busy && app.opening_image);
+            finish_recent_open(&mut app, &ctx);
+            for _ in 0..3 {
+                strip_frame(&mut app, &ctx, vec![]);
+            }
+            let output = strip_frame(&mut app, &ctx, vec![]);
+            assert_eq!(app.project_path.as_ref(), Some(path));
+            assert!(
+                strip_label(&output, path).is_some(),
+                "active thumbnail must scroll into view: {path:?}"
+            );
+            assert!(app.library.recents_have_focus(&ctx));
+            assert_eq!(
+                app.library.recent_paths(&app.settings.recent_files),
+                visible
+            );
+        }
+        strip_frame(
+            &mut app,
+            &ctx,
+            arrow(egui::Key::ArrowRight, egui::Modifiers::NONE),
+        );
+        assert!(!app.busy, "Right stays at the last thumbnail");
+        strip_frame(
+            &mut app,
+            &ctx,
+            arrow(egui::Key::ArrowLeft, egui::Modifiers::NONE),
+        );
+        finish_recent_open(&mut app, &ctx);
+        assert_eq!(app.project_path.as_ref(), Some(&paths[10]));
+        assert_eq!(
+            app.library.recent_paths(&app.settings.recent_files),
+            visible
+        );
+    }
+
+    #[test]
+    fn strip_arrows_save_edits_before_opening_and_leave_other_key_scopes_alone() {
+        let (_dir, mut app, ctx, paths) = strip_app();
+        for _ in 0..3 {
+            strip_frame(&mut app, &ctx, vec![]);
+        }
+        let output = strip_frame(&mut app, &ctx, vec![]);
+        click_strip_point(&mut app, &ctx, strip_label(&output, &paths[0]).unwrap());
+        let doc = app.document.as_mut().unwrap();
+        let before = doc.edit_state();
+        doc.geometry.flip_horizontal = true;
+        app.history.commit(before, doc);
+        strip_frame(
+            &mut app,
+            &ctx,
+            arrow(egui::Key::ArrowRight, egui::Modifiers::NONE),
+        );
+        assert!(
+            app.project_session.saving && app.busy,
+            "save before replacing the edited project"
+        );
+        assert_eq!(app.project_path.as_ref(), Some(&paths[0]));
+        finish_recent_open(&mut app, &ctx);
+        assert_eq!(app.project_path.as_ref(), Some(&paths[1]));
+        assert!(
+            document::load_project(&paths[0])
+                .unwrap()
+                .geometry
+                .flip_horizontal
+        );
+        assert!(!app.has_unsaved_edits());
+        strip_frame(&mut app, &ctx, vec![]);
+        for modifiers in [
+            egui::Modifiers::SHIFT,
+            egui::Modifiers::CTRL,
+            egui::Modifiers::ALT,
+            egui::Modifiers::COMMAND,
+        ] {
+            strip_frame(&mut app, &ctx, arrow(egui::Key::ArrowRight, modifiers));
+            assert!(!app.busy);
+            assert_eq!(app.project_path.as_ref(), Some(&paths[1]));
+        }
+        for blocked in ["closed", "busy", "dialog", "control", "popup"] {
+            app.settings.recents_open = blocked != "closed";
+            app.busy = blocked == "busy";
+            app.about_open = blocked == "dialog";
+            if blocked == "control" {
+                ctx.memory_mut(|m| m.request_focus(egui::Id::new("focused-editor-control")));
+            }
+            if blocked == "popup" {
+                egui::Popup::open_id(&ctx, egui::Id::new("open-strip-menu"));
+            }
+            strip_frame(
+                &mut app,
+                &ctx,
+                arrow(egui::Key::ArrowRight, egui::Modifiers::NONE),
+            );
+            assert!(!app.opening_image, "no project navigation while {blocked}");
+            assert_eq!(app.project_path.as_ref(), Some(&paths[1]));
+            app.busy = false;
+            app.about_open = false;
+            app.settings.recents_open = true;
+            egui::Popup::close_all(&ctx);
+            if let Some(id) = ctx.memory(|m| m.focused()) {
+                ctx.memory_mut(|m| m.surrender_focus(id));
+            }
+        }
+    }
+
+    #[test]
+    fn strip_arrows_preserve_annotation_nudging_and_browse_from_an_empty_canvas() {
+        let (_dir, mut app, ctx, paths) = strip_app();
+        let mut doc = document();
+        doc.annotations.push(crate::markup_tests::object(
+            document::AnnotationKind::Arrow,
+            [20., 20.],
+            [80., 60.],
+        ));
+        document::save_project(&doc, &paths[0]).unwrap();
+        app.install_document_state(doc, Some(paths[0].clone()));
+        for _ in 0..3 {
+            strip_frame(&mut app, &ctx, vec![]);
+        }
+        let output = strip_frame(&mut app, &ctx, vec![]);
+        let texture = app.last_texture.as_ref().unwrap().id();
+        let image_rect = ctx
+            .tessellate(output.shapes, output.pixels_per_point)
+            .into_iter()
+            .find_map(|p| match p.primitive {
+                egui::epaint::Primitive::Mesh(mesh) if mesh.texture_id == texture => {
+                    Some(mesh.calc_bounds())
+                }
+                _ => None,
+            })
+            .unwrap();
+        click_strip_point(&mut app, &ctx, image_rect.center());
+        let before = app.document.as_ref().unwrap().annotations[0].clone();
+        strip_frame(
+            &mut app,
+            &ctx,
+            arrow(egui::Key::ArrowRight, egui::Modifiers::NONE),
+        );
+        assert!(
+            !app.busy,
+            "selected annotations must nudge instead of opening a file"
+        );
+        let after = &app.document.as_ref().unwrap().annotations[0];
+        assert_eq!(after.start.x, before.start.x + 1.);
+        assert_eq!(after.end.x, before.end.x + 1.);
+        assert_eq!(app.project_path.as_ref(), Some(&paths[0]));
+        // Clicking empty canvas clears the selection while keeping canvas focus.
+        click_strip_point(
+            &mut app,
+            &ctx,
+            image_rect.min + image_rect.size() * egui::vec2(0.1, 0.8),
+        );
+        strip_frame(
+            &mut app,
+            &ctx,
+            arrow(egui::Key::ArrowRight, egui::Modifiers::NONE),
+        );
+        assert!(app.busy);
+        finish_recent_open(&mut app, &ctx);
+        assert_eq!(app.project_path.as_ref(), Some(&paths[1]));
+        assert_eq!(
+            document::load_project(&paths[0]).unwrap().annotations[0]
+                .start
+                .x,
+            before.start.x + 1.
+        );
     }
 
     #[test]

@@ -185,6 +185,7 @@ pub struct LibraryPanel {
     selection: FileSelection,
     marquee: Option<selection::Marquee>,
     recent_selection: FileSelection,
+    recent_scroll_to: Option<PathBuf>,
     pending: HashSet<PathBuf>,
     outdated_previews: HashSet<PathBuf>,
     preserve_scan_scroll: bool,
@@ -220,6 +221,7 @@ impl Default for LibraryPanel {
             selection: FileSelection::default(),
             marquee: None,
             recent_selection: FileSelection::default(),
+            recent_scroll_to: None,
             pending: HashSet::new(),
             outdated_previews: HashSet::new(),
             preserve_scan_scroll: false,
@@ -242,6 +244,17 @@ impl Drop for LibraryPanel {
 }
 
 impl LibraryPanel {
+    pub fn recents_have_focus(&self, ctx: &egui::Context) -> bool {
+        self.recent_selection
+            .focus
+            .is_some_and(|id| ctx.memory(|memory| memory.has_focus(id)))
+    }
+
+    pub fn navigate_recent_to(&mut self, path: PathBuf) {
+        self.recent_selection.click(&path, &[], false, false);
+        self.recent_scroll_to = Some(path);
+    }
+
     pub fn recent_paths(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
         self.recent_entries(paths)
             .into_iter()
@@ -344,6 +357,7 @@ impl LibraryPanel {
                     ui.set_max_width(260.);
                     ui.label("Click a thumbnail to open it. Opening keeps its position; editing or saving moves it to the front.");
                     ui.label("Ctrl/⌘-click to select several, or Shift-click for a range. Right-click for file actions.");
+                    ui.small("Use ← / → to open the previous or next project. Selected annotations and editing controls keep their arrow keys.");
                     ui.small("Scroll sideways for more. Hover a thumbnail for its full name and path.");
                 });
             });
@@ -382,6 +396,21 @@ impl LibraryPanel {
                     for entry in &entries {
                         let (rect, response) =
                             ui.allocate_exact_size(Vec2::new(100., 64.), egui::Sense::click());
+                        if self.recent_scroll_to.as_ref() == Some(&entry.path) && ui.is_enabled() {
+                            ui.scroll_to_rect(rect, None);
+                            response.request_focus();
+                            self.recent_selection.focus = Some(response.id);
+                            self.recent_scroll_to = None;
+                        }
+                        ui.memory_mut(|memory| {
+                            memory.set_focus_lock_filter(
+                                response.id,
+                                egui::EventFilter {
+                                    horizontal_arrows: true,
+                                    ..Default::default()
+                                },
+                            )
+                        });
                         if !ui.is_rect_visible(rect) {
                             continue;
                         }
