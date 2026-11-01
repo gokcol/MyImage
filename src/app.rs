@@ -2168,7 +2168,7 @@ impl eframe::App for MyImageApp {
                                     }
                                 }
                                 if matches!(self.view, View::Viewer | View::Editor)
-                                    && ui.add_enabled_ui(has_doc, |ui| appearance::icon_button(ui, "Print…", Icon::Print)).inner
+                                    && ui.add_enabled_ui(has_doc, |ui| appearance::document_icon_button(ui, "Print…", Icon::Print)).inner
                                         .on_hover_text("Print the finished image · ⌘P / Ctrl+P")
                                         .clicked()
                                 {

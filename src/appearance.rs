@@ -1150,6 +1150,26 @@ pub fn icon_button(ui: &mut egui::Ui, label: &str, kind: Icon) -> egui::Response
     response.on_hover_text(label)
 }
 
+/// Icon-only document action, aligned with the neighboring 30-point actions.
+pub fn document_icon_button(ui: &mut egui::Ui, label: &str, kind: Icon) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(30.), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    if response.hovered() || response.has_focus() || response.is_pointer_button_down_on() {
+        ui.painter()
+            .rect_filled(rect, 6, ui.style().interact(&response).bg_fill);
+    }
+    icon(
+        ui.painter(),
+        rect.center(),
+        kind,
+        palette(ui.ctx()).ink,
+        18.,
+    );
+    response.on_hover_text(label)
+}
+
 /// Block interaction during file I/O without flashing the surrounding UI.
 /// Restore only this scope's opacity: individually unavailable child controls
 /// still use their usual disabled appearance, and dialogs can still dim it.
