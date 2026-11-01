@@ -86,6 +86,8 @@ mod project_session;
 mod recent_history;
 #[path = "recovery_ui.rs"]
 mod recovery_ui;
+#[path = "save_dialog.rs"]
+mod save_dialog;
 use file_browser::FileDialog;
 
 #[derive(Clone)]
@@ -161,6 +163,7 @@ pub struct MyImageApp {
     quit_after_work: bool,
     pending_action: Option<PendingAction>,
     file_dialog: Option<FileDialog>,
+    save_dialog: Option<save_dialog::PendingSave>,
     after_save: Option<PendingAction>,
     allow_discard: bool,
     displays: Vec<DisplayInfo>,
@@ -297,6 +300,7 @@ impl MyImageApp {
             quit_after_work: false,
             pending_action: None,
             file_dialog: None,
+            save_dialog: None,
             after_save: None,
             allow_discard: false,
             displays: Vec::new(),
@@ -922,23 +926,18 @@ impl MyImageApp {
                 .and_then(|p| p.file_stem())
                 .and_then(|s| s.to_str())
                 .unwrap_or(&self.draft_title);
-            let Some(path) = rfd::FileDialog::new()
+            let dialog = rfd::AsyncFileDialog::new()
                 .set_directory(directory)
                 .set_file_name(format!("{stem}.myimage"))
-                .add_filter("Editable MyImage project", &["myimage"])
-                .save_file()
-            else {
-                return false;
-            };
-            match checked_save_path(path, "myimage") {
-                Ok(path) => path,
-                Err(error) => {
-                    self.error = Some(error);
-                    return false;
-                }
-            }
+                .add_filter("Editable MyImage project", &["myimage"]);
+            self.choose_save_destination(ctx, dialog, save_dialog::SaveKind::Project);
+            return true;
         };
-        let document = self.document.as_ref().unwrap().clone();
+        self.write_project(ctx, path, self.document.as_ref().unwrap().clone());
+        true
+    }
+
+    fn write_project(&mut self, ctx: &egui::Context, path: PathBuf, document: Document) {
         let tx = self.work_tx.clone();
         let ctx = ctx.clone();
         self.project_session.saving = true;
@@ -949,7 +948,6 @@ impl MyImageApp {
             let _ = tx.send(WorkEvent::ProjectSaved(path, document.edit_state(), result));
             ctx.request_repaint();
         });
-        true
     }
 
     fn begin_save_as(&mut self) {
@@ -986,33 +984,12 @@ impl MyImageApp {
             .and_then(|p| p.file_stem())
             .and_then(|s| s.to_str())
             .unwrap_or("Untitled");
-        let Some(path) = rfd::FileDialog::new()
+        let dialog = rfd::AsyncFileDialog::new()
             .set_title(format!("Save As {}", format.label()))
             .set_directory(directory)
             .set_file_name(format!("{stem}.{}", format.extension()))
-            .add_filter(format.label(), format.extensions())
-            .save_file()
-        else {
-            return;
-        };
-        let path = match export::checked_export_path(path, format) {
-            Ok(path) => path,
-            Err(error) => {
-                self.save_as_panel.error = Some(error);
-                return;
-            }
-        };
-        let document = self.document.as_ref().unwrap().clone();
-        let tx = self.work_tx.clone();
-        let ctx = ctx.clone();
-        self.save_as_panel.open = false;
-        self.busy = true;
-        self.status = format!("Saving {} copy…", format.label());
-        std::thread::spawn(move || {
-            let result = export::save(&document, &path, options);
-            let _ = tx.send(WorkEvent::Exported(path, format, result));
-            ctx.request_repaint();
-        });
+            .add_filter(format.label(), format.extensions());
+        self.choose_save_destination(ctx, dialog, save_dialog::SaveKind::Image(options));
     }
 
     fn perform_action(&mut self, ctx: &egui::Context, action: PendingAction, discard: bool) {
@@ -1031,6 +1008,7 @@ impl MyImageApp {
     }
 
     fn handle_events(&mut self, ctx: &egui::Context) {
+        self.poll_save_destination(ctx);
         while let Ok(event) = self.desktop_rx.try_recv() {
             match event {
                 DesktopEvent::Capture => self.begin_capture(ctx),

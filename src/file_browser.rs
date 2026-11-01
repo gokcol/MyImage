@@ -10,7 +10,10 @@ pub(super) enum FileDialog {
         destination: PathBuf,
         move_existing: bool,
     },
-    Trash(Vec<PathBuf>),
+    Trash {
+        paths: Vec<PathBuf>,
+        skip_confirmation: bool,
+    },
     Rename {
         path: PathBuf,
         name: String,
@@ -128,7 +131,16 @@ impl MyImageApp {
             LibraryAction::Open(p) => self.open_path(ctx, p, true),
             LibraryAction::Copy(path) => self.copy_library_image(ctx, path),
             LibraryAction::Storage => self.file_dialog = Some(FileDialog::Storage),
-            LibraryAction::Trash(paths) => self.file_dialog = Some(FileDialog::Trash(paths)),
+            LibraryAction::Trash(paths) => {
+                if self.settings.confirm_trash {
+                    self.file_dialog = Some(FileDialog::Trash {
+                        paths,
+                        skip_confirmation: false,
+                    });
+                } else {
+                    self.start_file_operation(ctx, Operation::Trash(paths));
+                }
+            }
             LibraryAction::Duplicate(paths) => {
                 self.start_file_operation(ctx, Operation::Duplicate(paths))
             }
@@ -235,8 +247,13 @@ impl MyImageApp {
         self.settings
             .recent_files
             .retain(|p| !result.removed.contains(p) && !result.missing.contains(p));
-        self.library.forget_paths(&result.removed);
-        self.library.forget_paths(&result.missing);
+        let removed: Vec<_> = result
+            .removed
+            .iter()
+            .chain(&result.missing)
+            .cloned()
+            .collect();
+        self.library.files_removed(&removed);
         for (old, new) in &result.renamed {
             for target in self.settings.project_sources.values_mut() {
                 if target == old {
@@ -263,10 +280,12 @@ impl MyImageApp {
             self.settings.library = p;
         }
         self.persist_settings();
-        if let Some(loader) = &self.image_loader {
-            loader.clear();
+        if !result.created.is_empty() || !result.renamed.is_empty() {
+            if let Some(loader) = &self.image_loader {
+                loader.clear();
+            }
+            self.library.refresh();
         }
-        self.library.refresh();
         self.status = if !result.removed.is_empty() {
             format!("Moved {} file(s) to Trash", result.removed.len())
         } else if !result.created.is_empty() {
@@ -291,6 +310,7 @@ impl MyImageApp {
         };
         let mut close = false;
         let mut operation = None;
+        let mut confirm_trash = None;
         let mut choose_storage = false;
         let mut storage_change = None;
         let (title, icon) = match &dialog {
@@ -299,7 +319,7 @@ impl MyImageApp {
             FileDialog::ChangeStorage { .. } => {
                 ("Change storage folder".to_owned(), Icon::OpenProject)
             }
-            FileDialog::Trash(paths) => (
+            FileDialog::Trash { paths, .. } => (
                 format!("Move {} file(s) to Trash?", paths.len()),
                 Icon::Trash,
             ),
@@ -365,14 +385,21 @@ impl MyImageApp {
                         }
                     });
                 }
-                FileDialog::Trash(paths) => {
+                FileDialog::Trash { paths, skip_confirmation } => {
 
                     ui.label("You can restore them from your system Trash or Recycle Bin. The selected projects, their embedded images and edits, and any linked legacy captures in MyImage storage will be moved.");
                     egui::ScrollArea::vertical().max_height(180.).show(ui,|ui| {for p in paths.iter() {ui.label(p.file_name().unwrap_or_default().to_string_lossy());}});
                     ui.add_space(8.);
+                    ui.checkbox(skip_confirmation, "Don’t ask again");
+                    ui.weak("You can turn Trash confirmations back on in Settings.");
+                    ui.add_space(8.);
                     ui.horizontal_wrapped(|ui| {
                         if dialogs::secondary(ui, "Cancel", DialogIcon::Close).clicked() {close=true;}
-                        if dialogs::danger(ui, "Move to Trash", DialogIcon::Trash).clicked() {operation=Some(Operation::Trash(paths.clone()));close=true;}
+                        if dialogs::danger(ui, "Move to Trash", DialogIcon::Trash).clicked() {
+                            confirm_trash = Some(!*skip_confirmation);
+                            operation=Some(Operation::Trash(paths.clone()));
+                            close=true;
+                        }
                     });
                 }
                 FileDialog::Rename{path,name,error} => {
@@ -421,8 +448,113 @@ impl MyImageApp {
         if let Some((destination, move_existing)) = storage_change {
             self.begin_storage_change(ctx, destination, move_existing);
         }
+        if let Some(confirm) = confirm_trash
+            && self.settings.confirm_trash != confirm
+        {
+            self.settings.confirm_trash = confirm;
+            self.persist_settings();
+        }
         if let Some(op) = operation {
             self.start_file_operation(ctx, op);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(
+        app: &mut MyImageApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1000., 800.))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                app.file_dialog_ui(ctx);
+                app.appearance_ui(ctx);
+            },
+        )
+    }
+
+    fn click(app: &mut MyImageApp, ctx: &egui::Context, label: &str) {
+        for _ in 0..3 {
+            frame(app, ctx, vec![]);
+        }
+        let output = frame(app, ctx, vec![]);
+        let position = output
+            .shapes
+            .iter()
+            .find_map(|shape| {
+                if let egui::Shape::Text(text) = &shape.shape {
+                    (text.galley.job.text == label)
+                        .then(|| Rect::from_min_size(text.pos, text.galley.size()).center())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| panic!("Missing {label}"));
+        for pressed in [true, false] {
+            frame(
+                app,
+                ctx,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn trash_checkbox_commits_only_on_confirm_and_settings_can_restore_the_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        // Missing paths exercise the worker without moving any real files to Trash.
+        let missing = dir.path().join("already-removed.myimage");
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.library_action(&ctx, LibraryAction::Trash(vec![missing.clone()]));
+        click(&mut app, &ctx, "Don’t ask again");
+        assert!(app.settings.confirm_trash);
+        click(&mut app, &ctx, "Cancel");
+        assert!(app.settings.confirm_trash);
+        assert!(app.file_dialog.is_none());
+        assert!(!app.busy);
+
+        app.library_action(&ctx, LibraryAction::Trash(vec![missing.clone()]));
+        click(&mut app, &ctx, "Don’t ask again");
+        click(&mut app, &ctx, "Move to Trash");
+        assert!(!app.settings.confirm_trash);
+        assert!(app.file_dialog.is_none());
+        let WorkEvent::Files(result) = app.work_rx.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("Expected completed file operation");
+        };
+        assert_eq!(result.missing.as_slice(), std::slice::from_ref(&missing));
+        app.file_operation_finished(result);
+
+        app.library_action(&ctx, LibraryAction::Trash(vec![missing.clone()]));
+        assert!(app.file_dialog.is_none());
+        let WorkEvent::Files(result) = app.work_rx.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("Expected operation without confirmation");
+        };
+        app.file_operation_finished(result);
+        app.appearance_open = true;
+        click(&mut app, &ctx, "Ask before moving files to Trash");
+        assert!(app.settings.confirm_trash);
+        app.appearance_open = false;
+        app.library_action(&ctx, LibraryAction::Trash(vec![missing]));
+        assert!(matches!(app.file_dialog, Some(FileDialog::Trash { .. })));
     }
 }

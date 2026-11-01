@@ -527,6 +527,34 @@ impl LibraryPanel {
         self.warnings.clear();
     }
 
+    /// Remove known files without blanking the rest of the strip or resetting
+    /// its scroll position. Discard queued pre-delete work so it cannot restore
+    /// deleted entries or thumbnails; only restart a scan if one was in flight.
+    pub fn files_removed(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        self.cancel_marquee();
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.needs_scan |= self.scanning;
+        self.scanning = false;
+        self.pending.clear();
+        self.preserve_scan_scroll = true;
+        self.forget_paths(paths);
+        self.entries.retain(|entry| !paths.contains(&entry.path));
+        for path in paths {
+            self.checked_paths.remove(path);
+            self.outdated_previews.remove(path);
+            if let Some(preview) = self.previews.remove(path) {
+                self.preview_bytes -= preview.bytes;
+            }
+        }
+        let reset_scroll = self.reset_scroll;
+        self.filter_dirty = true;
+        self.update_filter();
+        self.reset_scroll = reset_scroll;
+    }
+
     /// A completed save changes one preview, not every visible library item.
     /// Keep the previous thumbnail on screen while its replacement is prepared.
     pub fn file_saved(&mut self, path: &Path) {
@@ -1035,6 +1063,103 @@ mod tests {
         match &panel.previews[path].preview {
             Preview::Ready { texture, .. } => texture.id(),
             Preview::Failed(error) => panic!("Expected a cached thumbnail: {error}"),
+        }
+    }
+
+    #[test]
+    fn trash_keeps_other_thumbnails_filters_and_scroll_and_rejects_stale_replies() {
+        let ctx = egui::Context::default();
+        for scanning in [false, true] {
+            let mut panel = LibraryPanel::default();
+            let removed = entry("removed.myimage", 2026, 10, 17);
+            let retained = entry("retained.myimage", 2026, 10, 17);
+            let other_day = entry("other-day.myimage", 2026, 10, 16);
+            panel.entries = vec![removed.clone(), retained.clone(), other_day.clone()];
+            panel.filter = DateFilter::Day(retained.date);
+            panel.update_filter();
+            panel.reset_scroll = false;
+            panel.needs_scan = false;
+            panel.scanning = scanning;
+            panel
+                .selection
+                .paths
+                .extend([removed.path.clone(), retained.path.clone()]);
+            panel
+                .recent_selection
+                .paths
+                .extend([removed.path.clone(), other_day.path.clone()]);
+            panel.preferences.favorites.insert(removed.path.clone());
+            cached_texture(&mut panel, &ctx, &removed.path);
+            let texture = cached_texture(&mut panel, &ctx, &retained.path);
+            let other_texture = cached_texture(&mut panel, &ctx, &other_day.path);
+            let (requests, _receiver) = mpsc::sync_channel(MAX_PENDING + 1);
+            let (sender, replies) = mpsc::channel();
+            panel.worker = Some(Worker { requests, replies });
+            let old_generation = panel.generation.load(Ordering::Relaxed);
+            panel.pending.insert(removed.path.clone());
+            let stale_entries = panel.entries.clone();
+            panel.files_removed(std::slice::from_ref(&removed.path));
+            assert_eq!(panel.needs_scan, scanning);
+            assert!(!panel.scanning);
+            assert!(panel.pending.is_empty());
+            assert_eq!(panel.entries, [retained.clone(), other_day.clone()]);
+            assert_eq!(panel.filtered, [0]);
+            assert_eq!(panel.filter, DateFilter::Day(retained.date));
+            assert!(!panel.reset_scroll);
+            assert_eq!(
+                panel.selection.list().as_slice(),
+                std::slice::from_ref(&retained.path)
+            );
+            assert_eq!(
+                panel.recent_selection.list().as_slice(),
+                std::slice::from_ref(&other_day.path)
+            );
+            assert!(!panel.preferences.favorites.contains(&removed.path));
+            assert!(!panel.previews.contains_key(&removed.path));
+            assert_eq!(panel.preview_bytes, 128);
+            assert_eq!(texture_id(&panel, &retained.path), texture);
+            assert_eq!(texture_id(&panel, &other_day.path), other_texture);
+            assert_eq!(
+                panel.recent_paths(&[]),
+                [retained.path.clone(), other_day.path.clone()]
+            );
+            sender
+                .send(Reply::Scan(
+                    old_generation,
+                    Ok(LibraryIndex {
+                        entries: stale_entries,
+                        warnings: Vec::new(),
+                    }),
+                ))
+                .unwrap();
+            sender
+                .send(Reply::Thumbnail(
+                    old_generation,
+                    removed.path.clone(),
+                    Ok(PreparedThumbnail {
+                        image: egui::ColorImage::filled([4, 4], Color32::RED),
+                        original_size: [64, 64],
+                    }),
+                ))
+                .unwrap();
+            panel.receive(&ctx);
+            assert_eq!(panel.entries, [retained.clone(), other_day.clone()]);
+            assert!(!panel.previews.contains_key(&removed.path));
+            assert_eq!(texture_id(&panel, &retained.path), texture);
+            if scanning {
+                sender
+                    .send(Reply::Scan(
+                        panel.generation.load(Ordering::Relaxed),
+                        Ok(LibraryIndex {
+                            entries: vec![retained.clone(), other_day.clone()],
+                            warnings: Vec::new(),
+                        }),
+                    ))
+                    .unwrap();
+                panel.receive(&ctx);
+                assert!(!panel.reset_scroll);
+                assert_eq!(panel.filtered, [0]);
+            }
         }
     }
 

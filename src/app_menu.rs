@@ -280,6 +280,7 @@ impl MyImageApp {
         let mut finish = self.settings.gui_finish;
         let mut icon_style = self.settings.icon_style;
         let mut pointer_style = self.settings.pointer_style;
+        let mut confirm_trash = self.settings.confirm_trash;
         let response = Dialog::new("Settings", "", Icon::Settings, 350.)
             .modal(ctx, egui::Id::new("appearance-settings"), |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(6., 6.);
@@ -331,6 +332,8 @@ impl MyImageApp {
                 }).response.on_hover_text("Calico gives every pointer a subtle cat accent: drawing, text, links, resizing, moving and tool cursors. Hotspots stay precise.");
                 ui.separator();
                 self.startup.ui(ui);
+                ui.separator();
+                ui.checkbox(&mut confirm_trash, "Ask before moving files to Trash");
                 dialogs::actions(ui, |ui| dialogs::primary(ui, "Done", Icon::Check).clicked())
             });
         if finish != self.settings.gui_finish {
@@ -345,6 +348,10 @@ impl MyImageApp {
         }
         if pointer_style != self.settings.pointer_style {
             self.settings.pointer_style = pointer_style;
+            self.persist_settings();
+        }
+        if confirm_trash != self.settings.confirm_trash {
+            self.settings.confirm_trash = confirm_trash;
             self.persist_settings();
         }
         if response.inner || response.should_close() {

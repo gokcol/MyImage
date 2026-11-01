@@ -41,6 +41,82 @@ mod tests {
     }
 
     #[test]
+    fn skipping_trash_confirmation_still_saves_the_active_projects_unsaved_edits_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("active.myimage");
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        app.install_document_state(document(), Some(path.clone()));
+        app.settings.confirm_trash = false;
+        let doc = app.document.as_mut().unwrap();
+        let before = doc.edit_state();
+        doc.geometry.flip_horizontal = true;
+        app.history.commit(before, doc);
+        let edited = doc.edit_state();
+        app.library_action(&ctx, LibraryAction::Trash(vec![path.clone()]));
+        assert!(app.file_dialog.is_none());
+        assert!(
+            matches!(&app.after_save, Some(PendingAction::Files(crate::library_files::Operation::Trash(paths))) if paths.as_slice() == std::slice::from_ref(&path))
+        );
+        let WorkEvent::ProjectSaved(saved, state, result) =
+            app.work_rx.recv_timeout(Duration::from_secs(5)).unwrap()
+        else {
+            panic!("The save must complete before any Trash operation");
+        };
+        assert_eq!(saved, path);
+        assert_eq!(state, edited);
+        result.unwrap();
+        assert!(path.is_file());
+        assert_eq!(document::load_project(&path).unwrap().edit_state(), edited);
+        assert!(app.document.is_some());
+    }
+
+    #[test]
+    fn trashing_other_recents_preserves_the_open_image_history_and_failed_entries() {
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);
+        let paths: Vec<PathBuf> = [
+            "active.myimage",
+            "removed.myimage",
+            "failed.myimage",
+            "missing.myimage",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+        app.install_document_state(document(), Some(paths[0].clone()));
+        app.last_path = Some(paths[0].clone());
+        app.settings.recent_files = paths.clone();
+        app.view = View::Editor;
+        let doc = app.document.as_mut().unwrap();
+        let before = doc.edit_state();
+        doc.geometry.flip_horizontal = true;
+        app.history.commit(before, doc);
+        let edited = doc.edit_state();
+        let revision = app.history.revision();
+        let image = doc.image.clone();
+        app.file_operation_finished(crate::library_files::Outcome {
+            removed: vec![paths[1].clone()],
+            missing: vec![paths[3].clone()],
+            errors: vec!["failed.myimage: permission denied".into()],
+            ..Default::default()
+        });
+        assert_eq!(
+            app.settings.recent_files,
+            [paths[0].clone(), paths[2].clone()]
+        );
+        assert_eq!(app.project_path.as_ref(), Some(&paths[0]));
+        assert_eq!(app.last_path.as_ref(), Some(&paths[0]));
+        assert!(matches!(app.view, View::Editor));
+        assert_eq!(app.history.revision(), revision);
+        let doc = app.document.as_ref().unwrap();
+        assert_eq!(doc.edit_state(), edited);
+        assert!(Arc::ptr_eq(&doc.image, &image));
+        assert!(app.history.is_dirty(doc));
+        assert!(app.error.as_ref().unwrap().contains("permission denied"));
+    }
+
+    #[test]
     fn copying_a_recent_keeps_the_open_project_undo_history_and_order_intact() {
         let ctx = egui::Context::default();
         let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(false)), true);

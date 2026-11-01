@@ -99,6 +99,7 @@ pub struct Settings {
     pub capture_on_release: bool,
     pub recent_files: Vec<PathBuf>,
     pub recents_open: bool,
+    pub confirm_trash: bool,
     pub project_library_version: u8,
     pub project_sources: std::collections::BTreeMap<PathBuf, PathBuf>,
     pub managed_image_sources: std::collections::BTreeSet<PathBuf>,
@@ -135,6 +136,7 @@ impl Default for Settings {
             capture_on_release: false,
             recent_files: Vec::new(),
             recents_open: true,
+            confirm_trash: true,
             project_library_version: 0,
             project_sources: Default::default(),
             managed_image_sources: Default::default(),
@@ -227,6 +229,17 @@ mod tests {
     use super::*;
     use chrono::{Local, TimeZone};
     use std::sync::Arc;
+
+    #[test]
+    fn trash_confirmation_defaults_on_and_remembers_an_explicit_opt_out() {
+        let mut settings: Settings = serde_json::from_str(r#"{"include_pointer":true}"#).unwrap();
+        assert!(settings.confirm_trash);
+        settings.confirm_trash = false;
+        let restored: Settings =
+            serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
+        assert!(!restored.confirm_trash);
+        assert!(restored.include_pointer);
+    }
 
     #[test]
     fn image_save_defaults_and_preferences_survive_existing_settings() {
