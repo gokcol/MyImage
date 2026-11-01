@@ -382,6 +382,137 @@ mod tests {
     }
 
     #[test]
+    fn background_image_jobs_keep_every_workspace_region_steady_and_locked() {
+        use eframe::App as _;
+        for job in ["fill", "wand/simplify", "export/print/copy"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut app, ctx) = app(dir.path());
+            app.initialized = true;
+            app.guide_open = false;
+            app.view = View::Editor;
+            app.settings.recents_open = true;
+            let path = dir.path().join("current.myimage");
+            document::save_project(app.document.as_ref().unwrap(), &path).unwrap();
+            app.project_path = Some(path.clone());
+            app.settings.recent_files = vec![path];
+            let draw = |app: &mut MyImageApp, events| {
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 900.))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| app.update(ctx, &mut eframe::Frame::_new_kittest()),
+                );
+                let status =
+                    egui::containers::panel::PanelState::load(&ctx, egui::Id::new("status"))
+                        .unwrap()
+                        .rect;
+                output
+                    .shapes
+                    .into_iter()
+                    .filter(|entry| {
+                        let bounds = entry.shape.visual_bounding_rect();
+                        bounds.is_positive() && bounds.max.y <= status.top()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while ctx
+                .tex_manager()
+                .read()
+                .allocated()
+                .filter(|(_, meta)| meta.name.starts_with("library-"))
+                .count()
+                < 1
+            {
+                draw(&mut app, vec![]);
+                assert!(Instant::now() < deadline, "thumbnail must be ready");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            for _ in 0..4 {
+                draw(&mut app, vec![]);
+            }
+            let normal = draw(&mut app, vec![]);
+            assert_eq!(draw(&mut app, vec![]), normal);
+            let before = app.document.as_ref().unwrap().edit_state();
+            let release: Box<dyn FnOnce()> = match job {
+                "fill" => {
+                    let sender = app
+                        .editor
+                        .hold_fill_for_test(app.document.as_ref().unwrap());
+                    Box::new(move || {
+                        let _ = sender.send(Err("Test fill failure".into()));
+                    })
+                }
+                "wand/simplify" => Box::new(
+                    app.editor
+                        .hold_extra_tool_for_test(app.document.as_ref().unwrap()),
+                ),
+                _ => {
+                    app.busy = true;
+                    Box::new(|| {})
+                }
+            };
+            let working = draw(&mut app, vec![]);
+            assert_eq!(
+                working.len(),
+                normal.len(),
+                "{job}: workspace geometry changed"
+            );
+            for (index, (actual, expected)) in working.iter().zip(&normal).enumerate() {
+                assert_eq!(actual, expected, "{job}: workspace shape {index} changed");
+            }
+            let home = normal
+                .iter()
+                .find_map(|entry| match &entry.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == "Home" => {
+                        Some(text.pos + egui::vec2(4., 4.))
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            for pressed in [true, false] {
+                draw(
+                    &mut app,
+                    vec![
+                        egui::Event::PointerMoved(home),
+                        egui::Event::PointerButton {
+                            pos: home,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            draw(
+                &mut app,
+                vec![egui::Event::Key {
+                    key: egui::Key::Z,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }],
+            );
+            assert!(
+                app.view == View::Editor,
+                "{job}: navigation must stay blocked"
+            );
+            assert_eq!(app.document.as_ref().unwrap().edit_state(), before);
+            release();
+            app.busy = false;
+            draw(&mut app, vec![]);
+            assert!(
+                !app.editor.has_modal(),
+                "{job}: completion must unlock the editor"
+            );
+            assert_eq!(app.document.as_ref().unwrap().edit_state(), before);
+        }
+    }
+
+    #[test]
     fn opening_from_strip_keeps_the_whole_workspace_steady() {
         use eframe::App as _;
         let dir = tempfile::tempdir().unwrap();
@@ -834,11 +965,16 @@ mod tests {
             normal
         );
 
-        // Unrelated work and a dialog overlapping a save retain their visual lock.
+        // Other background work is equally steady. A real dialog still dims
+        // the canvas, including when it overlaps an in-flight save.
+        app.busy = true;
+        assert_eq!(
+            workspace_canvas(&mut app, &ctx, source.id(), vec![]),
+            normal
+        );
         for saving in [false, true] {
-            app.busy = true;
             app.project_session.saving = saving;
-            app.about_open = saving;
+            app.about_open = true;
             let locked = workspace_canvas(&mut app, &ctx, source.id(), vec![]);
             assert!(locked.vertices.iter().all(|v| v.color.a() < 255));
         }

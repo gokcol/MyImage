@@ -1170,7 +1170,7 @@ pub fn document_icon_button(ui: &mut egui::Ui, label: &str, kind: Icon) -> egui:
     response.on_hover_text(label)
 }
 
-/// Block interaction during file I/O without flashing the surrounding UI.
+/// Block interaction during background work without flashing the surrounding UI.
 /// Restore only this scope's opacity: individually unavailable child controls
 /// still use their usual disabled appearance, and dialogs can still dim it.
 pub fn input_scope<R>(

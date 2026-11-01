@@ -80,6 +80,20 @@ impl FillState {
     }
 }
 impl EditorState {
+    #[cfg(test)]
+    pub(crate) fn hold_fill_for_test(
+        &mut self,
+        document: &Document,
+    ) -> mpsc::Sender<Result<Annotation, String>> {
+        let (sender, receiver) = mpsc::channel();
+        self.fill_tool.pending = Some(Pending {
+            before: document.edit_state(),
+            index: None,
+            receiver,
+        });
+        sender
+    }
+
     pub(super) fn restore_fill_preferences(&mut self) {
         let preferences = &self.tool_preferences.fill;
         self.fill_tool.color = preferences.color;

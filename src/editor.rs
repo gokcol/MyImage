@@ -494,11 +494,15 @@ impl EditorState {
             && !self.property_interacting
     }
 
+    /// Both image workers and dialogs block competing edits. Only dialogs
+    /// should dim the workspace; short image jobs must not flash it.
     pub fn has_modal(&self) -> bool {
+        self.has_dialog() || self.extra_tools.busy() || self.fill_tool.busy()
+    }
+
+    pub fn has_dialog(&self) -> bool {
         self.text_extraction.open
-            || self.extra_tools.busy()
             || self.toolbar_customizer
-            || self.fill_tool.busy()
             || self.text_dialog.is_some()
             || self.stamps.is_importing()
             || self.resize.is_some()
@@ -680,7 +684,7 @@ impl EditorState {
             }
             self.clipboard_events(ui, document, history);
         }
-        ui.add_enabled_ui(!modal_open, |ui| {
+        crate::appearance::input_scope(ui, !modal_open, !self.has_dialog(), |ui| {
             self.workspace_ui(ui, document, history, texture, preview);
         });
         self.customize_toolbar(ui.ctx());
@@ -5315,6 +5319,105 @@ mod tests {
     #[test]
     fn canvas_draws_when_press_motion_and_release_arrive_in_one_frame() {
         canvas_drag(true);
+    }
+
+    #[test]
+    fn background_fill_keeps_selected_object_controls_visible_but_inactive() {
+        let ctx = egui::Context::default();
+        crate::appearance::apply(&ctx);
+        let mut document = Document {
+            image: std::sync::Arc::new(image::RgbaImage::from_pixel(
+                320,
+                240,
+                image::Rgba([80, 140, 210, 255]),
+            )),
+            annotations: vec![crate::markup_tests::object(
+                AnnotationKind::Arrow,
+                [80., 80.],
+                [240., 160.],
+            )],
+            geometry: Default::default(),
+        };
+        let texture = ctx.load_texture(
+            "selected object",
+            crate::image_loading::color_image(&document.image),
+            Default::default(),
+        );
+        let mut editor = EditorState::default();
+        editor.select(Some(0), &document);
+        editor.inspector.close();
+        let mut history = EditHistory::new(document.edit_state());
+        let mut preview = crate::privacy_preview::PrivacyPreview::default();
+        let mut draw = |editor: &mut EditorState, document: &mut Document, events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1000., 700.))),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        editor.ui(ui, document, &mut history, &texture, &mut preview)
+                    });
+                },
+            )
+            .shapes
+            .into_iter()
+            .filter(|entry| entry.shape.visual_bounding_rect().is_positive())
+            .collect::<Vec<_>>()
+        };
+        for _ in 0..5 {
+            draw(&mut editor, &mut document, vec![]);
+        }
+        let normal = draw(&mut editor, &mut document, vec![]);
+        let bar_id = egui::Id::new("selected-object-properties")
+            .with(AnnotationKind::Arrow as u8)
+            .with(1_usize);
+        let bar = ctx
+            .memory(|m| m.area_rect(bar_id))
+            .expect("selected object quick controls");
+        let sender = editor.hold_fill_for_test(&document);
+        assert_eq!(
+            draw(&mut editor, &mut document, vec![]),
+            normal,
+            "background fill must retain the canvas and quick controls"
+        );
+        let before = document.edit_state();
+        let pin = editor.inspector.preferences;
+        let styles_button = bar.left_center() + egui::vec2(18., 0.);
+        for pressed in [true, false] {
+            draw(
+                &mut editor,
+                &mut document,
+                vec![
+                    egui::Event::PointerMoved(styles_button),
+                    button_event(styles_button, pressed),
+                ],
+            );
+        }
+        assert_eq!(
+            editor.inspector.preferences, pin,
+            "disabled floating controls must not open Styles"
+        );
+        assert_eq!(document.edit_state(), before);
+        sender.send(Err("Test fill failure".into())).unwrap();
+        draw(&mut editor, &mut document, vec![egui::Event::PointerGone]);
+        assert!(!editor.has_modal());
+        assert_eq!(document.edit_state(), before);
+        for pressed in [true, false] {
+            draw(
+                &mut editor,
+                &mut document,
+                vec![
+                    egui::Event::PointerMoved(styles_button),
+                    button_event(styles_button, pressed),
+                ],
+            );
+        }
+        assert!(
+            editor.inspector.preferences.expanded,
+            "the same Styles click must work after the job finishes"
+        );
     }
 
     #[test]

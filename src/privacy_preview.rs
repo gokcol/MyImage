@@ -299,6 +299,109 @@ mod tests {
     }
 
     #[test]
+    fn fill_style_layer_and_effect_edits_always_paint_current_composed_pixels() {
+        use crate::{document::EditHistory, markup_tests::object};
+        let ctx = egui::Context::default();
+        let image = RgbaImage::from_fn(64, 48, |x, y| {
+            if x == 32 {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([220, 180 + (y / 4) as u8, 70, 255])
+            }
+        });
+        let mut doc = Document {
+            image: Arc::new(image),
+            annotations: vec![],
+            geometry: Default::default(),
+        };
+        let mut fill = object(AnnotationKind::Fill, [0., 0.], [64., 48.]);
+        fill.color = [20, 90, 210, 255];
+        fill.fill_region =
+            Some(crate::fill::build(&doc.image, &fill, Point { x: 8., y: 8. }, 15, false).unwrap());
+        doc.annotations.push(fill);
+        let mut states = vec![("new fill", doc.clone())];
+        doc.annotations[0].color = [210, 30, 60, 255];
+        states.push(("recolor fill", doc.clone()));
+        doc.annotations[0].color[3] = 100;
+        states.push(("fill opacity", doc.clone()));
+        doc.annotations[0].color[3] = 0;
+        states.push(("transparent fill", doc.clone()));
+        doc.annotations[0].fill_region = Some(
+            crate::fill::build(
+                &doc.image,
+                &doc.annotations[0],
+                Point { x: 8., y: 8. },
+                15,
+                true,
+            )
+            .unwrap(),
+        );
+        states.push(("recalculate global fill", doc.clone()));
+        doc.annotations[0].color[3] = 255;
+        doc.annotations
+            .push(object(AnnotationKind::Arrow, [5., 5.], [55., 35.]));
+        states.push(("arrow over fill", doc.clone()));
+        doc.annotations[1].color = [50, 220, 40, 255];
+        doc.annotations[1].stroke_width = 6.;
+        doc.annotations[1].end.x = 45.;
+        states.push(("arrow style and geometry", doc.clone()));
+        doc.annotations.swap(0, 1);
+        states.push(("layer reorder", doc.clone()));
+        doc.annotations[1].layer.hidden = true;
+        states.push(("hide fill", doc.clone()));
+        doc.annotations[1].layer.hidden = false;
+        doc.annotations
+            .push(object(AnnotationKind::Blur, [4., 6.], [40., 35.]));
+        states.push(("add blur", doc.clone()));
+        doc.annotations[2].kind = AnnotationKind::Pixelate;
+        doc.annotations[2].effect_size = 12;
+        states.push(("pixelate adjustment", doc.clone()));
+        let mut history = EditHistory::new(doc.edit_state());
+        let before = doc.edit_state();
+        doc.geometry.effects.grayscale = true;
+        history.commit(before, &doc);
+        states.push(("quick effect", doc.clone()));
+        assert!(history.undo(&mut doc));
+        states.push(("undo effect", doc.clone()));
+        assert!(history.redo(&mut doc));
+        states.push(("redo effect", doc.clone()));
+        doc.annotations.clear();
+        doc.geometry.effects = Default::default();
+        states.push(("remove fill and effects", doc));
+        // Hold refinement so every edit must immediately supply its own safe
+        // current composition, never an old texture or an empty/loading frame.
+        let mut cache = PrivacyPreview {
+            running: true,
+            ..Default::default()
+        };
+        let mut uploaded = std::collections::HashMap::new();
+        for (label, doc) in states {
+            let mut displayed = None;
+            let output = ctx.run(Default::default(), |ctx| {
+                displayed = Some(cache.continuous_texture(ctx, &doc).unwrap().expect(label));
+            });
+            for (id, delta) in output.textures_delta.set {
+                assert!(delta.pos.is_none());
+                let egui::ImageData::Color(pixels) = delta.image;
+                uploaded.insert(id, pixels);
+            }
+            let texture = displayed.unwrap();
+            let actual = uploaded.get(&texture.id()).unwrap();
+            let expected = crate::image_loading::color_image(
+                &crate::render::privacy_preview(&doc, 768).unwrap(),
+            );
+            assert_eq!(actual.size, expected.size, "{label}: preview size changed");
+            assert!(
+                actual.pixels == expected.pixels,
+                "{label}: preview contains stale or unprocessed pixels"
+            );
+            for id in output.textures_delta.free {
+                uploaded.remove(&id);
+            }
+        }
+    }
+
+    #[test]
     fn continuous_preview_has_no_blank_transition_and_rejects_stale_worker_pixels() {
         let ctx = egui::Context::default();
         let mut doc = document();

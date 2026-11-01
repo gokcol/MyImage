@@ -1861,6 +1861,12 @@ impl MyImageApp {
             && !self.save_as_panel.open
     }
 
+    /// Input locks for background work preserve the whole workspace's colors.
+    /// A visible app/editor dialog still supplies its usual dimmed backdrop.
+    fn workspace_has_dialog(&self) -> bool {
+        !self.workspace_unobscured() || self.editor.has_dialog()
+    }
+
     fn workspace_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let unobscured = self.workspace_unobscured();
         let animate_canvas = self.view == View::Editor
@@ -1875,7 +1881,7 @@ impl MyImageApp {
         appearance::input_scope(
             ui,
             !self.busy && unobscured,
-            (self.project_session.saving || self.opening_image) && unobscured,
+            !self.workspace_has_dialog(),
             |ui| match self.view {
                 View::Home => self.home_ui(ui, ctx),
                 View::Capture => self.capture_ui(ui, ctx),
@@ -2123,7 +2129,7 @@ impl eframe::App for MyImageApp {
                         appearance::input_scope(
                             ui,
                             !self.busy && unobscured,
-                            (self.project_session.saving || self.opening_image) && unobscured,
+                            !self.workspace_has_dialog(),
                             |ui| {
                                 let has_doc = self.document.is_some();
                                 if matches!(self.view, View::Viewer | View::Editor) {
@@ -2204,7 +2210,7 @@ impl eframe::App for MyImageApp {
                 appearance::input_scope(
                     ui,
                     !self.busy && unobscured,
-                    (self.project_session.saving || self.opening_image) && unobscured,
+                    !self.workspace_has_dialog(),
                     |ui| {
                         ui.horizontal(|ui| {
                             for (view, label, icon) in [

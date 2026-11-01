@@ -13,8 +13,7 @@ impl MyImageApp {
                         self.recents_keyboard(ctx);
                     }
                     let enabled = !self.busy && unobscured;
-                    let keep_appearance =
-                        (self.project_session.saving || self.opening_image) && unobscured;
+                    let keep_appearance = !self.workspace_has_dialog();
                     let was_open = self.settings.recents_open;
                     let mut chosen = self.library.recents_header(
                         ui,

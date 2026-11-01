@@ -144,7 +144,7 @@ impl EditorState {
             && !(self.tool == Tool::Area && self.area_bounds(document).is_some())
             && self.gesture.is_none()
             && self.area_drag.is_none()
-            && !self.has_modal()
+            && !self.has_dialog()
     }
 
     pub(super) fn finish_canvas_resize(
@@ -173,7 +173,7 @@ impl EditorState {
         scale: f32,
         _viewport: Vec2,
     ) -> (bool, bool) {
-        if !ui.is_enabled() {
+        if !ui.is_enabled() || self.has_modal() {
             return (false, false);
         }
         if self.canvas_resize.is_none()

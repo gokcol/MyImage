@@ -29,6 +29,18 @@ impl State {
     }
 }
 impl EditorState {
+    #[cfg(test)]
+    pub(crate) fn hold_extra_tool_for_test(
+        &mut self,
+        document: &Document,
+    ) -> impl FnOnce() + use<> {
+        let (sender, receiver) = mpsc::channel();
+        self.extra_tools.pending = Some((document.edit_state(), receiver));
+        move || {
+            let _ = sender.send(Err("Test image-tool failure".into()));
+        }
+    }
+
     pub(super) fn extra_panel_active(&self, document: &Document) -> bool {
         matches!(self.tool, Tool::Wand | Tool::CutOut)
             || self

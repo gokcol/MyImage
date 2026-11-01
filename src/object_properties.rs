@@ -8,6 +8,7 @@ fn property_button_menu<R>(
     button: egui::Button<'_>,
     content: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
+    let content = popup_input(ui.is_enabled(), ui.opacity(), content);
     let config = egui::containers::menu::MenuConfig::new()
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let (response, inner) = if egui::containers::menu::is_in_menu(ui) {
@@ -21,6 +22,22 @@ fn property_button_menu<R>(
     };
     egui::InnerResponse::new(inner.map(|r| r.inner), response)
 }
+// Popups are independent egui Areas and do not inherit their anchor's input
+// lock or opacity. Keep an already-open property menu safe during background work.
+fn popup_input<R>(
+    enabled: bool,
+    opacity: f32,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> impl FnOnce(&mut egui::Ui) -> R {
+    move |ui| {
+        crate::appearance::input_scope(ui, enabled, true, |ui| {
+            ui.set_opacity(opacity);
+            content(ui)
+        })
+        .inner
+    }
+}
+
 fn property_menu<R>(
     ui: &mut egui::Ui,
     label: impl Into<egui::WidgetText>,
@@ -732,10 +749,10 @@ impl QuickProperties {
             .width(size.x)
             .layout(egui::Layout::top_down(egui::Align::Min))
             .frame(quick_frame(ui))
-            .show(|ui| {
+            .show(popup_input(ui.is_enabled(), ui.opacity(), |ui| {
                 ui.spacing_mut().item_spacing = Vec2::splat(3.);
                 content(ui);
-            });
+            }));
     }
 }
 
@@ -1216,12 +1233,11 @@ impl EditorState {
         scale: f32,
         viewport: Rect,
     ) {
-        if !ui.is_enabled()
-            || self.precision_active()
+        if self.precision_active()
             || matches!(self.tool, Tool::Step | Tool::Pen | Tool::Eraser)
             || self.gesture.is_some()
             || self.area_drag.is_some()
-            || self.has_modal()
+            || self.has_dialog()
             || self.crop.is_some()
         {
             return;
@@ -1305,12 +1321,18 @@ impl EditorState {
             bar: Rect::from_min_size(position, size),
         };
         let mut changed = false;
+        let enabled = ui.is_enabled();
+        let workspace_opacity = ui.opacity();
         egui::Area::new(bar_id)
+            .enabled(enabled)
             .default_size(initial_size)
             .order(egui::Order::Foreground)
             .fixed_pos(position)
             .movable(false)
             .show(ui.ctx(), |ui| {
+                // Keep the retained quick controls visually stable during a
+                // background input lock, without letting their Area accept edits.
+                ui.set_opacity(workspace_opacity);
                 quick_frame(ui).show(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = if quick { 2. } else { 4. };
                     ui.spacing_mut().button_padding = Vec2::new(6., 5.);
@@ -1333,9 +1355,12 @@ impl EditorState {
                         }
                         if indices.len() > 1 {
                             ui.weak(format!("{} selected", indices.len()));
-                            ui.menu_button("Arrange ▾", |ui| {
-                                self.selection_controls(ui, document, history);
-                            });
+                            ui.menu_button(
+                                "Arrange ▾",
+                                popup_input(enabled, workspace_opacity, |ui| {
+                                    self.selection_controls(ui, document, history);
+                                }),
+                            );
                             return;
                         }
                         if quick {
@@ -1381,10 +1406,16 @@ impl EditorState {
                                     crate::appearance::palette(ui.ctx()).ink,
                                 );
                                 let button = button.on_hover_text("Callout shape");
-                                egui::Popup::menu(&button).show(|ui| {
-                                    changed |=
-                                        crate::callout_style::picker(ui, &mut self.callout_style);
-                                });
+                                egui::Popup::menu(&button).show(popup_input(
+                                    enabled,
+                                    workspace_opacity,
+                                    |ui| {
+                                        changed |= crate::callout_style::picker(
+                                            ui,
+                                            &mut self.callout_style,
+                                        );
+                                    },
+                                ));
                             }
                             property_menu(ui, "Aa ▾", |ui| {
                                 ui.set_min_width(244.);
@@ -1530,6 +1561,97 @@ mod tests {
             )),
             annotations: vec![],
             geometry: Default::default(),
+        }
+    }
+
+    #[test]
+    fn open_property_popups_inherit_background_input_locks() {
+        for quick in [false, true] {
+            let ctx = egui::Context::default();
+            let mut changes = 0;
+            let frame = |enabled, events, changes: &mut usize| {
+                let mut popup_id = None;
+                let mut inside = None;
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(800., 600.))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            crate::appearance::input_scope(ui, enabled, true, |ui| {
+                                let content = |ui: &mut egui::Ui| {
+                                    let response = ui.button("Change style");
+                                    inside = Some((response.rect, ui.is_enabled(), ui.opacity()));
+                                    if response.clicked() {
+                                        *changes += 1;
+                                    }
+                                };
+                                let response = if quick {
+                                    let response = ui.button("Properties");
+                                    QuickProperties {
+                                        selection: Rect::from_min_size(
+                                            egui::pos2(300., 300.),
+                                            Vec2::splat(100.),
+                                        ),
+                                        viewport: ctx.content_rect(),
+                                        bar: response.rect,
+                                    }
+                                    .popup(
+                                        ui,
+                                        &response,
+                                        egui::vec2(160., 70.),
+                                        content,
+                                    );
+                                    response
+                                } else {
+                                    property_menu(ui, "Properties", content).response
+                                };
+                                popup_id = Some(egui::Popup::default_response_id(&response));
+                            });
+                        });
+                    },
+                );
+                (popup_id.unwrap(), inside)
+            };
+            let (id, _) = frame(true, vec![], &mut changes);
+            egui::Popup::open_id(&ctx, id);
+            for _ in 0..3 {
+                frame(true, vec![], &mut changes);
+            }
+            let (_, inside) = frame(false, vec![], &mut changes);
+            let (button, enabled, opacity) =
+                inside.expect("open popup stays visible during the lock");
+            assert!(!enabled);
+            assert_eq!(opacity, 1.);
+            let click = |pressed| {
+                vec![
+                    egui::Event::PointerMoved(button.center()),
+                    egui::Event::PointerButton {
+                        pos: button.center(),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]
+            };
+            for pressed in [true, false] {
+                frame(false, click(pressed), &mut changes);
+            }
+            assert_eq!(changes, 0, "locked property popup accepted an edit");
+            assert!(egui::Popup::is_id_open(&ctx, id));
+            // egui hit testing uses the previous frame's enabled widget map.
+            // Let the completed worker's repaint register the unlocked controls.
+            let (_, unlocked) = frame(true, vec![egui::Event::PointerGone], &mut changes);
+            assert!(unlocked.unwrap().1);
+            for pressed in [true, false] {
+                frame(true, click(pressed), &mut changes);
+            }
+            assert_eq!(
+                changes, 1,
+                "property popup must unlock after background work"
+            );
         }
     }
 
