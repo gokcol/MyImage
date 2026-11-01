@@ -433,6 +433,7 @@ pub enum Icon {
     Copy,
     Save,
     SaveAs,
+    Print,
     CalendarYear,
     CalendarMonth,
     CalendarDay,
@@ -465,6 +466,45 @@ pub fn icon(p: &egui::Painter, center: Pos2, kind: Icon, color: Color32, size: f
     let s = Stroke::new(icon_style::current(p.ctx()).width(), color);
     let r = Rect::from_center_size(center, Vec2::splat(size));
     match kind {
+        Icon::Print => {
+            p.rect_stroke(
+                Rect::from_min_max(
+                    center + Vec2::new(-size * 0.28, -size * 0.46),
+                    center + Vec2::new(size * 0.28, -size * 0.1),
+                ),
+                0,
+                s,
+                egui::StrokeKind::Inside,
+            );
+            p.rect_stroke(
+                Rect::from_center_size(center, Vec2::new(size, size * 0.5)),
+                2,
+                s,
+                egui::StrokeKind::Inside,
+            );
+            p.rect_filled(
+                Rect::from_min_max(
+                    center + Vec2::new(-size * 0.28, size * 0.05),
+                    center + Vec2::new(size * 0.28, size * 0.46),
+                ),
+                0,
+                palette(p.ctx()).paper,
+            );
+            p.rect_stroke(
+                Rect::from_min_max(
+                    center + Vec2::new(-size * 0.28, size * 0.05),
+                    center + Vec2::new(size * 0.28, size * 0.46),
+                ),
+                0,
+                s,
+                egui::StrokeKind::Inside,
+            );
+            p.circle_filled(
+                center + Vec2::new(size * 0.33, -size * 0.06),
+                size * 0.04,
+                color,
+            );
+        }
         Icon::CalendarYear | Icon::CalendarMonth | Icon::CalendarDay => {
             let calendar = if matches!(kind, Icon::CalendarYear) {
                 p.rect_stroke(

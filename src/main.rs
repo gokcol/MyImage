@@ -41,6 +41,7 @@ mod open_transition;
 mod pdf_export;
 mod pointer_style;
 mod presets;
+mod printing;
 mod privacy;
 mod privacy_preview;
 mod project_store;

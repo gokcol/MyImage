@@ -68,6 +68,7 @@ enum WorkEvent {
         PathBuf,
         Result<crate::image_loading::PreparedDocument, String>,
     ),
+    PrintPrepared(Result<crate::printing::Prepared, String>),
     ProjectSaved(PathBuf, document::EditState, Result<(), String>),
     Exported(PathBuf, ExportFormat, Result<(), String>),
     ClipboardImage(Result<image::RgbaImage, String>),
@@ -80,6 +81,8 @@ enum WorkEvent {
 
 #[path = "file_browser.rs"]
 mod file_browser;
+#[path = "print_ui.rs"]
+mod print_ui;
 #[path = "project_session.rs"]
 mod project_session;
 #[path = "recent_history.rs"]
@@ -197,6 +200,8 @@ pub struct MyImageApp {
     create_panel: crate::templates::CreatePanel,
     draft_title: String,
     save_as_panel: SaveAsPanel,
+    print_ready: Option<crate::printing::Prepared>,
+    print_job: Option<crate::printing::Job>,
     privacy_preview: PrivacyPreview,
     zoom: f32,
     fit: bool,
@@ -337,6 +342,8 @@ impl MyImageApp {
             create_panel: Default::default(),
             draft_title: "Untitled image".into(),
             save_as_panel: SaveAsPanel::default(),
+            print_ready: None,
+            print_job: None,
             privacy_preview: PrivacyPreview::default(),
             zoom: 1.0,
             fit: true,
@@ -1307,6 +1314,10 @@ impl MyImageApp {
                         self.request_quit(ctx);
                     }
                 }
+                WorkEvent::PrintPrepared(result) => match result {
+                    Ok(prepared) => self.print_ready = Some(prepared),
+                    Err(error) => self.finish_print(ctx, Err(error)),
+                },
                 WorkEvent::Prepared(path, result) => {
                     self.busy = false;
                     self.opening_image = false;
@@ -1932,7 +1943,7 @@ impl eframe::App for MyImageApp {
     fn raw_input_hook(&mut self, ctx: &egui::Context, input: &mut egui::RawInput) {
         crate::image_clipboard::complete_paste_input(ctx, input);
     }
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.calico.cancel_on_escape(ctx);
         if self.restore_frames_left > 0 {
             self.apply_window_restoration(ctx);
@@ -1964,6 +1975,7 @@ impl eframe::App for MyImageApp {
             }
         }
         self.handle_events(ctx);
+        self.poll_print(ctx, frame);
         self.promote_edited_recent(ctx);
         self.autosave_project(ctx);
         self.autosave(ctx);
@@ -2038,6 +2050,13 @@ impl eframe::App for MyImageApp {
                 self.begin_save_as();
             } else if ctx.input_mut(|i| i.consume_shortcut(&save)) {
                 self.save_project(ctx, false);
+            } else if ctx.input_mut(|i| {
+                i.consume_shortcut(&egui::KeyboardShortcut::new(
+                    egui::Modifiers::COMMAND,
+                    egui::Key::P,
+                ))
+            }) {
+                self.begin_print(ctx);
             }
         }
         egui::TopBottomPanel::top("document_bar")
@@ -2144,6 +2163,13 @@ impl eframe::App for MyImageApp {
                                     {
                                         self.begin_save_as();
                                     }
+                                }
+                                if matches!(self.view, View::Viewer | View::Editor)
+                                    && ui.add_enabled_ui(has_doc, |ui| appearance::icon_button(ui, "Print…", Icon::Print)).inner
+                                        .on_hover_text("Print the finished image · ⌘P / Ctrl+P")
+                                        .clicked()
+                                {
+                                    self.begin_print(ctx);
                                 }
                                 if appearance::action_button(
                                     ui,

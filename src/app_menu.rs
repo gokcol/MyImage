@@ -154,6 +154,10 @@ impl MyImageApp {
                     self.view = if self.view == View::Viewer { View::Editor } else { View::Viewer };
                     ui.close();
                 }
+                if row(ui, "Print image…", Icon::Print, can_open && self.document.is_some(), if cfg!(target_os = "macos") { "⌘P" } else { "Ctrl+P" }).clicked() {
+                    self.begin_print(ctx);
+                    ui.close();
+                }
                 self.recovery_menu(ui);
                 if row(ui, "About MyImage", Icon::Info, can_open, "›").clicked() {
                     self.about_open = true;
