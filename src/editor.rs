@@ -1374,7 +1374,9 @@ impl EditorState {
                 let stamp_payload =
                     egui::DragAndDrop::has_payload_of_type::<crate::stamps::StampSource>(ui.ctx());
                 let draw_in_margin = self.draws_objects() || stamp_payload;
-                let hit_rect = if draw_in_margin {
+                let select_in_margin =
+                    !self.precision_active() && matches!(self.tool, Tool::Select | Tool::Area);
+                let hit_rect = if draw_in_margin || select_in_margin {
                     space
                 } else if self.selected.is_some()
                     || (self.tool == Tool::Area && self.area_bounds(document).is_some())
@@ -1450,6 +1452,7 @@ impl EditorState {
                     && let Some(position) = press
                     && hit_rect.intersect(ui.clip_rect()).contains(position)
                     && (draw_in_margin
+                        || select_in_margin
                         || rect.contains(position)
                         || self.object_target(
                             object_point(position, rect, scale, document),
@@ -1466,7 +1469,13 @@ impl EditorState {
                     self.finish_annotation_gesture(document, history);
                     let point = if self.draws_objects()
                         || self.tool == Tool::Select
-                        || (self.tool == Tool::Area && self.area.is_none())
+                        || (self.tool == Tool::Area
+                            && (self.area.is_none()
+                                || (!rect.contains(position)
+                                    && !self.over_area_handle(
+                                        object_point(position, rect, scale, document),
+                                        document,
+                                    ))))
                     {
                         object_point(position, rect, scale, document)
                     } else {
@@ -1800,7 +1809,10 @@ impl EditorState {
                         .any(|annotation| annotation.visible() && annotation.kind.needs_composite())
                 {
                     let image = if self.moving_area_pixels(document) || self.gesture.is_some() {
-                        preview.drag_texture(ui.ctx(), paint_document)
+                        let frame_size = stable_frame
+                            .as_ref()
+                            .map_or(paint_rect.size(), |(_, bounds)| bounds.size());
+                        preview.drag_texture(ui.ctx(), paint_document, frame_size)
                     } else {
                         preview.continuous_texture(ui.ctx(), paint_document)
                     };
@@ -4488,6 +4500,90 @@ mod tests {
             button: PointerButton::Primary,
             pressed,
             modifiers: Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn pixel_selection_can_start_in_the_canvas_margin() {
+        for existing_area in [false, true] {
+            for coalesced in [false, true] {
+                for (start, end, expected) in [
+                    ((50., 110.), (130., 150.), Some((0., 40., 60., 80.))),
+                    ((110., 50.), (150., 130.), Some((40., 0., 80., 60.))),
+                    ((190., 110.), (110., 150.), Some((40., 40., 100., 80.))),
+                    ((110., 190.), (150., 110.), Some((40., 40., 80., 100.))),
+                    ((50., 50.), (190., 190.), Some((0., 0., 100., 100.))),
+                    ((190., 190.), (50., 50.), Some((0., 0., 100., 100.))),
+                    ((30., 40.), (50., 60.), None),
+                ] {
+                    let context = egui::Context::default();
+                    let texture = context.load_texture(
+                        "margin selection",
+                        egui::ColorImage::new([1, 1], vec![Color32::WHITE]),
+                        Default::default(),
+                    );
+                    let mut document = Document {
+                        image: std::sync::Arc::new(image::RgbaImage::new(100, 100)),
+                        annotations: vec![],
+                        geometry: Default::default(),
+                    };
+                    let before = document.edit_state();
+                    let mut history = EditHistory::new(before.clone());
+                    let mut editor = EditorState {
+                        tool: Tool::Area,
+                        fit: false,
+                        area: existing_area
+                            .then(|| Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.))),
+                        ..Default::default()
+                    };
+                    canvas_frame(
+                        &mut editor,
+                        &mut document,
+                        &mut history,
+                        &context,
+                        &texture,
+                        vec![],
+                    );
+                    let start = egui::pos2(start.0, start.1);
+                    let end = egui::pos2(end.0, end.1);
+                    let mut events =
+                        vec![egui::Event::PointerMoved(start), button_event(start, true)];
+                    if !coalesced {
+                        canvas_frame(
+                            &mut editor,
+                            &mut document,
+                            &mut history,
+                            &context,
+                            &texture,
+                            events,
+                        );
+                        assert!(
+                            editor.area_drag.is_some(),
+                            "press in margin must start selection"
+                        );
+                        events = vec![];
+                    }
+                    events.extend([egui::Event::PointerMoved(end), button_event(end, false)]);
+                    canvas_frame(
+                        &mut editor,
+                        &mut document,
+                        &mut history,
+                        &context,
+                        &texture,
+                        events,
+                    );
+                    let expected = expected.map(|(x1, y1, x2, y2)| {
+                        Rect::from_min_max(egui::pos2(x1, y1), egui::pos2(x2, y2))
+                    });
+                    assert_eq!(
+                        editor.area, expected,
+                        "{start:?} -> {end:?}, existing={existing_area}, coalesced={coalesced}"
+                    );
+                    assert!(editor.area_drag.is_none());
+                    assert_eq!(document.edit_state(), before);
+                    assert!(!history.can_undo());
+                }
+            }
         }
     }
 

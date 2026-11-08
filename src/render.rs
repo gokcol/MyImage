@@ -1054,8 +1054,10 @@ pub fn flatten(document: &Document) -> Result<RgbaImage, String> {
     }
 }
 
-/// Bounded, nearest-sampled transition frame. Only this small composition runs
-/// on the UI thread; the normal worker replaces it with the antialiased preview.
+pub(crate) const MAX_INTERACTIVE_PREVIEW_SIDE: u32 = 4096;
+
+/// Bounded composition at the requested sampling density. Transition frames use
+/// a small limit; active drags retain enough detail for their displayed size.
 /// Sample expanded canvases directly, never allocate their full-resolution pixels.
 pub fn interactive_preview(document: &Document, max_side: u32) -> Result<RgbaImage, String> {
     crate::document::validate_document(document)?;
@@ -1074,8 +1076,8 @@ pub fn interactive_preview(document: &Document, max_side: u32) -> Result<RgbaIma
         });
     let dimensions = fit_dimensions(
         [bounds.width, bounds.height],
-        max_side.min(768),
-        max_side.min(768),
+        max_side.min(MAX_INTERACTIVE_PREVIEW_SIDE),
+        max_side.min(MAX_INTERACTIVE_PREVIEW_SIDE),
     );
     let crop = document.geometry.crop_rect(original);
     let mut output = RgbaImage::from_fn(dimensions[0], dimensions[1], |x, y| {

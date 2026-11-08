@@ -478,11 +478,25 @@ impl EditorState {
                             .collect();
                     }
                 } else {
-                    let crop = crop_between(drag.origin, at, document);
-                    self.area = Some(Rect::from_min_size(
-                        egui::pos2(crop.x as f32, crop.y as f32),
-                        egui::vec2(crop.width as f32, crop.height as f32),
-                    ));
+                    // A drag may begin in the workspace margin. Only create a
+                    // pixel selection once its rectangle reaches the image;
+                    // crop_between otherwise rounds an outside drag to one pixel.
+                    let bounds = Rect::from_two_pos(
+                        output_point(drag.origin, document),
+                        output_point(at, document),
+                    );
+                    let [width, height] = document.output_size();
+                    self.area = (bounds.right() > 0.
+                        && bounds.bottom() > 0.
+                        && bounds.left() < width as f32
+                        && bounds.top() < height as f32)
+                        .then(|| {
+                            let crop = crop_between(drag.origin, at, document);
+                            Rect::from_min_size(
+                                egui::pos2(crop.x as f32, crop.y as f32),
+                                egui::vec2(crop.width as f32, crop.height as f32),
+                            )
+                        });
                     self.area_mask.clear();
                 }
             }

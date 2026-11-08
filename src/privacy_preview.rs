@@ -99,17 +99,22 @@ impl PrivacyPreview {
         ctx: &egui::Context,
         document: &Document,
     ) -> Result<Option<TextureHandle>, String> {
-        self.current_texture(ctx, document, true)
+        self.current_texture(ctx, document, true, MAX_PREVIEW_SIDE)
     }
 
-    /// Active drags use only the bounded composition, avoiding a full expanded
-    /// canvas allocation/refinement job for every intermediate pointer position.
+    /// Keep the retained drag frame sharp at the displayed pixel density, without
+    /// allocating the full expanded source canvas or starting refinement workers.
     pub fn drag_texture(
         &mut self,
         ctx: &egui::Context,
         document: &Document,
+        screen_size: egui::Vec2,
     ) -> Result<Option<TextureHandle>, String> {
-        self.current_texture(ctx, document, false)
+        let side = (screen_size.max_elem() * ctx.pixels_per_point())
+            .ceil()
+            .max(MAX_PREVIEW_SIDE as f32)
+            .min(crate::render::MAX_INTERACTIVE_PREVIEW_SIDE as f32) as u32;
+        self.current_texture(ctx, document, false, side)
     }
 
     fn current_texture(
@@ -117,14 +122,13 @@ impl PrivacyPreview {
         ctx: &egui::Context,
         document: &Document,
         refine: bool,
+        limit: u32,
     ) -> Result<Option<TextureHandle>, String> {
-        if let Some(texture) = self.texture_impl(ctx, document, refine)? {
+        if let Some(texture) = self.texture_impl(ctx, document, refine, limit)? {
             return Ok(Some(texture));
         }
-        let side = self
-            .requested
-            .as_ref()
-            .map_or(768, |key| key.max_side.min(768));
+        let side = self.requested.as_ref().map_or(limit, |key| key.max_side);
+        let side = if refine { side.min(768) } else { side };
         let pixels = crate::render::interactive_preview(document, side)?;
         let color = crate::image_loading::color_image(&pixels);
         let texture = ctx.load_texture(
@@ -145,7 +149,7 @@ impl PrivacyPreview {
         ctx: &egui::Context,
         document: &Document,
     ) -> Result<Option<TextureHandle>, String> {
-        self.texture_impl(ctx, document, true)
+        self.texture_impl(ctx, document, true, MAX_PREVIEW_SIDE)
     }
 
     fn texture_impl(
@@ -153,8 +157,8 @@ impl PrivacyPreview {
         ctx: &egui::Context,
         document: &Document,
         refine: bool,
+        limit: u32,
     ) -> Result<Option<TextureHandle>, String> {
-        let limit = if refine { MAX_PREVIEW_SIDE } else { 768 };
         let max_side = (ctx.input(|input| input.max_texture_side).max(1) as u32).min(limit);
         if !self
             .requested
@@ -271,15 +275,26 @@ mod tests {
             width: 200,
             height: 150,
         });
-        let first = cache.drag_texture(&ctx, &doc).unwrap().unwrap();
+        let screen_size = egui::vec2(200., 150.);
+        let first = cache
+            .drag_texture(&ctx, &doc, screen_size)
+            .unwrap()
+            .unwrap();
         assert!(!cache.running);
         assert_eq!(
-            cache.drag_texture(&ctx, &doc).unwrap().unwrap().id(),
+            cache
+                .drag_texture(&ctx, &doc, screen_size)
+                .unwrap()
+                .unwrap()
+                .id(),
             first.id()
         );
         let previous_generation = cache.generation;
         doc.geometry.canvas.as_mut().unwrap().width += 20;
-        let moved = cache.drag_texture(&ctx, &doc).unwrap().unwrap();
+        let moved = cache
+            .drag_texture(&ctx, &doc, screen_size)
+            .unwrap()
+            .unwrap();
         assert_ne!(moved.id(), first.id());
         cache
             .tx
@@ -289,13 +304,90 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            cache.drag_texture(&ctx, &doc).unwrap().unwrap().id(),
+            cache
+                .drag_texture(&ctx, &doc, screen_size)
+                .unwrap()
+                .unwrap()
+                .id(),
             moved.id()
         );
         assert!(!cache.running);
-        assert!(moved.size().iter().all(|&v| v <= 768));
+        assert_eq!(moved.size(), [220, 150]);
         cache.continuous_texture(&ctx, &doc).unwrap();
         assert!(cache.running, "Release resumes normal refinement");
+    }
+
+    #[test]
+    fn selection_drag_preserves_single_pixel_detail_in_a_retained_frame() {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(2.);
+        let mut doc = Document {
+            image: Arc::new(RgbaImage::from_fn(1200, 800, |x, y| {
+                image::Rgba([if x % 2 == 0 { 0 } else { 255 }, (y % 251) as u8, 80, 255])
+            })),
+            annotations: vec![],
+            geometry: Default::default(),
+        };
+        doc.geometry.canvas = Some(crate::geometry::CanvasRect {
+            x: -200,
+            y: -100,
+            width: 2600,
+            height: 1600,
+        });
+        let mut selection =
+            crate::markup_tests::object(AnnotationKind::MoveArea, [600., 300.], [800., 500.]);
+        selection.area_source = Some([Point { x: 300., y: 100. }, Point { x: 500., y: 300. }]);
+        doc.annotations.push(selection);
+        let mut cache = PrivacyPreview::default();
+        for offset in [0., 25.] {
+            doc.annotations[0].start.x = 600. + offset;
+            doc.annotations[0].end.x = 800. + offset;
+            let mut displayed = None;
+            let output = ctx.run(
+                egui::RawInput {
+                    max_texture_side: Some(4096),
+                    ..Default::default()
+                },
+                |ctx| {
+                    displayed = cache
+                        .drag_texture(ctx, &doc, egui::vec2(1300., 800.))
+                        .unwrap();
+                },
+            );
+            let texture = displayed.unwrap();
+            assert_eq!(
+                texture.size(),
+                [2600, 1600],
+                "Dragging must retain native detail at 200% DPI"
+            );
+            let delta = output
+                .textures_delta
+                .set
+                .iter()
+                .find(|(id, _)| *id == texture.id())
+                .unwrap();
+            let egui::ImageData::Color(pixels) = &delta.1.image;
+            for y in 0..32 {
+                for x in 0..64 {
+                    let expected = doc.image.get_pixel(x, y).0;
+                    let actual = pixels.pixels[(y as usize + 100) * 2600 + x as usize + 200];
+                    assert_eq!(
+                        actual.to_array(),
+                        expected,
+                        "Stationary fine detail changed at {x},{y}"
+                    );
+                }
+            }
+            let x = 600 + offset as usize + 200;
+            let actual = pixels.pixels[400 * 2600 + x];
+            assert_eq!(actual.to_array(), doc.image.get_pixel(300, 100).0);
+            assert_eq!(
+                pixels.pixels[0].a(),
+                0,
+                "Expanded margins remain transparent"
+            );
+            assert!(!cache.running, "Dragging must not start refinement workers");
+        }
     }
 
     #[test]
