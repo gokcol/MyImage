@@ -31,6 +31,8 @@ pub enum DesktopEvent {
     Capture,
     CapturePanel,
     Show,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Reopen,
     CaptureSettings,
     Library,
     Quit,

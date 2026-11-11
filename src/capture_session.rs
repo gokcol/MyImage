@@ -1576,6 +1576,70 @@ mod tests {
     }
 
     #[test]
+    fn native_reopen_preserves_pending_capture_and_active_overlays() {
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(true)), true);
+        app.guide_open = false;
+        app.view = View::Capture;
+        app.generation = 42;
+        app.pending_capture = Some(true);
+        let cancel = Arc::new(AtomicBool::new(false));
+        app.capture_cancel = Some(cancel.clone());
+        app.desktop_tx.send(DesktopEvent::Reopen).unwrap();
+        let output = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+        assert_eq!(app.pending_capture, Some(true));
+        assert_eq!(app.generation, 42);
+        assert!(!cancel.load(Ordering::Acquire));
+        assert!(app.hidden.load(Ordering::Relaxed));
+        assert!(
+            !output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&ViewportCommand::Visible(true))
+        );
+
+        app.pending_capture = None;
+        let session = test_screens(&ctx, CaptureMode::Region);
+        let ids: Vec<_> = session
+            .screens
+            .iter()
+            .map(|screen| screen.display.id)
+            .collect();
+        app.selection = Some(session);
+        for placement in [0, 4] {
+            app.selection.as_mut().unwrap().screens[0].placement_frames = placement;
+            app.desktop_tx.send(DesktopEvent::Reopen).unwrap();
+            let output = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+            assert_eq!(
+                app.selection
+                    .as_ref()
+                    .unwrap()
+                    .screens
+                    .iter()
+                    .map(|screen| screen.display.id)
+                    .collect::<Vec<_>>(),
+                ids
+            );
+            assert_eq!(app.generation, 42);
+            assert!(!cancel.load(Ordering::Acquire));
+            assert!(matches!(app.view, View::Capture));
+            let commands = &output.viewport_output[&egui::ViewportId::ROOT].commands;
+            assert_eq!(commands.contains(&ViewportCommand::Focus), placement == 4);
+            assert!(!commands.contains(&ViewportCommand::Decorations(true)));
+        }
+
+        // The explicit Editor command still leaves capture when requested.
+        app.desktop_tx.send(DesktopEvent::Show).unwrap();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+        assert!(app.selection.is_none());
+        assert!(cancel.load(Ordering::Acquire));
+        assert!(matches!(app.view, View::Editor));
+        app.hidden.store(true, Ordering::Relaxed);
+        app.desktop_tx.send(DesktopEvent::Reopen).unwrap();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+        assert!(!app.hidden.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn full_screen_click_chooses_either_screen_and_its_native_size() {
         for index in 0..2 {
             let ctx = egui::Context::default();

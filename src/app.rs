@@ -1033,7 +1033,26 @@ impl MyImageApp {
             match event {
                 DesktopEvent::Capture => self.begin_capture(ctx),
                 DesktopEvent::CapturePanel => self.toggle_capture_launcher(ctx),
-                DesktopEvent::Show | DesktopEvent::CaptureSettings | DesktopEvent::Library => {
+                DesktopEvent::Reopen
+                    if self.pending_capture.is_some() || self.selection.is_some() =>
+                {
+                    // Native activation can arrive while the editor is hidden
+                    // for capture. Keep that capture alive and let placement
+                    // finish before focusing its overlay.
+                    if self.selection.as_ref().is_some_and(|session| {
+                        session
+                            .screens
+                            .first()
+                            .is_some_and(|screen| screen.placement_frames >= 4)
+                    }) {
+                        ctx.send_viewport_cmd(ViewportCommand::Focus);
+                    }
+                    ctx.request_repaint();
+                }
+                DesktopEvent::Show
+                | DesktopEvent::Reopen
+                | DesktopEvent::CaptureSettings
+                | DesktopEvent::Library => {
                     self.close_capture_launcher(ctx);
                     if self.scroll_session.is_some() {
                         if !self.busy {
@@ -1062,7 +1081,7 @@ impl MyImageApp {
                         && !self.editor.has_modal()
                     {
                         match event {
-                            DesktopEvent::Show => {
+                            DesktopEvent::Show | DesktopEvent::Reopen => {
                                 self.finish_edit();
                                 self.view = View::Editor;
                             }

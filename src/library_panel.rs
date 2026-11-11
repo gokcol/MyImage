@@ -460,10 +460,15 @@ impl LibraryPanel {
                                     let size = texture.size_vec2();
                                     let factor = (image_rect.width() / size.x)
                                         .min(image_rect.height() / size.y);
-                                    crate::editor::paint_checkerboard(ui.painter(), image_rect);
-                                    ui.painter().image(
+                                    let fitted_rect =
+                                        Rect::from_center_size(image_rect.center(), size * factor);
+                                    let painter = ui
+                                        .painter()
+                                        .with_clip_rect(fitted_rect.intersect(ui.clip_rect()));
+                                    crate::editor::paint_checkerboard(&painter, fitted_rect);
+                                    painter.image(
                                         texture.id(),
-                                        Rect::from_center_size(image_rect.center(), size * factor),
+                                        fitted_rect,
                                         Rect::from_min_max(Pos2::ZERO, egui::pos2(1., 1.)),
                                         Color32::WHITE,
                                     );

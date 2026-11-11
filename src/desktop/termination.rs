@@ -191,7 +191,7 @@ extern "C-unwind" fn application_should_handle_reopen(
         .ok()
         .and_then(|target| target.as_ref().and_then(Weak::upgrade));
     if let Some(sink) = sink
-        && sink.sender.send(DesktopEvent::Show).is_ok()
+        && sink.sender.send(DesktopEvent::Reopen).is_ok()
     {
         sink.ctx.request_repaint_of(egui::ViewportId::ROOT);
         objc2::runtime::Bool::NO
@@ -255,7 +255,7 @@ mod tests {
                 msg_send![&delegate, applicationShouldHandleReopen: ptr::null_mut::<AnyObject>(), hasVisibleWindows: visible]
             };
             assert!(!reopen.as_bool());
-            assert_eq!(receiver.try_recv().unwrap(), DesktopEvent::Show);
+            assert_eq!(receiver.try_recv().unwrap(), DesktopEvent::Reopen);
         }
 
         drop(guard);

@@ -300,7 +300,14 @@ impl EditorState {
             if crate::canvas::set_view_rect(&mut source, source_rect).is_err() {
                 source = display.clone();
             }
-            let texture = render::interactive_preview(&source, 768).map(|pixels| {
+            let [width, height] = source.output_size();
+            let preview_side = (width.max(height) as f32 * drag.scale * ui.ctx().pixels_per_point())
+                .ceil()
+                .max(768.)
+                .min(render::MAX_INTERACTIVE_PREVIEW_SIDE as f32)
+                as u32;
+            let preview_side = preview_side.min(ui.input(|i| i.max_texture_side).max(1) as u32);
+            let texture = render::interactive_preview(&source, preview_side).map(|pixels| {
                 ui.ctx().load_texture(
                     "canvas resize composition",
                     crate::image_loading::color_image(&pixels),
@@ -523,6 +530,84 @@ mod tests {
                 vertex.pos.distance(expected) < 0.002,
                 "Composition pixels must retain their original screen positions and scale"
             );
+        }
+    }
+
+    #[test]
+    fn retina_canvas_resize_retains_detail_across_drag_frames() {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(2.);
+        let mut document = Document {
+            image: Arc::new(image::RgbaImage::from_fn(800, 560, |x, y| {
+                image::Rgba([if x % 2 == 0 { 0 } else { 255 }, (y % 251) as u8, 80, 255])
+            })),
+            annotations: vec![],
+            geometry: Default::default(),
+        };
+        let before = document.edit_state();
+        let mut history = EditHistory::new(before.clone());
+        let mut editor = EditorState {
+            fit: false,
+            zoom: 1.,
+            ..Default::default()
+        };
+        frame(&ctx, &mut editor, &mut document, &mut history, vec![]);
+        let initial = frame(&ctx, &mut editor, &mut document, &mut history, vec![]);
+        let start = Edge(-1, -1).position(canvas_border(&initial));
+        frame(
+            &ctx,
+            &mut editor,
+            &mut document,
+            &mut history,
+            vec![egui::Event::PointerMoved(start), button(start, true)],
+        );
+        let mut retained_texture = None;
+        for delta in [
+            egui::vec2(-4., -4.),
+            egui::vec2(-8., -8.),
+            egui::vec2(-2., -2.),
+        ] {
+            let output = frame(
+                &ctx,
+                &mut editor,
+                &mut document,
+                &mut history,
+                vec![egui::Event::PointerMoved(start + delta)],
+            );
+            let drag = editor.canvas_resize.as_ref().unwrap();
+            let texture = drag.texture.as_ref().unwrap();
+            let source = drag.source.as_ref().unwrap();
+            let [width, height] = source.output_size();
+            assert_eq!(texture.size(), [width as usize, height as usize]);
+            if let Some(previous) = retained_texture {
+                assert_eq!(
+                    texture.id(),
+                    previous,
+                    "Reuse the fixed pixel grid during resizing"
+                );
+            } else {
+                let upload = output
+                    .textures_delta
+                    .set
+                    .iter()
+                    .find(|(id, _)| *id == texture.id())
+                    .unwrap();
+                let egui::ImageData::Color(pixels) = &upload.1.image;
+                let bounds = source.geometry.canvas_rect(original_size(source));
+                for y in 0..32 {
+                    for x in 0..64 {
+                        let index =
+                            (y - bounds.y) as usize * width as usize + (x - bounds.x) as usize;
+                        assert_eq!(
+                            pixels.pixels[index].to_array(),
+                            document.image.get_pixel(x as u32, y as u32).0
+                        );
+                    }
+                }
+                retained_texture = Some(texture.id());
+            }
+            assert_resize_pixels_stay_anchored(&output, drag);
+            assert_eq!(document.edit_state(), before);
         }
     }
 
