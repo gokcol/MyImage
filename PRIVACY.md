@@ -1,9 +1,9 @@
 # MyImage privacy policy
 
-Effective date: 23 October 2026
+Effective date: 12 November 2026
 
 MyImage is a desktop screen-capture and image editor by Orhan Gökçöl.
-This policy describes version 2.1.0 and applies to its GitHub distribution
+This policy describes version 2.2.1 and applies to its GitHub distribution
 and any Microsoft Store edition using this source.
 
 ## On-device processing
@@ -44,8 +44,13 @@ assets/recovery under `%LOCALAPPDATA%\MyImage\MyImage\data`. On macOS these use
 created during editing, capture and export. The app does not separately encrypt
 these files; protection depends on your OS permissions and disk encryption.
 
-Uninstalling the app does not intentionally delete your captures, projects or
-shared application data. Delete unwanted files yourself or use the app's
+Uninstalling the app does not intentionally delete captures and projects saved
+in Pictures/MyImage or another folder you choose. The Microsoft Store edition
+uses standard MSIX app-data handling: newly created preferences, stamps and
+recovery files may be stored privately by Windows and removed on package
+uninstall or reset. Save unfinished work as a .myimage project before removing
+the Store edition. The installer/portable edition does not intentionally delete
+its shared application data on uninstall. Delete unwanted files yourself or use the app's
 Move to Trash/recovery-discard controls. Backups, network drives and cloud-synced
 folders you use are governed by those services and your settings.
 
@@ -58,7 +63,7 @@ update and diagnostic processing is governed by Microsoft's policies.
 
 ## Contact and changes
 
-For privacy questions, contact the developer through
-[the MyImage repository](https://github.com/gokcol/MyImage).
+For privacy and support questions, email
+[orhan.gokcol@hotmail.com](mailto:orhan.gokcol@hotmail.com).
 Do not include confidential images or personal information in public issues.
 Changes to this policy will be published here with an updated effective date.

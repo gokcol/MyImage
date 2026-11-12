@@ -1,0 +1,9 @@
+New in MyImage 2.2.1 (build 100):
+
+- Standard Microsoft Store app-data handling, without the unvirtualizedResources capability.
+- Select artwork by dragging from the margins outside the image canvas.
+- Steadier canvas resizing and previews during Fill and background edits.
+- Cleaner Recents thumbnails without the unwanted transparent outer border.
+- Includes native printing and faster project-strip browsing from earlier 2.2 updates.
+
+Support: orhan.gokcol@hotmail.com

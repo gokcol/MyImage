@@ -118,6 +118,17 @@ try {
             throw 'Packaged executable differs from the release build.'
         }
         [xml]$roundTrip = Get-Content (Join-Path $unpacked 'AppxManifest.xml') -Raw
+        $capabilities = @($roundTrip.SelectNodes("//*[local-name()='Capabilities']/*") | ForEach-Object { $_.GetAttribute('Name') })
+        if ($capabilities.Count -ne 1 -or $capabilities[0] -cne 'runFullTrust') {
+            throw 'The Store package must declare only runFullTrust; additional capabilities require review.'
+        }
+        if ($roundTrip.SelectNodes("//*[local-name()='FileSystemWriteVirtualization' or local-name()='RegistryWriteVirtualization' or local-name()='ExcludedDirectory' or local-name()='ExcludedKey']").Count -ne 0) {
+            throw 'The Store package must use standard MSIX virtualization without exclusions.'
+        }
+        $roundTripStartup = $roundTrip.SelectSingleNode("//*[local-name()='StartupTask']")
+        if (-not $roundTripStartup -or $roundTripStartup.GetAttribute('Enabled') -cne 'false') {
+            throw 'Store startup must remain disabled until the user opts in.'
+        }
         if ($roundTrip.Package.Identity.Name -ne $IdentityName -or $roundTrip.Package.Identity.Publisher -ne $Publisher -or
             $roundTrip.Package.Identity.Version -ne $PackageVersion) { throw 'Packaged identity does not match the requested identity.' }
         $roundTripVisual = $roundTrip.GetElementsByTagName('VisualElements', 'http://schemas.microsoft.com/appx/manifest/uap/windows10')[0]

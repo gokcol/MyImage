@@ -2,13 +2,19 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 2.2.0 · build 87](https://github.com/gokcol/MyImage/releases/tag/v2.2.0-build87) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending. Microsoft Store packages are submitted separately for certification.
+[Download MyImage 2.2.1 · build 100](https://github.com/gokcol/MyImage/releases/tag/v2.2.1-build100) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending. Microsoft Store packages are submitted separately for certification.
 
 MyImage opens in **Home**, with **Editor**, **Library**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
 MyImage automatically creates and saves **`.myimage` projects**, keeping each original image and its editable changes together in one portable file. **Library and Recents show projects only**. Switching images or quitting flushes pending edits; opening a project keeps its place until you change it. Existing capture/project pairs are matched by their original pixels, and verified old captures in MyImage’s dated storage are moved to Trash. External imported originals stay untouched. Deleting a project also trashes any remaining managed legacy image associated with it. **Save As…** saves an editable `.myimage` project or a flattened JPG, PNG, GIF, HEIF, TIFF, WebP or PDF copy with visible annotations included. Image edits are stored as reversible settings in the project.
 
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
+
+## New in 2.2.1
+
+Build 100 uses standard Microsoft Store app-data handling without the `unvirtualizedResources` capability. It includes the fixes through build 99: selection from canvas margins, steady canvas resizing, reliable macOS capture activation, clean Recents thumbnail bounds, and stable previews during Fill and other background edits.
+
+Support: [orhan.gokcol@hotmail.com](mailto:orhan.gokcol@hotmail.com).
 
 ## New in 2.2
 
@@ -59,7 +65,7 @@ pipeline modeled on MyPDF, with identity validation, installation checks and
 calico assets. Microsoft signs Store packages after certification; an unsigned
 submission artifact is not a signed end-user installer. See the
 [Store preparation guide](packaging/windows/msix/README.md) and
-[privacy policy](PRIVACY.md). MyImage 2.1.2 uses MSIX version 2.1.4.0, which preserves upgrade ordering
+[privacy policy](PRIVACY.md). MyImage 2.2.1 uses MSIX version 2.2.4.0, which preserves upgrade ordering
 after earlier 1.x Store packages.
 
 ## Run

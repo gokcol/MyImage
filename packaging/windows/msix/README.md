@@ -46,7 +46,7 @@ These public values are configured as GitHub Actions variables. The product's
 reserved display name is configured separately in `MSIX_DISPLAY_NAME`; it must
 match Partner Center exactly, including punctuation.
 
-Public app version is **2.2.0**; the independent MSIX version is **2.2.1.0**.
+Public app version is **2.2.1**, build **100**; the independent MSIX version is **2.2.4.0**.
 This preserves increasing package order after the earlier 1.x packages.
 Increase `version.txt` for subsequent Store releases. Revision (fourth field)
 must remain zero; each component must fit 16 bits.
@@ -65,18 +65,20 @@ These are automated packaging checks, not interactive app certification.
 - `runFullTrust`: required for native desktop capture, file dialogs, GPU editing,
   clipboard and tray/keyboard integration at the user's privilege level.
   MyImage does not request administrator elevation.
-- `unvirtualizedResources`: preserves preferences, custom stamps and unfinished
-  project recovery data, sharing the existing portable app's data paths.
-  Windows 11 exclusions cover only `LocalAppData\MyImage\MyImage` and
-  `RoamingAppData\MyImage\MyImage`; Windows 10 needs the broader file-system opt-out.
-  Registry virtualization remains enabled.
+
+The package uses standard MSIX file-system and registry virtualization. It does
+not request `unvirtualizedResources` or declare virtualization exclusions.
+New preferences, stamps and recovery files in AppData can be private to the
+Store package and are removed when Windows uninstalls or resets that package.
+Save unfinished work as a `.myimage` project before removing the Store app.
+The installer/portable edition's existing data is not deliberately deleted.
 
 Captures/projects stay in Pictures/MyImage or the user-chosen folder. The Store
 startup task is declared disabled; users can opt in through Settings to start
 MyImage at login. No default-app change, background service or file association
 is registered.
 The Store package opens files using MyImage's Open controls. Microsoft must
-review the restricted capability explanations.
+review the `runFullTrust` explanation. Support: orhan.gokcol@hotmail.com.
 
 ## Submission checklist
 
