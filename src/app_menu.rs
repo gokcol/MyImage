@@ -225,59 +225,6 @@ impl MyImageApp {
 }
 
 impl MyImageApp {
-    pub(super) fn about_ui(&mut self, ctx: &egui::Context) {
-        if !self.about_open {
-            return;
-        }
-        let mut close = false;
-        let response = Dialog::new(
-            "About MyImage",
-            "Capture. Annotate. Make it clear.",
-            Icon::Info,
-            360.,
-        )
-        .modal(ctx, egui::Id::new("about-myimage"), |ui| {
-            ui.horizontal(|ui| {
-                ui.add(egui::Image::new(&self.app_icon).fit_to_exact_size(Vec2::splat(72.)));
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("MyImage").size(24.).strong());
-                    let build = include_str!("../packaging/macos/Info.plist")
-                        .split_once("<key>CFBundleVersion</key>")
-                        .and_then(|(_, s)| s.split_once("<string>"))
-                        .and_then(|(_, s)| s.split_once("</string>"))
-                        .map_or("development", |(s, _)| s);
-                    ui.label(format!(
-                        "Version {} · build {build}",
-                        env!("CARGO_PKG_VERSION")
-                    ));
-                    ui.label(
-                        RichText::new("Created by Orhan Gökçöl")
-                            .strong()
-                            .color(appearance::palette(ui.ctx()).accent),
-                    );
-                });
-            });
-            ui.add_space(8.);
-            ui.label("A playful capture and annotation studio for macOS and Windows.");
-            ui.small("© 2026 Orhan Gökçöl · MIT License");
-            ui.hyperlink_to(
-                "GitHub · source & releases",
-                "https://github.com/gokcol/MyImage",
-            );
-            ui.hyperlink_to(
-                "Privacy policy",
-                "https://github.com/gokcol/MyImage/blob/main/PRIVACY.md",
-            );
-            ui.add_space(8.);
-            close = dialogs::primary(ui, "Done", Icon::Check).clicked();
-        });
-        if close || response.should_close() {
-            self.about_open = false;
-        }
-    }
-}
-
-impl MyImageApp {
     pub(super) fn appearance_ui(&mut self, ctx: &egui::Context) {
         if !self.appearance_open {
             return;

@@ -3,7 +3,7 @@
 Effective date: 13 November 2026
 
 MyImage is a desktop screen-capture and image editor by Orhan Gökçöl.
-This policy describes version 2.2.2 and applies to its GitHub distribution
+This policy describes version 2.2.3 and applies to its GitHub distribution
 and any Microsoft Store edition using this source.
 
 ## On-device processing

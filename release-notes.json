@@ -1,8 +1,9 @@
 {
-  "version": "2.2.2",
-  "build": 101,
-  "store_version": "2.2.5.0",
+  "version": "2.2.3",
+  "build": 102,
+  "store_version": "2.2.6.0",
   "changes": [
+    "A redesigned, centered About dialog puts Calico branding, version details, support and updates in one polished card.",
     "What's new & updates shows the installed version and release notes, even offline.",
     "Release notes appear once after an upgrade and remain available from the app menu.",
     "Optional daily update checks show a quiet notice when an update is available. Background checks are off by default."

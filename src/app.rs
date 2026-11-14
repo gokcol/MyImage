@@ -1,5 +1,7 @@
 use crate::appearance::Icon as DialogIcon;
 use crate::dialogs::{self, Dialog};
+#[path = "about_ui.rs"]
+mod about_ui;
 #[path = "app_menu.rs"]
 mod app_menu;
 #[path = "capture_launcher.rs"]
