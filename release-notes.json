@@ -1,7 +1,7 @@
 {
-  "version": "2.2.4",
-  "build": 103,
-  "store_version": "2.2.7.0",
+  "version": "3.0.0",
+  "build": 104,
+  "store_version": "3.0.0.0",
   "changes": [
     "About matches MyPDF’s centered card, with version details, support links and separate What’s New and Check for Updates actions.",
     "What’s New has a refreshed layout with clear release highlights, a version badge and a dedicated update card, even offline.",
