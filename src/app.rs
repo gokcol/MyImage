@@ -2382,7 +2382,7 @@ impl eframe::App for MyImageApp {
         }
         self.file_dialog_ui(ctx);
         self.recovery_ui(ctx);
-        self.about_ui(ctx);
+        self.about_ui(ctx, frame);
         self.updates_ui(ctx, frame);
         self.appearance_ui(ctx);
         if self.recovery.ready

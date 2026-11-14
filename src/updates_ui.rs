@@ -16,7 +16,7 @@ impl MyImageApp {
         None
     }
 
-    fn start_update_check(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+    pub(super) fn start_update_check(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         if self.updates.checking() {
             return;
         }

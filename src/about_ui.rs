@@ -1,185 +1,139 @@
-//! A centered brand card with accessible text and the platform's update route.
+//! MyPDF-style About card, centered with a fixed footer and platform update actions.
 use super::*;
-use egui::{Align, Align2, CornerRadius, Frame, RichText, Sense};
+use egui::{Align, Align2, FontId, Frame, RichText, Sense};
 
 impl MyImageApp {
-    pub(super) fn about_ui(&mut self, ctx: &egui::Context) {
+    pub(super) fn about_ui(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         if !self.about_open {
             return;
         }
         let palette = appearance::palette(ctx);
-        let width = (ctx.content_rect().width() - 48.).clamp(220., 520.);
-        let max_height = (ctx.content_rect().height() - 48.).max(180.);
+        let width = (ctx.content_rect().width() - 96.).clamp(220., 420.);
+        let body_height = (ctx.content_rect().height() - 144.).clamp(80., 440.);
         let mut close = false;
-        let mut updates = false;
+        let mut show_notes = false;
+        let mut check = false;
         let id = egui::Id::new("about-myimage");
         let response = egui::Modal::new(id)
             .area(egui::Modal::default_area(id).anchor(Align2::CENTER_CENTER, Vec2::ZERO))
-            .backdrop_color(Color32::from_black_alpha(112))
+            .backdrop_color(Color32::from_black_alpha(100))
             .frame(
                 Frame::new()
-                    .fill(palette.paper)
+                    .fill(Color32::WHITE)
                     .stroke(Stroke::new(1., palette.border))
                     .corner_radius(18)
+                    .inner_margin(24)
                     .shadow(egui::Shadow {
-                        offset: [0, 14],
-                        blur: 40,
+                        offset: [0, 18],
+                        blur: 48,
                         spread: 0,
-                        color: Color32::from_black_alpha(80),
+                        color: Color32::from_black_alpha(55),
                     }),
             )
             .show(ctx, |ui| {
                 ui.set_width(width);
-                ui.spacing_mut().item_spacing = Vec2::ZERO;
+                ui.spacing_mut().item_spacing = Vec2::new(8., 8.);
                 egui::ScrollArea::vertical()
                     .id_salt("about-body")
-                    .max_height(max_height)
+                    .max_height(body_height)
                     .min_scrolled_height(0.)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        close |= about_hero(ui, &self.app_icon, width);
-                        Frame::new().inner_margin(24).show(ui, |ui| {
-                            ui.set_width(width - 48.);
-                            ui.spacing_mut().item_spacing = Vec2::new(10., 8.);
-                            ui.vertical_centered(|ui| {
-                                let notes = crate::updates::notes();
-                                Frame::new()
-                                    .fill(palette.cream)
-                                    .stroke(Stroke::new(1., palette.border))
-                                    .corner_radius(24)
-                                    .inner_margin(egui::Margin::symmetric(14, 7))
-                                    .show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "Version {}  ·  Build {}",
-                                                notes.version, notes.build
-                                            ))
-                                            .size(13.)
-                                            .strong()
-                                            .color(palette.accent),
-                                        );
-                                    });
-                                ui.add_space(4.);
-                                ui.label(
-                                    RichText::new("Your ideas, beautifully captured.")
-                                        .size(19.)
-                                        .strong()
-                                        .color(palette.ink),
-                                );
-                                ui.add(egui::Label::new("Capture a moment. Add your perspective.\nKeep every edit yours.").wrap());
-                                ui.add_space(8.);
-                                ui.separator();
-                                ui.add_space(6.);
-                                ui.label(RichText::new("Designed & developed by").size(12.).color(palette.muted));
-                                ui.label(RichText::new("Orhan Gökçöl").size(17.).strong().color(palette.ink));
-                                ui.hyperlink_to("Get support", "mailto:orhan.gokcol@hotmail.com");
-                                ui.add_space(6.);
-                                // Opening this local panel does not start a network request.
-                                updates = dialogs::primary(ui, "What's new & updates", Icon::Refresh).clicked();
-                                ui.label(RichText::new(if cfg!(target_os = "windows") {
-                                    "Updates via Microsoft Store"
-                                } else {
-                                    "Updates via GitHub"
-                                }).size(12.).color(palette.muted));
-                                ui.add_space(4.);
-                                ui.horizontal_wrapped(|ui| {
-                                    ui.hyperlink_to("Source on GitHub", "https://github.com/gokcol/MyImage");
-                                    ui.label(RichText::new("·").color(palette.muted));
-                                    ui.hyperlink_to("Privacy", "https://github.com/gokcol/MyImage/blob/main/PRIVACY.md");
-                                    ui.label(RichText::new("·").color(palette.muted));
-                                    ui.hyperlink_to("MIT License", "https://github.com/gokcol/MyImage/blob/main/LICENSE");
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(12.);
+                            ui.add(egui::Image::new(&self.app_icon).fit_to_exact_size(Vec2::splat(80.)));
+                            ui.add_space(12.);
+                            ui.label(RichText::new("MyImage").size(32.).strong().color(palette.ink));
+                            ui.label(RichText::new("Screen capture & image editor").size(15.).color(palette.muted));
+                            ui.add_space(10.);
+                            let notes = crate::updates::notes();
+                            Frame::new()
+                                .fill(palette.cream)
+                                .corner_radius(12)
+                                .inner_margin(egui::Margin::symmetric(12, 5))
+                                .show(ui, |ui| {
+                                    ui.label(RichText::new(format!("Version {} · Build {}", notes.version, notes.build)).size(12.).color(palette.accent));
                                 });
-                                ui.label(RichText::new("© 2026 Orhan Gökçöl").size(11.).color(palette.muted));
-                                ui.add_space(5.);
-                                close |= dialogs::secondary(ui, "Done", Icon::Check).clicked();
-                            });
+                            ui.add_space(16.);
+                            ui.label(RichText::new("Developed by Orhan Gökçöl").size(14.).strong().color(palette.ink));
+                            ui.add_space(18.);
                         });
+                        if ui.available_width() >= 360. {
+                            ui.columns(2, |columns| {
+                                show_notes = about_action(&mut columns[0], "What's New", Icon::Info).clicked();
+                                check = about_action(&mut columns[1], "Check for Updates…", Icon::Refresh).clicked();
+                            });
+                        } else {
+                            show_notes = about_action(ui, "What's New", Icon::Info).clicked();
+                            check = about_action(ui, "Check for Updates…", Icon::Refresh).clicked();
+                        }
+                        ui.add_space(18.);
+                        ui.separator();
+                        ui.add_space(12.);
+                        ui.label(RichText::new("MyImage makes everyday screen capture and visual communication easier. Capture, annotate and keep your work editable — your images and projects stay on your device.").size(12.).color(palette.muted));
+                        ui.add_space(4.);
+                        ui.label(RichText::new(if cfg!(target_os = "windows") {
+                            "Updates are checked through Microsoft Store."
+                        } else {
+                            "Updates are checked through GitHub."
+                        }).size(12.).color(palette.muted));
+                        ui.add_space(8.);
                     });
+                ui.add_space(10.);
+                ui.horizontal(|ui| {
+                    ui.hyperlink_to("GitHub", "https://github.com/gokcol/MyImage");
+                    ui.hyperlink_to("Support", "mailto:orhan.gokcol@hotmail.com");
+                    ui.hyperlink_to("Privacy", "https://github.com/gokcol/MyImage/blob/main/PRIVACY.md");
+                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                        close = dialogs::primary(ui, "Close", Icon::Close).clicked();
+                    });
+                });
             });
-        if close || updates || response.should_close() {
+        if close || show_notes || check || response.should_close() {
             self.about_open = false;
         }
-        if updates {
+        if show_notes || check {
             self.updates.pending_notes = false;
             self.updates.open = true;
+        }
+        if check {
+            self.start_update_check(ctx, frame);
         }
     }
 }
 
-fn about_hero(ui: &mut egui::Ui, icon: &egui::TextureHandle, width: f32) -> bool {
+fn about_action(ui: &mut egui::Ui, label: &str, icon: Icon) -> egui::Response {
     let p = appearance::palette(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, 208.), Sense::hover());
-    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    painter.rect_filled(
-        rect,
-        CornerRadius {
-            nw: 18,
-            ne: 18,
-            sw: 0,
-            se: 0,
-        },
-        p.navy,
-    );
-    // Quiet capture/annotation motifs frame the existing Calico artwork.
-    for (offset, radius) in [
-        (Vec2::new(-width * 0.38, -36.), 98.),
-        (Vec2::new(width * 0.41, 34.), 124.),
-    ] {
-        painter.circle_stroke(
-            rect.center() + offset,
-            radius,
-            Stroke::new(1., p.ginger.gamma_multiply(0.18)),
-        );
-        painter.circle_stroke(
-            rect.center() + offset,
-            radius - 18.,
-            Stroke::new(1., p.ginger.gamma_multiply(0.09)),
-        );
-    }
-    for (offset, motif) in [
-        (Vec2::new(-width * 0.34, 7.), Icon::Capture),
-        (Vec2::new(width * 0.34, 7.), Icon::Edit),
-    ] {
-        let center = rect.center() + offset;
-        painter.rect_stroke(
-            Rect::from_center_size(center, Vec2::splat(42.)),
-            12,
-            Stroke::new(1., p.ginger.gamma_multiply(0.28)),
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 36.), Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    if response.hovered() || response.has_focus() {
+        ui.painter().rect(
+            rect,
+            8,
+            p.cream,
+            Stroke::new(1., p.border),
             egui::StrokeKind::Inside,
         );
-        appearance::icon(&painter, center, motif, p.ginger.gamma_multiply(0.5), 23.);
     }
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(rect.shrink2(Vec2::new(38., 20.)))
-            .layout(egui::Layout::top_down(Align::Center)),
-        |ui| {
-            ui.spacing_mut().item_spacing.y = 6.;
-            ui.add(egui::Image::new(icon).fit_to_exact_size(Vec2::splat(88.)));
-            ui.label(
-                RichText::new("MyImage")
-                    .size(32.)
-                    .strong()
-                    .color(Color32::WHITE),
-            );
-            ui.label(
-                RichText::new("Capture. Annotate. Make it clear.")
-                    .size(13.)
-                    .color(p.ginger),
-            );
-        },
+    let font = FontId::proportional(13.);
+    let galley = ui.painter().layout_no_wrap(label.to_owned(), font, p.ink);
+    let left = rect.center().x - (galley.size().x + 28.) * 0.5;
+    appearance::icon(
+        ui.painter(),
+        egui::pos2(left + 9., rect.center().y),
+        icon,
+        p.ink,
+        18.,
     );
-    let button = ui.put(
-        Rect::from_min_size(rect.right_top() + Vec2::new(-38., 10.), Vec2::splat(28.)),
-        egui::Button::new(RichText::new("×").size(23.).color(Color32::WHITE))
-            .fill(p.navy)
-            .stroke(Stroke::NONE)
-            .corner_radius(14),
+    ui.painter().galley(
+        egui::pos2(left + 28., rect.center().y - galley.size().y * 0.5),
+        galley,
+        p.ink,
     );
-    button.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close About MyImage")
-    });
-    button.on_hover_text("Close About MyImage").clicked()
+    response
 }
 
 #[cfg(test)]
@@ -209,7 +163,7 @@ mod tests {
                             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
                             ..Default::default()
                         },
-                        |ctx| app.about_ui(ctx),
+                        |ctx| app.about_ui(ctx, &eframe::Frame::_new_kittest()),
                     );
                     assert!(output.platform_output.commands.is_empty());
                     if pass == 3 {
@@ -238,7 +192,7 @@ mod tests {
                     }],
                     ..Default::default()
                 },
-                |ctx| app.about_ui(ctx),
+                |ctx| app.about_ui(ctx, &eframe::Frame::_new_kittest()),
             );
             assert!(!app.about_open);
         }

@@ -14,7 +14,7 @@ Real capture, rounded PNG saving/viewing, and both physical capture shortcuts we
 
 ## New in 2.2.3 · build 102
 
-A redesigned About dialog is centered in the app window, with Calico branding, clear version and author details, support links and a direct route to What's new & updates. It follows the selected interface finish and stays within smaller windows.
+About now matches MyPDF’s clean, centered card: Calico icon, version band, developer credit, separate What’s New and Check for Updates buttons, and support links. The check button immediately uses Microsoft Store on Windows or GitHub on Mac. The dialog stays within smaller windows.
 
 ## New in 2.2.2 · build 101
 
