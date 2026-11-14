@@ -3,6 +3,38 @@ use super::*;
 use egui::{Align, Align2, FontId, Frame, RichText, Sense};
 
 impl MyImageApp {
+    pub(super) fn can_open_information(&self) -> bool {
+        !self.quitting
+            && !self.busy
+            && self.pending_capture.is_none()
+            && self.selection.is_none()
+            && self.scroll_session.is_none()
+            && !self.guide_open
+            && !self.appearance_open
+            && !self.recovery.prompt
+            && self.pending_action.is_none()
+            && self.file_dialog.is_none()
+            && !self.save_as_panel.open
+            && !self.screen_text.open
+            && !self.editor.has_modal()
+            && self.error.is_none()
+    }
+
+    pub(super) fn open_information_from_menu(&mut self, ctx: &egui::Context, event: DesktopEvent) {
+        // A menu event queued just before capture/dialog activation must not
+        // replace it. About and release notes can switch directly between each other.
+        if !self.can_open_information() {
+            return;
+        }
+        self.close_capture_launcher(ctx);
+        self.finish_edit();
+        self.about_open = event == DesktopEvent::About;
+        self.updates.open = !self.about_open;
+        self.updates.pending_notes = false;
+        self.updates.manual_request |= event == DesktopEvent::CheckUpdates;
+        self.show(ctx);
+    }
+
     pub(super) fn about_ui(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         if !self.about_open {
             return;
@@ -133,6 +165,41 @@ fn about_action(ui: &mut egui::Ui, label: &str, icon: Icon) -> egui::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn top_menu_routes_to_shared_dialogs_and_respects_busy_work() {
+        let ctx = egui::Context::default();
+        let mut app = MyImageApp::with_context(&ctx, false, Arc::new(AtomicBool::new(true)), true);
+        app.guide_open = false;
+        app.updates.pending_notes = true;
+        app.desktop_tx.send(DesktopEvent::About).unwrap();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+        assert!(app.about_open && !app.updates.open);
+        assert!(!app.hidden.load(Ordering::Relaxed));
+        assert!(!app.updates.pending_notes && !app.updates.manual_request);
+
+        app.desktop_tx.send(DesktopEvent::WhatsNew).unwrap();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+        assert!(!app.about_open && app.updates.open);
+        assert!(!app.updates.checking() && !app.updates.manual_request);
+
+        app.desktop_tx.send(DesktopEvent::CheckUpdates).unwrap();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+        assert!(app.updates.open && app.updates.manual_request);
+
+        app.updates.manual_request = false;
+        for (busy, saving) in [(true, false), (false, true)] {
+            app.busy = busy;
+            app.save_as_panel.open = saving;
+            let generation = app.generation;
+            app.desktop_tx.send(DesktopEvent::About).unwrap();
+            app.desktop_tx.send(DesktopEvent::CheckUpdates).unwrap();
+            let _ = ctx.run(egui::RawInput::default(), |ctx| app.handle_events(ctx));
+            assert!(!app.about_open && app.updates.open);
+            assert!(!app.updates.manual_request);
+            assert_eq!(app.generation, generation);
+        }
+    }
 
     #[test]
     fn about_stays_centered_and_bounded_across_window_sizes_and_finishes() {

@@ -46,7 +46,7 @@ These public values are configured as GitHub Actions variables. The product's
 reserved display name is configured separately in `MSIX_DISPLAY_NAME`; it must
 match Partner Center exactly, including punctuation.
 
-Current source app version is **2.2.3**, build **102**; the independent MSIX version is **2.2.6.0**.
+Current source app version is **2.2.4**, build **103**; the independent MSIX version is **2.2.7.0**.
 This source version includes Store-aware update checks; Microsoft approval of a previous version does not approve this new package.
 This preserves increasing package order after the earlier 1.x packages.
 Increase `version.txt` for subsequent Store releases. Revision (fourth field)

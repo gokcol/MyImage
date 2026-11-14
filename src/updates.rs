@@ -93,6 +93,8 @@ pub struct State {
     // Do not start a second native call if a timed-out worker hasn't returned.
     timed_out: bool,
     pub pending_notes: bool,
+    pub manual_request: bool,
+    pub reveal_status: bool,
 }
 
 impl State {

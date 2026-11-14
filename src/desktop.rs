@@ -1,6 +1,10 @@
 //! Desktop entry points. Construct on the UI thread after its event loop starts.
 
+#[cfg(target_os = "macos")]
+mod native_menu;
 mod shortcut;
+#[cfg(target_os = "macos")]
+pub use native_menu::ApplicationMenu;
 #[cfg(target_os = "macos")]
 mod termination;
 #[cfg(target_os = "macos")]
@@ -25,6 +29,9 @@ const SHOW_ID: &str = "myimage.show";
 const CAPTURE_SETTINGS_ID: &str = "myimage.capture-settings";
 const LIBRARY_ID: &str = "myimage.library";
 const QUIT_ID: &str = "myimage.quit";
+const ABOUT_ID: &str = "myimage.about";
+const WHATS_NEW_ID: &str = "myimage.whats-new";
+const CHECK_UPDATES_ID: &str = "myimage.check-updates";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopEvent {
@@ -35,6 +42,9 @@ pub enum DesktopEvent {
     Reopen,
     CaptureSettings,
     Library,
+    About,
+    WhatsNew,
+    CheckUpdates,
     Quit,
 }
 
@@ -97,6 +107,9 @@ fn menu_action(id: &str) -> Option<DesktopEvent> {
         CAPTURE_SETTINGS_ID => Some(DesktopEvent::CaptureSettings),
         LIBRARY_ID => Some(DesktopEvent::Library),
         QUIT_ID => Some(DesktopEvent::Quit),
+        ABOUT_ID => Some(DesktopEvent::About),
+        WHATS_NEW_ID => Some(DesktopEvent::WhatsNew),
+        CHECK_UPDATES_ID => Some(DesktopEvent::CheckUpdates),
         _ => None,
     }
 }
@@ -115,6 +128,10 @@ fn install_callbacks() {
             let Some(action) = menu_action(event.id.as_ref()) else {
                 return;
             };
+            #[cfg(target_os = "macos")]
+            if native_menu::send(action) {
+                return;
+            }
             with_event_sink(|sink| sink.send(action));
         }));
 
@@ -443,6 +460,12 @@ mod tests {
         assert_eq!(menu_action(LIBRARY_ID), Some(DesktopEvent::Library));
         assert_eq!(menu_action(SHOW_ID), Some(DesktopEvent::Show));
         assert_eq!(menu_action(QUIT_ID), Some(DesktopEvent::Quit));
+        assert_eq!(menu_action(ABOUT_ID), Some(DesktopEvent::About));
+        assert_eq!(menu_action(WHATS_NEW_ID), Some(DesktopEvent::WhatsNew));
+        assert_eq!(
+            menu_action(CHECK_UPDATES_ID),
+            Some(DesktopEvent::CheckUpdates)
+        );
         assert_eq!(menu_action("unknown"), None);
     }
 

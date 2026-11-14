@@ -1,14 +1,15 @@
 {
-  "version": "2.2.3",
-  "build": 102,
-  "store_version": "2.2.6.0",
+  "version": "2.2.4",
+  "build": 103,
+  "store_version": "2.2.7.0",
   "changes": [
     "About matches MyPDF’s centered card, with version details, support links and separate What’s New and Check for Updates actions.",
-    "What's new & updates shows the installed version and release notes, even offline.",
+    "What’s New has a refreshed layout with clear release highlights, a version badge and a dedicated update card, even offline.",
     "Release notes appear once after an upgrade and remain available from the app menu.",
     "Optional daily update checks show a quiet notice when an update is available. Background checks are off by default."
   ],
   "macos": [
+    "The macOS top MyImage menu opens the same About dialog as the in-app menu, with What’s New and Check for Updates actions.",
     "Check GitHub for a newer Mac version and build, then open the matching Mac download."
   ],
   "windows": [

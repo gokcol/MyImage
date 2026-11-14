@@ -2,15 +2,21 @@
 
 A native Rust screen-capture application for **macOS 14 or later and Windows**, built with egui, winit, and wgpu. It does not use a WebView.
 
-[Download MyImage 2.2.3 · build 102](https://github.com/gokcol/MyImage/releases/tag/v2.2.3-build102) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending.
+[Download MyImage 2.2.4 · build 103](https://github.com/gokcol/MyImage/releases/tag/v2.2.4-build103) — signed, notarized macOS Apple Silicon DMG/ZIP, plus an unsigned Windows x64 Setup installer and portable ZIP. Windows interactive validation remains pending.
 
-[Get MyImage (OG) from Microsoft Store](https://apps.microsoft.com/detail/9PL3HWB23J38). Microsoft approved Store package **2.2.4.0** (MyImage **2.2.1 build 100**); newer Store updates are submitted separately. The GitHub release does not indicate Store approval for build 102.
+[Get MyImage (OG) from Microsoft Store](https://apps.microsoft.com/detail/9PL3HWB23J38). Microsoft approved Store package **2.2.4.0** (MyImage **2.2.1 build 100**); newer Store updates are submitted separately. The GitHub release does not indicate Store approval for build 103.
 
 MyImage opens in **Home**, with **Editor**, **Library**, and **Create** beside it in the compact top toolbar. **View only** remains available from the bottom **App** menu. The native editor has a drawing toolbar, a large canvas, and an annotation inspector. Add editable text, arrows, 17 shape types, stamps, numbered steps, callouts, highlights, and freehand pen strokes; select, move, resize, recolor, reorder, or delete them. Add adjustable blur and pixelate regions to obscure selected areas, or use Fill to recolor or clear connected backgrounds. Crop, resize, and rotate the image without changing its original pixels. Undo and redo cover both image edits and annotations during the current session.
 
 MyImage automatically creates and saves **`.myimage` projects**, keeping each original image and its editable changes together in one portable file. **Library and Recents show projects only**. Switching images or quitting flushes pending edits; opening a project keeps its place until you change it. Existing capture/project pairs are matched by their original pixels, and verified old captures in MyImage’s dated storage are moved to Trash. External imported originals stay untouched. Deleting a project also trashes any remaining managed legacy image associated with it. **Save As…** saves an editable `.myimage` project or a flattened JPG, PNG, GIF, HEIF, TIFF, WebP or PDF copy with visible annotations included. Image edits are stored as reversible settings in the project.
 
 Real capture, rounded PNG saving/viewing, and both physical capture shortcuts were verified on macOS in the capture milestone. Annotation and library milestones include automated tests and native macOS browsing, save/reopen, and editing checks. The export, image-edit, privacy, markup, freehand, grouping, layout, layers, clipboard, and 0.13.0 preset milestones add independent image/PDF checks and native macOS editing, export, and project-reopening checks. Results are recorded in [the validation record](docs/RELEASE-VALIDATION.md). Windows runtime validation remains pending.
+
+## New in 2.2.4 · build 103
+
+What’s New now matches the About card with release highlights, a version badge, a dedicated update card, and always-visible action buttons.
+
+The macOS top **MyImage** menu now opens the same centered **About MyImage** dialog as the bottom App menu. It also includes **What’s New** and **Check for Updates…**, and restores the editor when opened from the background.
 
 ## New in 2.2.3 · build 102
 

@@ -157,6 +157,8 @@ pub struct MyImageApp {
     startup: crate::startup::Preference,
     #[cfg(target_os = "macos")]
     _termination_guard: Option<crate::desktop::TerminationGuard>,
+    #[cfg(target_os = "macos")]
+    application_menu: Option<crate::desktop::ApplicationMenu>,
     desktop: Option<DesktopIntegration>,
     capture_launcher: Option<capture_launcher::Launcher>,
     screen_text: screen_text::State,
@@ -301,6 +303,8 @@ impl MyImageApp {
             startup: Default::default(),
             #[cfg(target_os = "macos")]
             _termination_guard: None,
+            #[cfg(target_os = "macos")]
+            application_menu: None,
             desktop: None,
             capture_launcher: None,
             screen_text: Default::default(),
@@ -1041,6 +1045,9 @@ impl MyImageApp {
             match event {
                 DesktopEvent::Capture => self.begin_capture(ctx),
                 DesktopEvent::CapturePanel => self.toggle_capture_launcher(ctx),
+                DesktopEvent::About | DesktopEvent::WhatsNew | DesktopEvent::CheckUpdates => {
+                    self.open_information_from_menu(ctx, event);
+                }
                 DesktopEvent::Reopen
                     if self.pending_capture.is_some() || self.selection.is_some() =>
                 {
@@ -2001,6 +2008,11 @@ impl eframe::App for MyImageApp {
                     self.error = Some(format!("Native quit protection unavailable: {error}"))
                 }
             }
+            #[cfg(target_os = "macos")]
+            match crate::desktop::ApplicationMenu::install(ctx.clone(), self.desktop_tx.clone()) {
+                Ok(menu) => self.application_menu = Some(menu),
+                Err(error) => self.error = Some(format!("Application menu unavailable: {error}")),
+            }
             match DesktopIntegration::new(ctx.clone(), self.desktop_tx.clone()) {
                 Ok(desktop) => self.desktop = Some(desktop),
                 Err(error) => {
@@ -2014,6 +2026,10 @@ impl eframe::App for MyImageApp {
         }
         self.handle_events(ctx);
         self.poll_update_service(ctx, frame);
+        #[cfg(target_os = "macos")]
+        if let Some(menu) = &self.application_menu {
+            menu.set_information_enabled(self.can_open_information());
+        }
         self.poll_print(ctx, frame);
         self.promote_edited_recent(ctx);
         self.autosave_project(ctx);
