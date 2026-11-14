@@ -9,7 +9,7 @@ impl MyImageApp {
         }
         let palette = appearance::palette(ctx);
         let width = (ctx.content_rect().width() - 96.).clamp(220., 420.);
-        let body_height = (ctx.content_rect().height() - 144.).clamp(80., 440.);
+        let body_height = (ctx.content_rect().height() - 144.).clamp(80., 480.);
         let mut close = false;
         let mut show_notes = false;
         let mut check = false;
@@ -71,12 +71,6 @@ impl MyImageApp {
                         ui.separator();
                         ui.add_space(12.);
                         ui.label(RichText::new("MyImage makes everyday screen capture and visual communication easier. Capture, annotate and keep your work editable — your images and projects stay on your device.").size(12.).color(palette.muted));
-                        ui.add_space(4.);
-                        ui.label(RichText::new(if cfg!(target_os = "windows") {
-                            "Updates are checked through Microsoft Store."
-                        } else {
-                            "Updates are checked through GitHub."
-                        }).size(12.).color(palette.muted));
                         ui.add_space(8.);
                     });
                 ui.add_space(10.);
