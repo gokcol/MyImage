@@ -1,9 +1,9 @@
 # MyImage privacy policy
 
-Effective date: 12 November 2026
+Effective date: 13 November 2026
 
 MyImage is a desktop screen-capture and image editor by Orhan Gökçöl.
-This policy describes version 2.2.1 and applies to its GitHub distribution
+This policy describes version 2.2.2 and applies to its GitHub distribution
 and any Microsoft Store edition using this source.
 
 ## On-device processing
@@ -53,6 +53,20 @@ the Store edition. The installer/portable edition does not intentionally delete
 its shared application data on uninstall. Delete unwanted files yourself or use the app's
 Move to Trash/recovery-discard controls. Backups, network drives and cloud-synced
 folders you use are governed by those services and your settings.
+
+## Update checks
+
+What's new & updates displays bundled release notes without a network request.
+Manual update checks on macOS contact GitHub's public release API. GitHub receives
+ordinary connection information such as your IP address and the app's update-check
+user agent. Store-installed Windows copies query Microsoft Store services using
+their package identity. Images, project contents, recognized text and file paths
+are not sent with these checks. Optional daily background checks are off by default.
+You can enable or disable them in What's new & updates. Check times, the last
+viewed release and dismissed update notices are stored locally.
+
+Update buttons open a GitHub Mac download in your browser or the Microsoft Store
+listing. MyImage does not automatically download or install an update itself.
 
 ## External links
 

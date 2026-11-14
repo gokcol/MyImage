@@ -138,6 +138,7 @@ impl MyImageApp {
             && !self.recovery.prompt
             && !self.guide_open
             && !self.about_open
+            && !self.updates.open
             && !self.appearance_open
             && self.pending_action.is_none()
             && self.file_dialog.is_none()

@@ -10,6 +10,8 @@ mod capture_output;
 mod capture_session;
 #[path = "screen_text.rs"]
 mod screen_text;
+#[path = "updates_ui.rs"]
+mod updates_ui;
 use crate::{
     appearance::{self, Icon},
     capture::{self, DisplayInfo},
@@ -144,6 +146,7 @@ enum View {
 
 pub struct MyImageApp {
     about_open: bool,
+    updates: crate::updates::State,
     appearance_open: bool,
     guide_open: bool,
     source_textures: crate::texture_cache::SourceTextures,
@@ -287,6 +290,7 @@ impl MyImageApp {
         editor.set_toolbar_order(settings.editor_tool_order.clone());
         Self {
             about_open: false,
+            updates: crate::updates::State::new(&settings.updates, settings.guide_version > 0),
             appearance_open: false,
             guide_open: !background && settings.guide_version < crate::onboarding::VERSION,
             source_textures: Default::default(),
@@ -489,6 +493,7 @@ impl MyImageApp {
             || self.busy
             || self.recovery.prompt
             || self.about_open
+            || self.updates.open
             || self.appearance_open
             || self.guide_open
             || self.pending_action.is_some()
@@ -975,6 +980,7 @@ impl MyImageApp {
             || self.document.is_none()
             || self.recovery.prompt
             || self.about_open
+            || self.updates.open
             || self.appearance_open
             || self.guide_open
             || self.pending_action.is_some()
@@ -1073,6 +1079,7 @@ impl MyImageApp {
                     if !self.busy
                         && !self.guide_open
                         && !self.about_open
+                        && !self.updates.open
                         && !self.appearance_open
                         && !self.recovery.prompt
                         && self.pending_action.is_none()
@@ -1873,6 +1880,7 @@ impl MyImageApp {
     fn workspace_unobscured(&self) -> bool {
         !self.guide_open
             && !self.about_open
+            && !self.updates.open
             && !self.appearance_open
             && !self.recovery.prompt
             && self.pending_action.is_none()
@@ -2003,6 +2011,7 @@ impl eframe::App for MyImageApp {
             }
         }
         self.handle_events(ctx);
+        self.poll_update_service(ctx, frame);
         self.poll_print(ctx, frame);
         self.promote_edited_recent(ctx);
         self.autosave_project(ctx);
@@ -2017,6 +2026,7 @@ impl eframe::App for MyImageApp {
                     && self.selection.is_none()
                     && !self.guide_open
                     && !self.about_open
+                    && !self.updates.open
                     && !self.appearance_open
                     && !self.recovery.prompt
                     && self.pending_action.is_none()
@@ -2059,9 +2069,11 @@ impl eframe::App for MyImageApp {
             self.selection_ui(ctx);
             return;
         }
+        self.prepare_updates(ctx);
         if !self.busy
             && !self.guide_open
             && !self.about_open
+            && !self.updates.open
             && !self.appearance_open
             && !self.recovery.prompt
             && self.pending_action.is_none()
@@ -2369,6 +2381,7 @@ impl eframe::App for MyImageApp {
         self.file_dialog_ui(ctx);
         self.recovery_ui(ctx);
         self.about_ui(ctx);
+        self.updates_ui(ctx, frame);
         self.appearance_ui(ctx);
         if self.recovery.ready
             && !self.recovery.prompt

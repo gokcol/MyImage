@@ -147,8 +147,9 @@ mod tests {
     fn printing_respects_dialogs_and_no_document_and_reports_missing_native_window() {
         let dir = tempfile::tempdir().unwrap();
         let (mut app, ctx) = fixture(dir.path());
-        for block in ["about", "save-as", "busy", "no-document"] {
+        for block in ["about", "updates", "save-as", "busy", "no-document"] {
             app.about_open = block == "about";
+            app.updates.open = block == "updates";
             app.save_as_panel.open = block == "save-as";
             app.busy = block == "busy";
             let doc = if block == "no-document" {
@@ -164,6 +165,7 @@ mod tests {
             }
         }
         app.about_open = false;
+        app.updates.open = false;
         app.save_as_panel.open = false;
         app.busy = true;
         app.print_ready =

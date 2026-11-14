@@ -65,6 +65,7 @@ mod templates;
 mod text_path;
 mod text_style;
 mod texture_cache;
+mod updates;
 
 #[cfg(test)]
 mod canvas_tests;

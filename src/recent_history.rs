@@ -108,6 +108,7 @@ impl MyImageApp {
             || !matches!(self.view, View::Editor | View::Viewer)
             || self.guide_open
             || self.about_open
+            || self.updates.open
             || self.appearance_open
             || self.recovery.prompt
             || self.pending_action.is_some()

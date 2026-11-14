@@ -82,6 +82,7 @@ impl ImageSavePreferences {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub updates: crate::updates::Preferences,
     pub guide_version: u8,
     pub ui_text_size: UiTextSize,
     pub gui_finish: crate::appearance::GuiFinish,
@@ -119,6 +120,7 @@ impl Default for Settings {
             .map(|dirs| dirs.picture_dir().unwrap_or(dirs.home_dir()).to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
         Self {
+            updates: Default::default(),
             guide_version: 0,
             ui_text_size: UiTextSize::Normal,
             gui_finish: Default::default(),

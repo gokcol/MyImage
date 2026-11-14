@@ -146,7 +146,7 @@ impl MyImageApp {
                     ui.close();
                 }
                 ui.add_space(5.);
-                let can_open = !self.busy && !self.guide_open && !self.about_open && !self.appearance_open && !self.recovery.prompt
+                let can_open = !self.busy && !self.guide_open && !self.about_open && !self.updates.open && !self.appearance_open && !self.recovery.prompt
                     && self.pending_action.is_none() && self.file_dialog.is_none()
                     && !self.editor.has_modal() && !self.save_as_panel.open;
                 if row(ui, if self.view == View::Viewer { "Return to Editor" } else { "View only" }, if self.view == View::Viewer { Icon::Edit } else { Icon::Eye }, can_open && self.document.is_some(), "›").clicked() {
@@ -167,8 +167,9 @@ impl MyImageApp {
                     self.guide_open = true;
                     ui.close();
                 }
-                if row(ui, "Releases & updates", Icon::Refresh, true, "↗").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab("https://github.com/gokcol/MyImage/releases"));
+                if row(ui, "What's new & updates", Icon::Refresh, can_open, "›").clicked() {
+                    self.finish_edit();
+                    self.updates.open = true;
                     ui.close();
                 }
                 if row(ui, "Storage folder", Icon::Open, can_open, "›").clicked() {
